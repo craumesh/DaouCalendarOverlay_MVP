@@ -78,17 +78,19 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 ### P0. 착수 전 기반
 
-#### T0.1 git 저장소 초기화 — P0
+#### [완료] T0.1 git 저장소 초기화 — P0
 - 근거: `.gitignore`는 있으나 `.git` 없음. 문서의 "v7.0.0"이 어떤 소스 스냅샷인지 추적 불가.
 - 검증 상태: 코드 확인.
 - 지시: `git init`, `.gitignore`에 `bin/ obj/ publish/ .vs/ *.user *.suo` 유지 확인 후 현재 상태를 `v7.0.0-asbuilt` 태그로 초기 커밋. 이후 모든 작업은 별도 커밋.
 - 완료 기준: `git log`에 초기 커밋과 태그. `git status`가 깨끗함.
+- 적용 메모(2026-09-21): 실제 작업 저장소는 `C:\Users\USER\Develop\DaouCalendarOverlay_MVP`(Desktop 복사본과 소스 동일, diff로 확인). 이미 초기 커밋 `a046a1b`가 있어 `git init` 대신 그 커밋에 `v7.0.0-asbuilt` 태그를 부여하고, docs/(작업 지시서·기술 문서 HTML)와 .claude/·CLAUDE.md를 `73ba742`로 커밋했다. `.gitignore`는 요구 항목을 이미 포함.
 
-#### T0.2 테스트 프로젝트 골격 — P0
+#### [완료] T0.2 테스트 프로젝트 골격 — P0
 - 근거: 테스트 0개. UI 없는 클래스(`NativeBridgeProtocol`, `CalendarBridgeServer`의 URI/판정 로직, `MainViewModel`, `SettingsWindow`의 URL 파서, `SyncStatusService`)가 모두 테스트 가능.
 - 검증 상태: 코드 확인.
 - 지시: `tests/DaouCalendarOverlay.Tests` (xUnit, `net8.0-windows`) 추가. 솔루션에 포함. 첫 테스트로 `NativeBridgeProtocol.ReadFrameAsync/WriteFrameAsync` 왕복, `MainViewModel.GetVisibleRange` 42일 범위, `OccursOnDate`의 종일/시간 일정 케이스(2절 실데이터 규칙 그대로: 종료 `23:59:59.999` 포함, 공휴일 start==end)를 작성. `SettingsWindow.Extract_Click`의 파싱 부분은 정적 메서드로 추출해 테스트.
 - 완료 기준: `dotnet test`가 통과. 이후 P1 작업의 완료 기준에 테스트 포함.
+- 적용 메모(2026-09-21): lead가 3태스크로 분해 — T1 골격·솔루션 등록, T2 순수 로직 추출(`Models/CalendarGrid.cs`, `Services/CalendarUrlParser.cs`; 원본 대비 8,188케이스 비교 불일치 0), T3 테스트 4파일. 결과 테스트 83건 통과, 빌드 경고 0. 테스트 csproj의 `RuntimeIdentifier`/`SelfContained=false`/`ValidateExecutableReferencesMatchSelfContained=false`는 메인 csproj 전역 RID 우회이며 T2.6에서 함께 제거한다. 중간 검토(reviewer) approve, minor 5건과 P1 제약은 `docs/verification-log.md` 참조.
 
 ### P1. 기능·안정성 결함
 

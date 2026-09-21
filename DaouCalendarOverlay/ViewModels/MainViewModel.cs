@@ -146,7 +146,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<DaouCalendarEvent> GetEventsForDate(DateTime date) =>
         _events
-            .Where(e => OccursOnDate(e, date.Date))
+            .Where(e => CalendarGrid.OccursOnDate(e, date.Date))
             .OrderByDescending(e => e.IsAllDay)
             .ThenBy(e => e.StartTime)
             .ToList();
@@ -156,25 +156,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
             .Select(CreateEventChip)
             .ToList();
 
-    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange()
-    {
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
-        var gridEnd = gridStart.AddDays(42).AddMilliseconds(-1);
-        var offset = TimeSpan.FromHours(9);
-        return (
-            new DateTimeOffset(gridStart.Year, gridStart.Month, gridStart.Day, 0, 0, 0, offset),
-            new DateTimeOffset(gridEnd.Year, gridEnd.Month, gridEnd.Day, 23, 59, 59, 999, offset)
-        );
-    }
+    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange() => CalendarGrid.GetVisibleRange(_displayMonth);
 
     private void BuildCalendar()
     {
         Days.Clear();
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
+        var gridStart = CalendarGrid.GetGridStart(_displayMonth);
 
-        for (var i = 0; i < 42; i++)
+        for (var i = 0; i < CalendarGrid.CellCount; i++)
         {
             var date = gridStart.AddDays(i);
             var dayEvents = GetEventsForDate(date);
@@ -230,7 +219,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private IReadOnlyList<DaouCalendarEvent> GetVisibleUnfilteredEventsForDate(DateTime date) =>
         _allEvents
             .Where(e => !_hiddenCalendarIds.Contains(e.CalendarId))
-            .Where(e => OccursOnDate(e, date.Date))
+            .Where(e => CalendarGrid.OccursOnDate(e, date.Date))
             .OrderByDescending(e => e.IsAllDay)
             .ThenBy(e => e.StartTime)
             .ToList();
@@ -256,23 +245,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private static bool IsHolidayEvent(DaouCalendarEvent e) =>
         string.Equals(e.Type, "holiday", StringComparison.OrdinalIgnoreCase);
-
-    private static bool OccursOnDate(DaouCalendarEvent e, DateTime date)
-    {
-        if (e.IsAllDay)
-        {
-            var start = e.StartTime.Date;
-            var end = e.EndTime.Date;
-            if (end < start)
-                end = start;
-            return date >= start && date <= end;
-        }
-
-        var offset = TimeSpan.FromHours(9);
-        var dayStart = new DateTimeOffset(date.Year, date.Month, date.Day, 0, 0, 0, offset);
-        var dayEnd = dayStart.AddDays(1);
-        return e.StartTime < dayEnd && e.EndTime > dayStart;
-    }
 
     private static string BuildTooltip(DaouCalendarEvent e)
     {

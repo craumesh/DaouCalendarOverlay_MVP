@@ -28,3 +28,6 @@ appsettings.Local.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code subagent hook logs (local routing statistics)
+.claude/logs/
