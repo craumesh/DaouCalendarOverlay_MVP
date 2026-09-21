@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>DaouCalendarOverlay</AssemblyName>
+    <RootNamespace>DaouCalendarOverlay</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <ApplicationIcon>Assets\DaouCalendarOverlayIcon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="ChromeExtension\manifest.json" LogicalName="DaouCalendarOverlay.ChromeExtension.manifest.json" />
+    <EmbeddedResource Include="ChromeExtension\service-worker-v700.js" LogicalName="DaouCalendarOverlay.ChromeExtension.service-worker-v700.js" />
+    <EmbeddedResource Include="ChromeExtension\icon16.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon16.png" />
+    <EmbeddedResource Include="ChromeExtension\icon32.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon32.png" />
+    <EmbeddedResource Include="ChromeExtension\icon48.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon48.png" />
+    <EmbeddedResource Include="ChromeExtension\icon128.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon128.png" />
+  </ItemGroup>
+</Project>

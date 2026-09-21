@@ -1,0 +1,30 @@
+# .NET / Visual Studio
+**/bin/
+**/obj/
+.vs/
+.idea/
+
+# User-specific IDE files
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+
+# Build / publish output
+publish/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Local configuration / secrets
+.env
+.env.*
+secrets.json
+appsettings.Local.json
+
+# OS
+.DS_Store
+Thumbs.db

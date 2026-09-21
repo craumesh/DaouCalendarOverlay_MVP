@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Daou Calendar Overlay Bridge",
+  "version": "7.0.0",
+  "minimum_chrome_version": "120",
+  "description": "Native Messaging bridge for Daou Calendar Overlay. Reuses the existing Chrome DaouOffice session without localhost networking.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVtcLz/s89ZU6TY1uhc94rteHKd75K8P9oAQotTFx0fD4Kx2JPPJj4FNXTT3Wgh7F0+VDRteFuV1CknE5664nAL4kgeDMsUbS6BB2xlfteSxPYt/kS/VpfMVmKFEST0KWFCboE61SoOuki84gdpcKyECz+2LM1xtwAU0L1nnsSb/lyXsB7TwcIh0zy5X0xyIFnE1SRTLnIzy3liQNUQsGowZndFr15TyRAAoYdClr7THeRX2U+PNGCE5XumxWKHMwqiL5hG339Zgt0QEuuRDYzr51x0isp5V0K9n/qgYpEX90s2icOxOu8uhFa82GVD7SqJTc0jdHGZu7ZbJNuW5fQIDAQAB",
+  "permissions": [
+    "alarms",
+    "background",
+    "cookies",
+    "storage",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://*.daouoffice.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker-v700.js"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "Daou Calendar Overlay Bridge"
+  }
+}
