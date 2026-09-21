@@ -30,32 +30,22 @@ public partial class SettingsWindow : Window
 
     private void Extract_Click(object sender, RoutedEventArgs e)
     {
-        var raw = ApiUrlTextBox.Text.Trim();
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        var parsed = CalendarUrlParser.Parse(ApiUrlTextBox.Text);
+
+        if (parsed.Status == CalendarUrlParseStatus.InvalidUrl)
         {
             WpfMessageBox.Show(this, "유효한 전체 URL을 붙여넣어 주세요.", "URL 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
             return;
         }
 
-        var ids = new List<string>();
-        var query = uri.Query.TrimStart('?');
-        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = pair.Split('=', 2);
-            var key = Uri.UnescapeDataString(parts[0].Replace('+', ' '));
-            var value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : "";
-            if (string.Equals(key, "calendarIds[]", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
-                ids.Add(value.Trim());
-        }
-
-        if (ids.Count == 0)
+        if (parsed.Status == CalendarUrlParseStatus.NoCalendarIds)
         {
             WpfMessageBox.Show(this, "URL에서 calendarIds[]를 찾지 못했습니다.", "추출 결과", WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
             return;
         }
 
-        BaseUrlTextBox.Text = $"{uri.Scheme}://{uri.Authority}";
-        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, ids.Distinct());
+        BaseUrlTextBox.Text = parsed.BaseUrl;
+        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, parsed.CalendarIds);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
