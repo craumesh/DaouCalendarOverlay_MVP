@@ -14,71 +14,103 @@
 <section id="process"><h2>5. 동일 EXE의 두 실행 모드</h2><p>이 프로젝트의 중요한 설계 포인트는 <strong>별도의 native-host EXE를 만들지 않고 같은 EXE를 재사용</strong>한다는 점이다.</p><div class="grid2"><div class="card"><h3>A. 일반 GUI 모드</h3><ol><li>WPF App 시작</li><li>싱글 인스턴스 Mutex 획득</li><li>설정/캐시 로드</li><li>Chrome extension 추출</li><li>Native Messaging host 등록</li><li>Named Pipe bridge 서버 시작</li><li>오버레이/트레이 표시</li></ol></div><div class="card"><h3>B. Native Host 모드</h3><ol><li>Chrome이 같은 EXE를 Native Messaging host로 실행</li><li>인자에 고정 extension origin이 있는지 판정</li><li>GUI 초기화를 건너뜀</li><li>stdin에서 Chrome 메시지 읽기</li><li>실행 중 GUI의 Named Pipe에 전달</li><li>응답을 stdout으로 반환하고 종료</li></ol></div></div><pre><code>    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-        // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
-        if (NativeMessagingHost.IsNativeInvocation(e.Args))
-        {
-            await NativeMessagingHost.RunAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance = new SingleInstanceService();
-        if (!_singleInstance.TryAcquirePrimary())
-        {
-            await SingleInstanceService.NotifyPrimaryAsync();
-            await _singleInstance.DisposeAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
-        _singleInstance.StartListening();
-        _syncStatus.StatusChanged += SyncStatus_StatusChanged;
-        _syncStatus.MarkStarting();
 
         try
         {
-            _settings = await _settingsService.LoadAsync();
-            _extensionInstaller.EnsureExtracted();
-            _nativeMessagingRegistration.EnsureRegistered();
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            if (!_settings.IsConfigured)
+            // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
+            if (NativeMessagingHost.IsNativeInvocation(e.Args))
             {
-                var setup = new SettingsWindow(_settings, firstRun: true);
-                if (setup.ShowDialog() != true)
-                {
-                    await ExitApplicationAsync();
-                    return;
-                }
-
-                _settings = setup.Result;
-                await _settingsService.SaveAsync(_settings);
-                _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered();
+                LogService.Initialize(LogService.DefaultLogDirectory, &quot;host&quot;);
+                await NativeMessagingHost.RunAsync();
+                Shutdown();
+                return;
             }
 
-            _startupService.Apply(_settings.StartWithWindows);
+            LogService.Initialize(LogService.DefaultLogDirectory, &quot;overlay&quot;);
+            RegisterGlobalExceptionHandlers();
+            LogService.Info(&quot;startup&quot;, $&quot;overlay 시작 pid={Environment.ProcessId}&quot;);
 
-            _overlayWindow = new MainWindow(_settings);
-            _overlayWindow.Show();
-            CreateTrayIcon();
+            _singleInstance = new SingleInstanceService();
+            if (!_singleInstance.TryAcquirePrimary())
+            {
+                await SingleInstanceService.NotifyPrimaryAsync();
+                await _singleInstance.DisposeAsync();
+                Shutdown();
+                return;
+            }
 
-            var cache = await _cacheService.LoadAsync();
-            if (cache.Events.Count &gt; 0)
-                _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $&quot;캐시 {cache.LastUpdated:HH:mm}&quot;);
+            _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
+            _singleInstance.StartListening();
+            _syncStatus.StatusChanged += SyncStatus_StatusChanged;
+            _syncStatus.MarkStarting();
 
-            _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
-            _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
-            _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
-            _bridgeServer.Start();
+            try
+            {
+                _settings = await _settingsService.LoadAsync();
+                _extensionInstaller.EnsureExtracted();
+                _nativeMessagingRegistration.EnsureRegistered();
 
-            ConfigureRefreshTimer();
-            ConfigureHealthTimer();
-            _syncStatus.MarkWaiting();
-            await RefreshAsync(true);
-        }</code></pre><p class="caption">App.OnStartup에서 Native Messaging invocation을 GUI보다 먼저 분기한다.</p></section>
+                if (!_settings.IsConfigured)
+                {
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
+                    if (setup.ShowDialog() != true)
+                    {
+                        await ExitApplicationAsync();
+                        return;
+                    }
+
+                    _settings = setup.Result;
+                    await SaveSettingsAsync();
+                    _extensionInstaller.EnsureExtracted();
+                    _nativeMessagingRegistration.EnsureRegistered();
+                }
+
+                _startupService.Apply(_settings.StartWithWindows);
+
+                _overlayWindow = new MainWindow(_settings);
+                _overlayWindow.Show();
+                CreateTrayIcon();
+
+                var cache = await _cacheService.LoadAsync();
+                if (cache.Events.Count &gt; 0)
+                {
+                    _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $&quot;캐시 {cache.LastUpdated:HH:mm}&quot;);
+                    if (!CacheRangePolicy.CoversToday(cache.RangeFrom, cache.RangeTo, DateTimeOffset.Now))
+                    {
+                        _syncStatus.MarkCacheOutOfRange();
+                        LogService.Info(&quot;cache&quot;, &quot;캐시 범위가 오늘을 포함하지 않아 범위 밖으로 표기합니다.&quot;);
+                    }
+                }
+
+                _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
+                _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
+                _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
+                _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
+                _bridgeServer.Start();
+
+                ConfigureHealthTimer();
+                _syncStatus.MarkWaiting();
+                await RefreshAsync(true);
+            }
+            catch (Exception ex)
+            {
+                LogService.Error(&quot;startup&quot;, &quot;앱 초기화 실패&quot;, ex);
+                System.Windows.MessageBox.Show(
+                    $&quot;앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json&quot;,
+                    &quot;Daou Calendar Overlay&quot;,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                await ExitApplicationAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Error(&quot;startup&quot;, &quot;OnStartup 실패&quot;, ex);
+            _syncStatus.MarkGeneralError($&quot;시작 실패: {ex.Message}&quot;);
+        }
+    }</code></pre><p class="caption">App.OnStartup에서 Native Messaging invocation을 GUI보다 먼저 분기한다.</p></section>
 <section id="chrome"><h2>6. Chrome Extension (Manifest V3)</h2><h3>6.1 권한 구성</h3><div class="table-wrap"><table><thead><tr><th>권한</th><th>역할</th></tr></thead><tbody><tr><td><code>cookies</code></td><td>DaouOffice의 로그인 쿠키를 Chrome cookie store에서 읽는다.</td></tr><tr><td><code>storage</code></td><td><code>chrome.storage.session</code>에 마지막 정상 cookie header를 브라우저 세션 동안 메모리 캐시한다.</td></tr><tr><td><code>alarms</code></td><td>MV3 service worker를 30초 단위로 깨운다.</td></tr><tr><td><code>background</code></td><td>사용자 Chrome 설정이 허용할 때 마지막 창을 닫은 뒤에도 background mode를 유지하는 데 사용된다.</td></tr><tr><td><code>nativeMessaging</code></td><td>등록된 Windows native host에 JSON 메시지를 보낸다.</td></tr><tr><td><code>host_permissions</code></td><td><code>https://*.daouoffice.com/*</code> 범위로 권한을 제한한다.</td></tr></tbody></table></div><pre><code>{
   &quot;manifest_version&quot;: 3,
   &quot;name&quot;: &quot;Daou Calendar Overlay Bridge&quot;,
@@ -327,54 +359,52 @@ public sealed class NativeMessagingRegistrationService
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
+
+        if (!string.IsNullOrWhiteSpace(validationNotice))
+        {
+            ValidationNoticeText.Text = validationNotice;
+            ValidationNoticeText.Visibility = Visibility.Visible;
+        }
     }
 
     private void Extract_Click(object sender, RoutedEventArgs e)
     {
-        var raw = ApiUrlTextBox.Text.Trim();
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        var parsed = CalendarUrlParser.Parse(ApiUrlTextBox.Text);
+
+        if (parsed.Status == CalendarUrlParseStatus.InvalidUrl)
         {
             WpfMessageBox.Show(this, &quot;유효한 전체 URL을 붙여넣어 주세요.&quot;, &quot;URL 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
             return;
         }
 
-        var ids = new List&lt;string&gt;();
-        var query = uri.Query.TrimStart(&#x27;?&#x27;);
-        foreach (var pair in query.Split(&#x27;&amp;&#x27;, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = pair.Split(&#x27;=&#x27;, 2);
-            var key = Uri.UnescapeDataString(parts[0].Replace(&#x27;+&#x27;, &#x27; &#x27;));
-            var value = parts.Length &gt; 1 ? Uri.UnescapeDataString(parts[1].Replace(&#x27;+&#x27;, &#x27; &#x27;)) : &quot;&quot;;
-            if (string.Equals(key, &quot;calendarIds[]&quot;, StringComparison.OrdinalIgnoreCase) &amp;&amp; !string.IsNullOrWhiteSpace(value))
-                ids.Add(value.Trim());
-        }
-
-        if (ids.Count == 0)
+        if (parsed.Status == CalendarUrlParseStatus.NoCalendarIds)
         {
             WpfMessageBox.Show(this, &quot;URL에서 calendarIds[]를 찾지 못했습니다.&quot;, &quot;추출 결과&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
             return;
         }
 
-        BaseUrlTextBox.Text = $&quot;{uri.Scheme}://{uri.Authority}&quot;;
-        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, ids.Distinct());
+        BaseUrlTextBox.Text = parsed.BaseUrl;
+        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, parsed.CalendarIds);
+
+        var extractedValidation = BaseUrlPolicy.Validate(parsed.BaseUrl);
+        if (!extractedValidation.IsValid)
+            WpfMessageBox.Show(this, extractedValidation.Reason, &quot;주소 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        var baseUrl = BaseUrlTextBox.Text.Trim().TrimEnd(&#x27;/&#x27;);
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps &amp;&amp; uri.Scheme != Uri.UriSchemeHttp))
+        var validation = BaseUrlPolicy.Validate(BaseUrlTextBox.Text);
+        if (!validation.IsValid)
         {
-            WpfMessageBox.Show(this, &quot;DaouOffice 주소를 https://... 형식으로 입력해 주세요.&quot;, &quot;설정 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 실제 HTTP는 C#에서</h3><p>Extension은 인증 정보만 제공하고 실제 API 요청은 C#에서 수행한다. 이를 통해 timeout, redirect 차단, HTML 로그인 페이지 감지, JSON code 검사, retry/backoff를 한 곳에서 처리한다.</p><pre><code>        try
+            WpfMessageBox.Show(this, validation.Reason, &quot;설정 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            BaseUrlTextBox.Focus();
+            BaseUrlTextBox.SelectAll();
+            return;
+        }</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 실제 HTTP는 C#에서</h3><p>Extension은 인증 정보만 제공하고 실제 API 요청은 C#에서 수행한다. 이를 통해 timeout, redirect 차단, HTML 로그인 페이지 감지, JSON code 검사, retry/backoff를 한 곳에서 처리한다.</p><pre><code>        try
         {
             var requestUri = BuildCalendarUri(settingsSnapshot, fromSnapshot, toSnapshot);
-            using var handler = new HttpClientHandler
-            {
-                UseCookies = false,
-                AllowAutoRedirect = false,
-                AutomaticDecompression = DecompressionMethods.All
-            };
-            using var client = new HttpClient(handler)
+            using var handler = HttpMessageHandlerFactory?.Invoke() ?? CreateDefaultHandler();
+            using var client = new HttpClient(handler, disposeHandler: false)
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
@@ -388,8 +418,8 @@ public sealed class NativeMessagingRegistrationService
             if (Uri.TryCreate(settingsSnapshot.BaseUrl, UriKind.Absolute, out var baseUri))
                 request.Headers.Referrer = new Uri(baseUri, &quot;/gw/app/calendar&quot;);
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-            var body = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var contentType = response.Content.Headers.ContentType?.MediaType ?? &quot;&quot;;
             var location = response.Headers.Location?.ToString() ?? &quot;&quot;;
 
@@ -437,22 +467,37 @@ public sealed class NativeMessagingRegistrationService
                 return;
             }
 
+            if (DiscardIfRangeChanged(fromSnapshot, toSnapshot))
+            {
+                LogService.Warn(&quot;bridge&quot;, &quot;표시 범위가 변경되어 이전 범위의 동기화 결과를 버리고 즉시 재발행합니다.&quot;);
+                return;
+            }
+
             RecordSuccess(settingsSnapshot.RefreshMinutes);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data));
+            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data, fromSnapshot, toSnapshot));
         }
         catch (HttpRequestException ex)
         {
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 네트워크 오류&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;네트워크 오류: {ex.Message}&quot;, BridgeFailureKind.Network, retryAt));
         }
         catch (TaskCanceledException ex)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                LogService.Info(&quot;bridge&quot;, &quot;종료 중 HTTP 요청 취소&quot;);
+                return;
+            }
+
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 취소/시간 초과&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             var message = ex.InnerException is TimeoutException ? &quot;DaouOffice 응답 시간 초과&quot; : &quot;네트워크 요청이 취소되었습니다.&quot;;
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.Network, retryAt));
         }
         catch (Exception ex)
         {
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 세션 브리지 실패&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;DaouOffice 세션 브리지 실패: {ex.Message}&quot;, BridgeFailureKind.General, retryAt));
         }</code></pre><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않는다. 조회 범위 내 occurrence가 API 결과의 개별 event로 내려오는 동작을 전제로 <code class="inline">startTime/endTime</code>을 그대로 표시한다. 음력 휴일도 서버 계산 결과를 신뢰한다.</p><p>같은 일정이 여러 캘린더에 공유되면 API는 동일한 <code class="inline">id</code>를 캘린더 수만큼 내려보낸다(실데이터 37건 중 5건). UI는 <code class="inline">Models/EventDeduplicator.cs</code>에서 <code class="inline">id</code> 기준으로 이를 1건으로 합치고, 소속 캘린더 ID/이름을 모두 <code class="inline">CalendarIds</code>/<code class="inline">CalendarNames</code>에 보존한다. 캐시 파일에는 병합 전 원본 이벤트를 그대로 저장하며(역호환), 병합은 캐시 로드 직후 화면에 표시하기 직전에 수행한다. 숨김 판정은 소속 캘린더가 모두 숨겨진 경우에만 적용되고, 하나라도 표시 중이면 일정은 계속 보인다.</p></section>
@@ -824,11 +869,11 @@ public sealed class SyncStatusService
     private async void SaveOpacityTimer_Tick(object? sender, EventArgs e)
     {
         _saveOpacityTimer?.Stop();
-        await ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value);
+        await RunGuardedAsync(&quot;ui.saveOpacity&quot;, () =&gt; ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value));
     }</code></pre></section>
 <section id="filter"><h2>12. 필터와 캘린더별 표시 On/Off</h2><p>서버 원본은 <code class="inline">_allEvents</code>에 보존하고 숨김 캘린더 + 텍스트 필터 결과만 <code class="inline">_events</code>로 만든다. UI 필터는 API 재조회 없이 즉시 반영된다.</p><div class="grid2"><div class="card"><h3>검색 필드</h3><ul><li>제목</li><li>소유/작성</li><li>공유/참석</li></ul><p>대소문자 무시 substring 검색.</p></div><div class="card"><h3>성능</h3><p>검색 문자열 입력은 180ms debounce를 둔다. 매 key stroke마다 42개 셀을 재생성하지 않기 위한 처리다.</p></div></div><pre><code>    public void SetEvents(IEnumerable&lt;DaouCalendarEvent&gt; events)
     {
-        _allEvents = events.OrderBy(e =&gt; e.StartTime).ToList();
+        _allEvents = EventDeduplicator.Deduplicate(events).OrderBy(e =&gt; e.StartTime).ToList();
         ApplyFilter();
     }
 
@@ -863,10 +908,32 @@ public sealed class SyncStatusService
 
     public void GoToday()
     {
-        _displayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var today = _today().Date;
+        _displayMonth = new DateTime(today.Year, today.Month, 1);
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(DisplayMonth));
         BuildCalendar();
+    }
+
+    /// &lt;summary&gt;시계가 가리키는 날짜가 바뀌었으면 달력을 다시 만들고 true를 반환한다.&lt;/summary&gt;
+    public bool RefreshTodayIfChanged()
+    {
+        var today = _today().Date;
+        if (today == _lastKnownToday)
+            return false;
+
+        var previous = _lastKnownToday;
+        _lastKnownToday = today;
+
+        var monthChanged = today.Year != previous.Year || today.Month != previous.Month;
+        var viewingPreviousTodayMonth = _displayMonth.Year == previous.Year &amp;&amp; _displayMonth.Month == previous.Month;
+
+        if (monthChanged &amp;&amp; viewingPreviousTodayMonth)
+            GoToday();
+        else
+            BuildCalendar();
+
+        return true;
     }
 
     public void SetStatus(string text, bool isError)
@@ -879,7 +946,7 @@ public sealed class SyncStatusService
 
     public IReadOnlyList&lt;DaouCalendarEvent&gt; GetEventsForDate(DateTime date) =&gt;
         _events
-            .Where(e =&gt; OccursOnDate(e, date.Date))
+            .Where(e =&gt; CalendarGrid.OccursOnDate(e, date.Date))
             .OrderByDescending(e =&gt; e.IsAllDay)
             .ThenBy(e =&gt; e.StartTime)
             .ToList();
@@ -889,25 +956,15 @@ public sealed class SyncStatusService
             .Select(CreateEventChip)
             .ToList();
 
-    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange()
-    {
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
-        var gridEnd = gridStart.AddDays(42).AddMilliseconds(-1);
-        var offset = TimeSpan.FromHours(9);
-        return (
-            new DateTimeOffset(gridStart.Year, gridStart.Month, gridStart.Day, 0, 0, 0, offset),
-            new DateTimeOffset(gridEnd.Year, gridEnd.Month, gridEnd.Day, 23, 59, 59, 999, offset)
-        );
-    }
+    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange() =&gt; CalendarGrid.GetVisibleRange(_displayMonth);
 
     private void BuildCalendar()
     {
         Days.Clear();
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
+        var today = _today().Date;
+        var gridStart = CalendarGrid.GetGridStart(_displayMonth);
 
-        for (var i = 0; i &lt; 42; i++)
+        for (var i = 0; i &lt; CalendarGrid.CellCount; i++)
         {
             var date = gridStart.AddDays(i);
             var dayEvents = GetEventsForDate(date);
@@ -915,7 +972,7 @@ public sealed class SyncStatusService
             {
                 Date = date,
                 IsCurrentMonth = date.Month == _displayMonth.Month &amp;&amp; date.Year == _displayMonth.Year,
-                IsToday = date.Date == DateTime.Today,
+                IsToday = date.Date == today,
                 // 제목 검색은 공휴일 색상을 숨기지 않지만, 캘린더 자체를 끈 경우에는 해당 캘린더의 효과도 숨긴다.
                 IsHoliday = GetVisibleUnfilteredEventsForDate(date).Any(IsHolidayEvent)
             };
@@ -934,7 +991,7 @@ public sealed class SyncStatusService
     private void ApplyFilter()
     {
         IEnumerable&lt;DaouCalendarEvent&gt; query = _allEvents
-            .Where(e =&gt; !_hiddenCalendarIds.Contains(e.CalendarId));
+            .Where(e =&gt; !IsHiddenEvent(e));
 
         if (!string.IsNullOrWhiteSpace(_filterText))
             query = query.Where(MatchesFilter);
