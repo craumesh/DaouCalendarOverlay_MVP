@@ -151,7 +151,7 @@ powershell -ExecutionPolicy Bypass -File .\publish.ps1
 
 1. Google Chrome을 설치합니다.
 2. Chrome에서 다우오피스에 로그인합니다.
-3. 프로젝트의 Chrome Extension을 설치/등록합니다.
+3. 프로젝트의 Chrome Extension을 설치/등록합니다. Extension 버전이 올라간 빌드로 교체했다면 `chrome://extensions`에서 해당 확장을 **새로고침**해야 새 Service Worker가 적용됩니다.
 4. Native Messaging Host가 정상적으로 등록되었는지 확인합니다.
 5. `DaouCalendarOverlay.exe`를 실행합니다.
 6. 애플리케이션에서 캘린더 동기화 상태를 확인합니다.
@@ -183,6 +183,19 @@ API Key
 ```
 
 `.gitignore`에는 일반적인 로컬 설정 및 비밀값 파일을 제외하도록 구성되어 있습니다.
+
+### 로그
+
+애플리케이션은 동작 기록을 다음 위치에 파일로 남깁니다.
+
+```text
+%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log   (오버레이 GUI 모드)
+%LOCALAPPDATA%\DaouCalendarOverlay\logs\host-yyyyMMdd.log      (Chrome이 실행하는 Native Messaging Host 모드)
+```
+
+- 날짜별 파일로 기록하며, 파일 하나가 1MB를 넘으면 롤링하여 최대 5개(`overlay-yyyyMMdd.log`, `.1` ~ `.4`)까지 보관합니다.
+- 트레이 아이콘 우클릭 메뉴의 **"로그 폴더 열기"** 로 위 폴더를 바로 열 수 있습니다.
+- 로그에는 인증 Cookie 값이나 토큰이 기록되지 않습니다. 쿠키는 개수(`cookieCount`)와 출처(`cookieSource`)만 남습니다.
 
 ### Chrome Extension의 고정 Key
 
@@ -251,7 +264,7 @@ git push
 3. Native Messaging Host가 정상적으로 등록되어 있는지 확인
 4. Native Messaging Host가 가리키는 실행 파일 경로가 실제 파일과 일치하는지 확인
 5. Chrome을 완전히 재시작한 후 다시 시도
-6. WPF 애플리케이션의 로그 확인
+6. WPF 애플리케이션의 로그 확인 (`%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`, Native Messaging Host 쪽은 같은 폴더의 `host-yyyyMMdd.log`)
 
 ### 일정이 동기화되지 않는 경우
 

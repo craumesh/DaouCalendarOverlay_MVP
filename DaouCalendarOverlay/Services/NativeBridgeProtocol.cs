@@ -64,6 +64,12 @@ public sealed class NativeBridgeRequest
 
     [JsonPropertyName("result")]
     public BridgeResultPayload? Result { get; set; }
+
+    [JsonPropertyName("lastError")]
+    public string? LastError { get; set; }
+
+    [JsonPropertyName("extensionVersion")]
+    public string? ExtensionVersion { get; set; }
 }
 
 public sealed class NativeBridgeResponse

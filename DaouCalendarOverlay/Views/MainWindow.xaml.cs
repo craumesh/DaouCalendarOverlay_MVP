@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Interop;
 using DaouCalendarOverlay.Models;
+using DaouCalendarOverlay.Services;
 using DaouCalendarOverlay.ViewModels;
 using WpfApplication = System.Windows.Application;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
@@ -155,29 +156,71 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>비동기 이벤트 핸들러에서 새어 나온 예외를 로그 + 상태 텍스트로 처리한다.</summary>
+    private static void ReportHandlerFailure(string category, Exception ex)
+    {
+        if (WpfApplication.Current is App app)
+            app.ReportError(category, "UI 동작 실패", ex);
+        else
+            LogService.Error(category, "UI 동작 실패", ex);
+    }
+
+    private static async Task RunGuardedAsync(string category, Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure(category, ex);
+        }
+    }
+
     private async void PrevMonth_Click(object sender, RoutedEventArgs e)
     {
-        _vm.MoveMonth(-1);
-        await ((App)WpfApplication.Current).RefreshAsync(false);
+        try
+        {
+            _vm.MoveMonth(-1);
+            await ((App)WpfApplication.Current).RefreshAsync(false);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.prevMonth", ex);
+        }
     }
 
     private async void NextMonth_Click(object sender, RoutedEventArgs e)
     {
-        _vm.MoveMonth(1);
-        await ((App)WpfApplication.Current).RefreshAsync(false);
+        try
+        {
+            _vm.MoveMonth(1);
+            await ((App)WpfApplication.Current).RefreshAsync(false);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.nextMonth", ex);
+        }
     }
 
     private async void Today_Click(object sender, RoutedEventArgs e)
     {
-        _vm.GoToday();
-        await ((App)WpfApplication.Current).RefreshAsync(false);
+        try
+        {
+            _vm.GoToday();
+            await ((App)WpfApplication.Current).RefreshAsync(false);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.today", ex);
+        }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) =>
-        await ((App)WpfApplication.Current).RefreshAsync(true);
+        await RunGuardedAsync("ui.refresh", () => ((App)WpfApplication.Current).RefreshAsync(true));
 
     private async void Settings_Click(object sender, RoutedEventArgs e) =>
-        await ((App)WpfApplication.Current).OpenSettingsAsync();
+        await RunGuardedAsync("ui.settings", () => ((App)WpfApplication.Current).OpenSettingsAsync());
 
     private void Login_Click(object sender, RoutedEventArgs e) =>
         ((App)WpfApplication.Current).OpenDaouOffice();
@@ -343,60 +386,81 @@ public partial class MainWindow : Window
 
     private async void Window_KeyDown(object sender, WpfKeyEventArgs e)
     {
-        switch (e.Key)
+        try
         {
-            case Key.PageUp:
-                _vm.MoveMonth(-1);
-                e.Handled = true;
-                await ((App)WpfApplication.Current).RefreshAsync(false);
-                break;
-            case Key.PageDown:
-                _vm.MoveMonth(1);
-                e.Handled = true;
-                await ((App)WpfApplication.Current).RefreshAsync(false);
-                break;
-            case Key.Home:
-                _vm.GoToday();
-                e.Handled = true;
-                await ((App)WpfApplication.Current).RefreshAsync(false);
-                break;
-            case Key.F5:
-                e.Handled = true;
-                await ((App)WpfApplication.Current).RefreshAsync(true);
-                break;
-            case Key.Escape:
-                e.Handled = true;
-                if (EventDetailsOverlay.Visibility == Visibility.Visible)
-                    HideEventDetails();
-                else if (DayEventsOverlay.Visibility == Visibility.Visible)
-                    HideDayEvents();
-                else
-                    Hide();
-                break;
+            switch (e.Key)
+            {
+                case Key.PageUp:
+                    _vm.MoveMonth(-1);
+                    e.Handled = true;
+                    await ((App)WpfApplication.Current).RefreshAsync(false);
+                    break;
+                case Key.PageDown:
+                    _vm.MoveMonth(1);
+                    e.Handled = true;
+                    await ((App)WpfApplication.Current).RefreshAsync(false);
+                    break;
+                case Key.Home:
+                    _vm.GoToday();
+                    e.Handled = true;
+                    await ((App)WpfApplication.Current).RefreshAsync(false);
+                    break;
+                case Key.F5:
+                    e.Handled = true;
+                    await ((App)WpfApplication.Current).RefreshAsync(true);
+                    break;
+                case Key.Escape:
+                    e.Handled = true;
+                    if (EventDetailsOverlay.Visibility == Visibility.Visible)
+                        HideEventDetails();
+                    else if (DayEventsOverlay.Visibility == Visibility.Visible)
+                        HideDayEvents();
+                    else
+                        Hide();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.keyDown", ex);
         }
     }
 
     private async void ContextToday_Click(object sender, RoutedEventArgs e)
     {
-        _vm.GoToday();
-        await ((App)WpfApplication.Current).RefreshAsync(false);
+        try
+        {
+            _vm.GoToday();
+            await ((App)WpfApplication.Current).RefreshAsync(false);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.contextToday", ex);
+        }
     }
 
     private async void ContextRefresh_Click(object sender, RoutedEventArgs e) =>
-        await ((App)WpfApplication.Current).RefreshAsync(true);
+        await RunGuardedAsync("ui.contextRefresh", () => ((App)WpfApplication.Current).RefreshAsync(true));
 
     private async void ContextSettings_Click(object sender, RoutedEventArgs e) =>
-        await ((App)WpfApplication.Current).OpenSettingsAsync();
+        await RunGuardedAsync("ui.contextSettings", () => ((App)WpfApplication.Current).OpenSettingsAsync());
 
     private void ContextHide_Click(object sender, RoutedEventArgs e) => Hide();
 
     private async void ContextTopmost_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not WpfMenuItem item)
-            return;
+        try
+        {
+            if (sender is not WpfMenuItem item)
+                return;
 
-        Topmost = item.IsChecked;
-        await ((App)WpfApplication.Current).SetAlwaysOnTopAsync(Topmost);
+            Topmost = item.IsChecked;
+            await ((App)WpfApplication.Current).SetAlwaysOnTopAsync(Topmost);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.contextTopmost", ex);
+        }
     }
 
     private void ContextMenu_Opened(object sender, RoutedEventArgs e)
@@ -458,23 +522,37 @@ public partial class MainWindow : Window
 
     private async void ContextPositionLock_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not WpfMenuItem item)
-            return;
+        try
+        {
+            if (sender is not WpfMenuItem item)
+                return;
 
-        _positionLocked = item.IsChecked;
-        await ((App)WpfApplication.Current).SetPositionLockedAsync(_positionLocked);
+            _positionLocked = item.IsChecked;
+            await ((App)WpfApplication.Current).SetPositionLockedAsync(_positionLocked);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.contextPositionLock", ex);
+        }
     }
 
     private async void ContextCalendarVisibility_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not WpfMenuItem { Tag: string calendarId } item)
-            return;
+        try
+        {
+            if (sender is not WpfMenuItem { Tag: string calendarId } item)
+                return;
 
-        await ((App)WpfApplication.Current).SetCalendarVisibilityAsync(calendarId, item.IsChecked);
+            await ((App)WpfApplication.Current).SetCalendarVisibilityAsync(calendarId, item.IsChecked);
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.contextCalendarVisibility", ex);
+        }
     }
 
     private async void ContextShowAllCalendars_Click(object sender, RoutedEventArgs e) =>
-        await ((App)WpfApplication.Current).ShowAllCalendarsAsync();
+        await RunGuardedAsync("ui.contextShowAllCalendars", () => ((App)WpfApplication.Current).ShowAllCalendarsAsync());
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
@@ -624,7 +702,7 @@ public partial class MainWindow : Window
     private async void SaveOpacityTimer_Tick(object? sender, EventArgs e)
     {
         _saveOpacityTimer?.Stop();
-        await ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value);
+        await RunGuardedAsync("ui.saveOpacity", () => ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value));
     }
 
     private void ScheduleBoundsSave()
@@ -643,7 +721,7 @@ public partial class MainWindow : Window
     private async void SaveBoundsTimer_Tick(object? sender, EventArgs e)
     {
         _saveBoundsTimer?.Stop();
-        await ((App)WpfApplication.Current).SaveWindowBoundsAsync(Left, Top);
+        await RunGuardedAsync("ui.saveBounds", () => ((App)WpfApplication.Current).SaveWindowBoundsAsync(Left, Top));
     }
 
     private static bool HasButtonAncestor(object? source, DependencyObject stopAt)

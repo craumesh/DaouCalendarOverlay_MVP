@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
@@ -94,8 +95,9 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                LogService.Warn("bridge.pipe", "파이프 accept 실패", ex);
                 if (cancellationToken.IsCancellationRequested)
                     break;
                 await Task.Delay(250, cancellationToken);
@@ -106,10 +108,12 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     private async Task HandlePipeClientAsync(Stream pipe, CancellationToken cancellationToken)
     {
         NativeBridgeResponse response;
+        byte[]? bytes = null;
+        var sw = Stopwatch.StartNew();
 
         try
         {
-            var bytes = await NativeBridgeProtocol.ReadFrameAsync(pipe, 8 * 1024 * 1024, cancellationToken);
+            bytes = await NativeBridgeProtocol.ReadFrameAsync(pipe, 8 * 1024 * 1024, cancellationToken);
             if (bytes is null)
             {
                 response = NativeBridgeResponse.Fail("Empty native bridge request.");
@@ -122,8 +126,11 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            LogService.Warn("bridge.pipe", "파이프 요청 처리 실패", ex);
             response = NativeBridgeResponse.Fail($"Native bridge request failed: {ex.Message}");
         }
+
+        LogService.Info("bridge.pipe", $"{BridgeLogSummary.DescribeRequest(bytes)} elapsed={sw.ElapsedMilliseconds}ms ok={response.Ok}");
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(response, _jsonOptions);
         await NativeBridgeProtocol.WriteFrameAsync(pipe, payload, cancellationToken);
@@ -143,9 +150,21 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
 
             case "getConfig":
             {
+                if (!string.IsNullOrWhiteSpace(request.LastError))
+                {
+                    var reported = request.LastError!.Length > 300
+                        ? request.LastError!.Substring(0, 300)
+                        : request.LastError!;
+                    LogService.Warn("extension", $"확장 보고 오류 ver={request.ExtensionVersion ?? "?"}: {reported}");
+                }
+
                 var config = BuildConfig();
                 if (config.ShouldFetch)
+                {
+                    LogService.Info("bridge", $"fetch 발행 requestId={config.RequestId}");
                     FetchIssued?.Invoke(this, EventArgs.Empty);
+                }
+
                 return NativeBridgeResponse.Success(config);
             }
 
@@ -220,6 +239,8 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             _activeRequestId = "";
             _leaseUntil = DateTimeOffset.MinValue;
         }
+
+        LogService.Info("bridge.result", BridgeLogSummary.DescribeResult(result));
 
         if (string.IsNullOrWhiteSpace(result.CookieHeader) || result.CookieCount <= 0)
         {
@@ -315,17 +336,20 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         }
         catch (HttpRequestException ex)
         {
+            LogService.Warn("bridge.http", "DaouOffice 요청 네트워크 오류", ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($"네트워크 오류: {ex.Message}", BridgeFailureKind.Network, retryAt));
         }
         catch (TaskCanceledException ex)
         {
+            LogService.Warn("bridge.http", "DaouOffice 요청 취소/시간 초과", ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             var message = ex.InnerException is TimeoutException ? "DaouOffice 응답 시간 초과" : "네트워크 요청이 취소되었습니다.";
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.Network, retryAt));
         }
         catch (Exception ex)
         {
+            LogService.Warn("bridge.http", "DaouOffice 세션 브리지 실패", ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($"DaouOffice 세션 브리지 실패: {ex.Message}", BridgeFailureKind.General, retryAt));
         }

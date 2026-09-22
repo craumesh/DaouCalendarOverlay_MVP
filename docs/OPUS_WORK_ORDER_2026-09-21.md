@@ -94,7 +94,7 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 ### P1. 기능·안정성 결함
 
-#### T1.1 파일 로깅 + 전역 예외 처리 — P1
+#### [부분] T1.1 파일 로깅 + 전역 예외 처리 — P1
 - 근거: 전체 소스에 로그 출력 없음. `App.xaml.cs:100-108`(초기화 실패 MessageBox 후 종료), `App.xaml.cs:179-205, 249-295`, `MainWindow.xaml.cs:393-400, 459-477, 624-629, 643-648`의 `async void` 핸들러가 파일/레지스트리 I/O를 try/catch 없이 호출. `CalendarBridgeServer.cs:97-102`, `StartupService.cs:28-31`, `NativeMessagingHost.cs:46-49, 61-62`, `App.xaml.cs:332-335`의 `catch {}`가 원인을 삼킴. 확장도 `service-worker-v700.js:144-148, 164-166`에서 오류를 버림.
 - 검증 상태: 코드 확인.
 - 지시:
@@ -105,6 +105,7 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
   5. 트레이 메뉴에 "로그 폴더 열기" 추가.
   6. 확장: `getConfig`/`postResult` 실패를 `chrome.storage.session`의 `lastError`에 기록하고, 다음 `getConfig` 요청에 `lastError`를 실어 보내 앱이 로그에 남기도록.
 - 완료 기준: 앱 시작·동기화 성공·인증 실패·네트워크 실패·파이프 실패가 로그에 각각 한 줄 이상 남는다. 설정 저장 중 파일을 읽기 전용으로 만들어도 앱이 종료되지 않고 상태 텍스트에 오류가 보인다. 문서 §18에 로그 경로와 대표 로그 라인 추가.
+- 적용 메모(2026-09-22): LogService/LogFormatter/LogRotation 신설 + 순수 로직 단위 테스트; 전역 예외 처리기 + async void 전수 try/catch + catch{} 로그 + 트레이 "로그 폴더 열기"; 확장 7.1.0 개명 + lastError 전달 프로토콜 필드 + README/기술문서 로그 절 갱신 수동 확인 9건 대기
 
 #### T1.2 설정/캐시 저장 직렬화 — P1
 - 근거: `SettingsService.cs:35-53` temp 경로가 `settings.json.tmp` 고정. `MainWindow.xaml.cs:624-629`(투명도 450ms)와 `643-648`(위치 400ms)의 `async void` 틱이 각각 `App.SaveWindowBoundsAsync`/`SetUiOpacityAsync`를 통해 `SaveAsync`를 호출하므로 await 지점에서 겹치면 `File.Create(temp)` 공유 위반 → 처리되지 않은 예외로 종료. `CacheService.cs:35-43`은 예외 시 temp 미정리이며 `App.xaml.cs:143-147`에서 결과가 관찰되지 않음. `AppSettings.IsConfigured`(`AppSettings.cs:16-19`)가 settings.json에 직렬화됨(실데이터 확인).

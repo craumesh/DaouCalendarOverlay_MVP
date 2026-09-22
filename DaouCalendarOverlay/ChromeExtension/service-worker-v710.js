@@ -2,6 +2,7 @@ const NATIVE_HOST = "com.daou.calendar_overlay";
 const ALARM_NAME = "daou-calendar-overlay-sync";
 const ALARM_PERIOD_MINUTES = 0.5;
 const SESSION_COOKIE_KEY = "daouSessionCookieCache";
+const LAST_ERROR_KEY = "daouBridgeLastError";
 
 let inFlight = false;
 
@@ -135,20 +136,56 @@ async function collectSession(config) {
   return payload;
 }
 
+async function recordLastError(stage, error) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  try {
+    await chrome.storage.session.set({
+      [LAST_ERROR_KEY]: { stage, message: message.slice(0, 500), at: Date.now() }
+    });
+  } catch {
+    // storage 실패는 무시한다.
+  }
+}
+
+async function readLastError() {
+  try {
+    const stored = await chrome.storage.session.get(LAST_ERROR_KEY);
+    const entry = stored?.[LAST_ERROR_KEY];
+    if (!entry || !entry.message) return "";
+    return `${entry.stage || "unknown"}: ${entry.message}`;
+  } catch {
+    return "";
+  }
+}
+
+async function clearLastError() {
+  try { await chrome.storage.session.remove(LAST_ERROR_KEY); } catch { /* 무시 */ }
+}
+
 async function syncOnce() {
   if (inFlight) return;
   inFlight = true;
 
   try {
+    const lastError = await readLastError();
     let bridgeResponse;
     try {
-      bridgeResponse = await sendNative({ type: "getConfig" });
-    } catch {
+      bridgeResponse = await sendNative({
+        type: "getConfig",
+        lastError,
+        extensionVersion: chrome.runtime.getManifest().version
+      });
+    } catch (error) {
+      await recordLastError("getConfig", error);
       return;
     }
 
-    if (!bridgeResponse?.ok || !bridgeResponse.config)
+    if (lastError) await clearLastError();
+
+    if (!bridgeResponse?.ok || !bridgeResponse.config) {
+      await recordLastError("getConfig", bridgeResponse?.error || "bridge returned not ok");
       return;
+    }
 
     const config = bridgeResponse.config;
     if (!config.shouldFetch)
@@ -161,8 +198,8 @@ async function syncOnce() {
         type: "postResult",
         result
       });
-    } catch {
-      // The overlay may have exited between getConfig and postResult.
+    } catch (error) {
+      await recordLastError("postResult", error);
     }
   } finally {
     inFlight = false;
