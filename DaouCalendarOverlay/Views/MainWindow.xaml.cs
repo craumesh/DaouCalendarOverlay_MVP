@@ -625,8 +625,26 @@ public partial class MainWindow : Window
         {
             Interval = TimeSpan.FromSeconds(1)
         };
-        _clockTimer.Tick += (_, _) => UpdateClock();
+        _clockTimer.Tick -= ClockTimer_Tick;
+        _clockTimer.Tick += ClockTimer_Tick;
         _clockTimer.Start();
+    }
+
+    // 자정을 넘기면 오늘 배지를 옮기고, 이번 달을 보고 있었다면 새 달로 이동한 뒤 한 번 강제 동기화한다.
+    private void ClockTimer_Tick(object? sender, EventArgs e)
+    {
+        try
+        {
+            UpdateClock();
+            if (!_vm.RefreshTodayIfChanged())
+                return;
+
+            _ = ((App)WpfApplication.Current).RefreshAsync(true);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("clock", "자정 전환 처리 실패", ex);
+        }
     }
 
     private void UpdateClock()

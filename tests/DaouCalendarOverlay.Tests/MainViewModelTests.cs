@@ -7,17 +7,6 @@ public sealed class MainViewModelTests
 {
     private static readonly TimeSpan Kst = TimeSpan.FromHours(9);
 
-    private static void RunSta(Action body)
-    {
-        Exception? failure = null;
-        var thread = new Thread(() => { try { body(); } catch (Exception ex) { failure = ex; } });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        if (failure is not null)
-            throw new InvalidOperationException("STA 스레드에서 테스트 본문이 실패했습니다.", failure);
-    }
-
     private static DaouCalendarEvent Ev(string timeType, DateTimeOffset start, DateTimeOffset end, string type = "normal") =>
         new DaouCalendarEvent
         {
@@ -55,9 +44,8 @@ public sealed class MainViewModelTests
     [Fact]
     public void GetVisibleRange_DelegatesToCalendarGridForCurrentMonth()
     {
-        var today = DateTime.Today;
-        var month = new DateTime(today.Year, today.Month, 1);
-        var vm = new MainViewModel();
+        var month = new DateTime(2026, 9, 1);
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
 
         Assert.Equal(CalendarGrid.GetVisibleRange(month), vm.GetVisibleRange());
     }
@@ -65,9 +53,8 @@ public sealed class MainViewModelTests
     [Fact]
     public void MoveMonth_ShiftsVisibleRangeByThatManyMonths()
     {
-        var today = DateTime.Today;
-        var month = new DateTime(today.Year, today.Month, 1);
-        var vm = new MainViewModel();
+        var month = new DateTime(2026, 9, 1);
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
 
         vm.MoveMonth(1);
         Assert.Equal(CalendarGrid.GetVisibleRange(month.AddMonths(1)), vm.GetVisibleRange());
@@ -180,5 +167,96 @@ public sealed class MainViewModelTests
 
         Assert.Equal(0, cell.MoreCount);
         Assert.Equal(2, cell.VisibleEvents.Count);
+    }
+
+    [Fact]
+    public void Constructor_UsesInjectedTodayForDisplayMonth()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        Assert.Equal(new DateTime(2026, 9, 1), vm.DisplayMonth);
+        Assert.Equal("2026년 9월", vm.MonthTitle);
+        Assert.Equal(new DateTime(2026, 9, 22), Assert.Single(vm.Days, d => d.IsToday).Date);
+    }
+
+    [Fact]
+    public void GoToday_UsesInjectedToday()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        vm.MoveMonth(3);
+        vm.GoToday();
+
+        Assert.Equal(new DateTime(2026, 9, 1), vm.DisplayMonth);
+    }
+
+    [Fact]
+    public void RefreshTodayIfChanged_ReturnsFalseWhenDateUnchanged()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        Assert.False(vm.RefreshTodayIfChanged());
+        Assert.Equal(42, vm.Days.Count);
+        Assert.Equal(new DateTime(2026, 9, 1), vm.DisplayMonth);
+    }
+
+    [Fact]
+    public void RefreshTodayIfChanged_MovesTodayBadgeWithinSameMonth()
+    {
+        var today = new DateTime(2026, 9, 22);
+        var vm = new MainViewModel(() => today);
+
+        today = new DateTime(2026, 9, 23);
+
+        Assert.True(vm.RefreshTodayIfChanged());
+        Assert.Equal(new DateTime(2026, 9, 1), vm.DisplayMonth);
+        Assert.Equal(new DateTime(2026, 9, 23), Assert.Single(vm.Days, d => d.IsToday).Date);
+    }
+
+    [Fact]
+    public void RefreshTodayIfChanged_GoesToNewMonthWhenViewingCurrentMonth()
+    {
+        var today = new DateTime(2026, 9, 30);
+        var vm = new MainViewModel(() => today);
+
+        today = new DateTime(2026, 10, 1);
+
+        Assert.True(vm.RefreshTodayIfChanged());
+        Assert.Equal(new DateTime(2026, 10, 1), vm.DisplayMonth);
+        Assert.Equal("2026년 10월", vm.MonthTitle);
+        Assert.Equal(new DateTime(2026, 10, 1), Assert.Single(vm.Days, d => d.IsToday).Date);
+    }
+
+    [Fact]
+    public void RefreshTodayIfChanged_KeepsDisplayMonthWhenUserBrowsedAnotherMonth()
+    {
+        var today = new DateTime(2026, 9, 30);
+        var vm = new MainViewModel(() => today);
+        vm.MoveMonth(-1);
+
+        today = new DateTime(2026, 10, 1);
+
+        Assert.True(vm.RefreshTodayIfChanged());
+        Assert.Equal(new DateTime(2026, 8, 1), vm.DisplayMonth);
+        Assert.DoesNotContain(vm.Days, d => d.IsToday);
+    }
+
+    [Fact]
+    public void RefreshTodayIfChanged_ReturnsTrueOnlyOnceWhenTicksCrossMidnight()
+    {
+        var today = new DateTime(2026, 9, 30);
+        var vm = new MainViewModel(() => today);
+
+        var trueCount = 0;
+        for (var i = 0; i < 30; i++)
+            if (vm.RefreshTodayIfChanged()) trueCount++;
+
+        today = new DateTime(2026, 10, 1);
+        for (var i = 0; i < 30; i++)
+            if (vm.RefreshTodayIfChanged()) trueCount++;
+
+        Assert.Equal(1, trueCount);
+        Assert.Equal(new DateTime(2026, 10, 1), vm.DisplayMonth);
+        Assert.Equal(new DateTime(2026, 10, 1), Assert.Single(vm.Days, d => d.IsToday).Date);
     }
 }

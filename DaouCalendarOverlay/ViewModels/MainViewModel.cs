@@ -29,10 +29,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private List<string> _configuredCalendarIds = new();
     private string _filterField = "Title";
     private string _filterText = "";
-    private DateTime _displayMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime _displayMonth;
     private string _statusText = "준비 중";
     private bool _statusIsError;
     private bool _loginRequired;
+    private readonly Func<DateTime> _today;
+    private DateTime _lastKnownToday;
 
     public ObservableCollection<DayCellViewModel> Days { get; } = new();
     public string MonthTitle => _displayMonth.ToString("yyyy년 M월");
@@ -44,8 +46,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public MainViewModel()
+    public MainViewModel() : this(() => DateTime.Today)
     {
+    }
+
+    public MainViewModel(Func<DateTime> today)
+    {
+        _today = today ?? throw new ArgumentNullException(nameof(today));
+        _lastKnownToday = _today().Date;
+        _displayMonth = new DateTime(_lastKnownToday.Year, _lastKnownToday.Month, 1);
         BuildCalendar();
     }
 
@@ -164,10 +173,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void GoToday()
     {
-        _displayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var today = _today().Date;
+        _displayMonth = new DateTime(today.Year, today.Month, 1);
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(DisplayMonth));
         BuildCalendar();
+    }
+
+    /// <summary>시계가 가리키는 날짜가 바뀌었으면 달력을 다시 만들고 true를 반환한다.</summary>
+    public bool RefreshTodayIfChanged()
+    {
+        var today = _today().Date;
+        if (today == _lastKnownToday)
+            return false;
+
+        var previous = _lastKnownToday;
+        _lastKnownToday = today;
+
+        var monthChanged = today.Year != previous.Year || today.Month != previous.Month;
+        var viewingPreviousTodayMonth = _displayMonth.Year == previous.Year && _displayMonth.Month == previous.Month;
+
+        if (monthChanged && viewingPreviousTodayMonth)
+            GoToday();
+        else
+            BuildCalendar();
+
+        return true;
     }
 
     public void SetStatus(string text, bool isError)
@@ -195,6 +226,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void BuildCalendar()
     {
         Days.Clear();
+        var today = _today().Date;
         var gridStart = CalendarGrid.GetGridStart(_displayMonth);
 
         for (var i = 0; i < CalendarGrid.CellCount; i++)
@@ -205,7 +237,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 Date = date,
                 IsCurrentMonth = date.Month == _displayMonth.Month && date.Year == _displayMonth.Year,
-                IsToday = date.Date == DateTime.Today,
+                IsToday = date.Date == today,
                 // 제목 검색은 공휴일 색상을 숨기지 않지만, 캘린더 자체를 끈 경우에는 해당 캘린더의 효과도 숨긴다.
                 IsHoliday = GetVisibleUnfilteredEventsForDate(date).Any(IsHolidayEvent)
             };

@@ -149,11 +149,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 동기화 중 "종료" 클릭 시 1초 내 프로세스 종료. 30초짜리 가짜 HTTP 응답(테스트 서버)에서 `getConfig`가 실패하지 않음.
 - 적용 메모(2026-09-22): CalendarBridgeServer: postResult 즉시 ok 응답 + HTTP 백그라운드화 + lease 해제 시점 이동 + 취소 토큰 전달; 파이프 accept 루프와 요청 처리 분리(인스턴스 4) + 파이프 동시성 테스트 + 문서 §10.2/§10.3 정정 수동 확인 6건 대기
 
-#### T1.8 자정/월 전환 갱신 — P1
+#### [부분] T1.8 자정/월 전환 갱신 — P1
 - 근거: `MainViewModel.cs:32`의 `_displayMonth`는 생성 시 고정, `IsToday`(:185)는 `BuildCalendar` 시점 계산. `MainWindow.xaml.cs:543-561` 시계 타이머는 텍스트만 갱신. `App._refreshTimer(:297-306)`는 `RefreshAsync(false)`→`UpdateRequest(force:false)`가 범위/설정 불변이면 no-op이라 실질적으로 죽은 타이머(주기 동기화는 `RecordSuccess(:334-341)`의 `_nextAttemptAt`이 결정).
 - 검증 상태: 코드 확인.
 - 지시: 시계 틱에서 날짜 변경 감지 → `BuildCalendar()`; 월이 바뀌었고 사용자가 이번 달을 보고 있었다면 `GoToday()` + `RefreshAsync(true)`. `_refreshTimer`는 제거하거나 이 용도로 재정의하고 문서 §10.1을 "주기는 CalendarBridgeServer가 결정"으로 정정.
 - 완료 기준: 시스템 시각을 자정 넘겨 바꾸면 5초 내 오늘 배지가 이동. 테스트: `MainViewModel`에 `Now` 주입 가능하게 리팩터링 후 날짜 전환 케이스.
+- 적용 메모(2026-09-22): MainViewModel에 시계(Func<DateTime>) 주입 + RefreshTodayIfChanged 추가; 시계 틱에서 자정 전환 처리, App._refreshTimer 제거, §10.1/README 정정 수동 확인 3건 대기
 
 #### T1.9 설정 상한과 입력 검증 — P1
 - 근거: `SettingsWindow.xaml.cs:84-88`은 `refreshMinutes < 1`만 검사. `App.xaml.cs:301-303`의 `DispatcherTimer.Interval`은 약 35,791분(Int32.MaxValue ms) 초과 시 예외 → 설정 저장 직후 종료. 캘린더 ID는 공백·쉼표·세미콜론으로 분리(`:71-76`)하나 숫자 형식 검증 없음.

@@ -22,7 +22,6 @@ public partial class App : WpfApplication
     private SingleInstanceService? _singleInstance;
     private AppSettings _settings = new();
     private MainWindow? _overlayWindow;
-    private DispatcherTimer? _refreshTimer;
     private DispatcherTimer? _healthTimer;
     private Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
@@ -108,7 +107,6 @@ public partial class App : WpfApplication
                 _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
                 _bridgeServer.Start();
 
-                ConfigureRefreshTimer();
                 ConfigureHealthTimer();
                 _syncStatus.MarkWaiting();
                 await RefreshAsync(true);
@@ -319,7 +317,6 @@ public partial class App : WpfApplication
         _extensionInstaller.EnsureExtracted();
         _nativeMessagingRegistration.EnsureRegistered();
         _overlayWindow.ApplySettings(_settings);
-        ConfigureRefreshTimer();
         await RefreshAsync(true);
     }
 
@@ -412,21 +409,6 @@ public partial class App : WpfApplication
         _settings.HiddenCalendarIds.Clear();
         await SaveSettingsAsync();
         _overlayWindow?.SetHiddenCalendars(_settings.HiddenCalendarIds);
-    }
-
-    private void ConfigureRefreshTimer()
-    {
-        _refreshTimer?.Stop();
-        _refreshTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMinutes(Math.Max(1, _settings.RefreshMinutes))
-        };
-        _refreshTimer.Tick += async (_, _) =>
-        {
-            try { await RefreshAsync(false); }
-            catch (Exception ex) { ReportError("timer.refresh", "주기 새로고침 실패", ex); }
-        };
-        _refreshTimer.Start();
     }
 
     private void ConfigureHealthTimer()
@@ -526,7 +508,6 @@ public partial class App : WpfApplication
 
         _isExiting = true;
         LogService.Info("shutdown", "overlay 종료");
-        _refreshTimer?.Stop();
         _healthTimer?.Stop();
 
         if (_trayIcon is not null)
