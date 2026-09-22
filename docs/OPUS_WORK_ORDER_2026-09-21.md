@@ -163,11 +163,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 범위 밖 입력이 거부되고 앱이 종료되지 않음.
 - 적용 메모(2026-09-22): SettingsValidation 순수 정책 클래스 추가 + App의 RefreshMinutes 상한 클램프; 설정창 RefreshMinutes/캘린더 ID 검증 배선 + 안내 문구·문서(§13, §20, README) 갱신 수동 확인 4건 대기
 
-#### T1.10 캐시 시각 노출 — P1
+#### [부분] T1.10 캐시 시각 노출 — P1
 - 근거: `App.xaml.cs:86-98`에서 `SetEvents(..., "캐시 HH:mm")` 직후 `_syncStatus.MarkWaiting()`이 "Chrome 백그라운드 대기"로 덮어씀. `SyncStatusService._lastSuccess`는 캐시 로드 시 설정되지 않아 `EvaluateHealth(:76-98)`의 "마지막 HH:mm"도 안 나옴.
 - 검증 상태: 코드 확인.
 - 지시: `SyncStatusService.MarkCacheLoaded(DateTimeOffset)` 추가, 대기/연결 대기 문구에 "· 캐시 MM-dd HH:mm" 접미. `MainWindow.SetEvents`의 `updatedAt` 파라미터(현재 미사용, `MainWindow.xaml.cs:118-123`)를 활용하거나 제거.
 - 완료 기준: Chrome이 꺼진 상태로 부팅해도 상태에 캐시 시각이 보임.
+- 적용 메모(2026-09-22): SyncStatusService.MarkCacheLoaded 추가 + Decorate에 캐시 시각 접미 합성, App 기동 경로 연결; MainWindow.SetEvents의 updatedAt 활용 — 상태 텍스트 툴팁에 마지막 갱신 시각; 캐시 시각 노출 문서 반영 — 기술문서 §10.4/§18, README 수동 확인 6건 대기
 
 ### P2. 아키텍처·성능·배포 개선
 

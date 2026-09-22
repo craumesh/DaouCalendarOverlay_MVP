@@ -98,6 +98,7 @@ public partial class App : WpfApplication
                 if (cache.Events.Count > 0)
                 {
                     _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $"캐시 {cache.LastUpdated:HH:mm}");
+                    _syncStatus.MarkCacheLoaded(cache.LastUpdated);
                     if (!CacheRangePolicy.CoversToday(cache.RangeFrom, cache.RangeTo, DateTimeOffset.Now))
                     {
                         _syncStatus.MarkCacheOutOfRange();

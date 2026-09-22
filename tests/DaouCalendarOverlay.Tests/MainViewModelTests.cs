@@ -259,4 +259,41 @@ public sealed class MainViewModelTests
         Assert.Equal(new DateTime(2026, 10, 1), vm.DisplayMonth);
         Assert.Equal(new DateTime(2026, 10, 1), Assert.Single(vm.Days, d => d.IsToday).Date);
     }
+
+    [Fact]
+    public void SetLastUpdated_FormatsStatusToolTipUsingValueOffset()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        vm.SetLastUpdated(new DateTimeOffset(2026, 9, 21, 8, 30, 0, Kst));
+
+        Assert.Equal("마지막 갱신 2026-09-21 08:30", vm.StatusToolTip);
+    }
+
+    [Fact]
+    public void SetLastUpdated_WithNull_ClearsStatusToolTip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetLastUpdated(new DateTimeOffset(2026, 9, 21, 8, 30, 0, Kst));
+
+        vm.SetLastUpdated(null);
+
+        Assert.Null(vm.StatusToolTip);
+    }
+
+    [Fact]
+    public void SetLastUpdated_RaisesPropertyChangedForStatusToolTip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        var raised = false;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.StatusToolTip))
+                raised = true;
+        };
+
+        vm.SetLastUpdated(new DateTimeOffset(2026, 9, 21, 8, 30, 0, Kst));
+
+        Assert.True(raised);
+    }
 }

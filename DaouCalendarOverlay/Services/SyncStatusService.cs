@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace DaouCalendarOverlay.Services;
 
 public enum OverlaySyncState
@@ -30,6 +32,7 @@ public sealed class SyncStatusService
     private DateTimeOffset _lastHeartbeat;
     private DateTimeOffset _lastSuccess;
     private bool _cacheOutOfRange;
+    private DateTimeOffset _cachedAt;
     private OverlaySyncState _state = OverlaySyncState.Starting;
     private string _configurationInvalidReason = "";
 
@@ -44,6 +47,25 @@ public sealed class SyncStatusService
     {
         lock (_gate)
             _cacheOutOfRange = true;
+    }
+
+    /// <summary>캐시를 읽어 화면에 표시했을 때 호출. 이후 대기/연결 대기 문구에 " · 캐시 MM-dd HH:mm"이 붙는다.</summary>
+    public void MarkCacheLoaded(DateTimeOffset cachedAt)
+    {
+        if (cachedAt == default)
+            return;
+
+        OverlaySyncState state;
+        lock (_gate)
+        {
+            _cachedAt = cachedAt;
+            state = _state;
+        }
+
+        if (state == OverlaySyncState.WaitingForChrome)
+            Publish(OverlaySyncState.WaitingForChrome, Decorate("Chrome 백그라운드 대기"), false);
+        else if (state == OverlaySyncState.Connected)
+            Publish(OverlaySyncState.Connected, Decorate("Chrome 브리지 연결됨 · 동기화 대기"), false);
     }
 
     public void MarkHeartbeat()
@@ -65,6 +87,7 @@ public sealed class SyncStatusService
         {
             _lastSuccess = when;
             _cacheOutOfRange = false;
+            _cachedAt = default;
         }
         Publish(OverlaySyncState.Synced, $"정상 · 동기화 {when:HH:mm}", false);
     }
@@ -140,9 +163,18 @@ public sealed class SyncStatusService
     private string Decorate(string text)
     {
         bool outOfRange;
+        DateTimeOffset cachedAt;
         lock (_gate)
+        {
             outOfRange = _cacheOutOfRange;
-        return outOfRange ? text + CacheOutOfRangeSuffix : text;
+            cachedAt = _cachedAt;
+        }
+
+        if (outOfRange)
+            text += CacheOutOfRangeSuffix;
+        if (cachedAt != default)
+            text += " · 캐시 " + cachedAt.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+        return text;
     }
 
     private void Publish(OverlaySyncState state, string text, bool isError)

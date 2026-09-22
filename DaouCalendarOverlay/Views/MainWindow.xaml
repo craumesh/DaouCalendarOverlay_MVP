@@ -562,6 +562,7 @@
                     <Ellipse Width="7" Height="7" Fill="{Binding StatusForeground}" Margin="0,0,6,0" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1"
                                Text="{Binding StatusText}"
+                               ToolTip="{Binding StatusToolTip}"
                                Foreground="{Binding StatusForeground}"
                                FontSize="10.5"
                                FontWeight="SemiBold"

@@ -166,6 +166,18 @@ DaouOffice 주소는 `https://회사이름.daouoffice.com` 형식만 허용합�
 
 Chrome Extension ID 및 Native Messaging 설정은 프로젝트의 Extension/Native Messaging 관련 파일을 기준으로 구성되어 있습니다.
 
+### 동작 확인
+
+애플리케이션 하단 상태 표시는 정상 경로에서 다음 순서로 바뀝니다.
+
+```text
+Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… → 정상 · 동기화 HH:mm
+```
+
+- 이전에 저장된 캐시가 있으면 첫 동기화 전까지 대기 문구 뒤에 `· 캐시 MM-dd HH:mm` 접미가 붙습니다(예: `Chrome 백그라운드 대기 · 캐시 09-21 08:30`). 저장된 조회 범위가 오늘을 포함하지 않으면 `· 캐시(범위 밖) · 캐시 MM-dd HH:mm` 순서로 두 접미가 함께 붙습니다. 동기화가 한 번 성공하면 접미는 사라집니다.
+- 상태 텍스트에 마우스를 올리면 `마지막 갱신 yyyy-MM-dd HH:mm` 툴팁으로 마지막으로 화면에 반영된 데이터 시각을 확인할 수 있습니다.
+- 95초 이상 확장 heartbeat가 없으면 `Chrome 확장 연결 대기`로 바뀝니다.
+
 ## 로컬 설정 및 인증 정보
 
 애플리케이션의 사용자별 설정은 로컬 사용자 환경에 저장됩니다.
@@ -296,6 +308,7 @@ git push
 5. 네트워크 및 다우오피스 서비스 상태 확인
 6. 설정창의 DaouOffice 주소가 `https://회사이름.daouoffice.com` 형식인지 확인
 7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
+8. 상태 문구에 `· 캐시 MM-dd HH:mm`만 계속 보이면 아직 한 번도 동기화에 성공하지 못한 상태입니다. Chrome 확장과 Native Messaging 등록을 먼저 확인하세요.
 
 ## 라이선스
 

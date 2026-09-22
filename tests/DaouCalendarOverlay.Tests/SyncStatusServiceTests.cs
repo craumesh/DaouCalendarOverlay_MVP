@@ -223,4 +223,134 @@ public sealed class SyncStatusServiceTests
         svc.MarkWaiting();
         Assert.Equal("Chrome 백그라운드 대기", captured!.Text);
     }
+
+    /// <summary>캐시를 읽지 않았으면 대기 문구에 아무 접미도 붙지 않는다(T1.10).</summary>
+    [Fact]
+    public void MarkWaiting_WithoutCache_KeepsPlainText()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkWaiting();
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 백그라운드 대기", last!.Text);
+        Assert.Equal(OverlaySyncState.WaitingForChrome, last.State);
+        Assert.False(last.IsError);
+    }
+
+    /// <summary>캐시 로드 후 대기 문구에는 " · 캐시 MM-dd HH:mm" 접미가 붙는다.</summary>
+    [Fact]
+    public void MarkCacheLoaded_ThenMarkWaiting_AppendsCacheSuffix()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+        service.MarkWaiting();
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 백그라운드 대기 · 캐시 09-21 08:30", last!.Text);
+    }
+
+    /// <summary>브리지 연결 문구에도 같은 캐시 접미가 붙는다.</summary>
+    [Fact]
+    public void MarkCacheLoaded_ThenMarkHeartbeat_AppendsCacheSuffixToConnectedText()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+        service.MarkHeartbeat();
+
+        Assert.NotNull(last);
+        Assert.Equal(OverlaySyncState.Connected, last!.State);
+        Assert.Equal("Chrome 브리지 연결됨 · 동기화 대기 · 캐시 09-21 08:30", last.Text);
+    }
+
+    /// <summary>이미 대기 상태면 캐시 로드만으로 접미가 붙은 문구가 다시 게시된다.</summary>
+    [Fact]
+    public void MarkCacheLoaded_WhileWaiting_RepublishesWithSuffix()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkWaiting();
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+
+        Assert.NotNull(last);
+        Assert.Equal(OverlaySyncState.WaitingForChrome, last!.State);
+        Assert.Equal("Chrome 백그라운드 대기 · 캐시 09-21 08:30", last.Text);
+    }
+
+    /// <summary>캐시 시각이 없으면(기본값) 값 저장도 재게시도 하지 않는다.</summary>
+    [Fact]
+    public void MarkCacheLoaded_WithDefaultValue_DoesNotPublish()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        var published = 0;
+        service.StatusChanged += (_, e) => { last = e; published++; };
+
+        service.MarkWaiting();
+        service.MarkCacheLoaded(default);
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 백그라운드 대기", last!.Text);
+        Assert.Equal(1, published);
+    }
+
+    /// <summary>성공 이력이 없어도 health timer 문구에 캐시 접미가 붙는다.</summary>
+    [Fact]
+    public void EvaluateHealth_WithCacheAndNoSuccess_AppendsCacheSuffix()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+        service.EvaluateHealth();
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 확장 연결 대기 · 캐시 09-21 08:30", last!.Text);
+    }
+
+    /// <summary>동기화가 한 번 성공하면 이후 문구에서 캐시 접미가 사라지고 "마지막" 접미로 바뀐다.</summary>
+    [Fact]
+    public void MarkSuccess_ClearsCacheSuffixFromLaterWaiting()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+        service.MarkSuccess(new DateTimeOffset(2026, 9, 21, 9, 5, 0, TimeSpan.FromHours(9)));
+        service.MarkWaiting();
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 백그라운드 대기", last!.Text);
+
+        service.EvaluateHealth();
+        Assert.Equal("Chrome 확장 연결 대기 · 마지막 09:05", last!.Text);
+    }
+
+    /// <summary>범위 밖 접미와 캐시 시각 접미가 동시에 걸릴 때의 결합 순서를 고정한다.</summary>
+    [Fact]
+    public void MarkCacheLoaded_WithCacheOutOfRange_AppendsOutOfRangeThenCacheSuffix()
+    {
+        var service = new SyncStatusService();
+        SyncStatusChangedEventArgs? last = null;
+        service.StatusChanged += (_, e) => last = e;
+
+        service.MarkCacheOutOfRange();
+        service.MarkCacheLoaded(new DateTimeOffset(2026, 9, 21, 8, 30, 0, TimeSpan.FromHours(9)));
+        service.MarkWaiting();
+
+        Assert.NotNull(last);
+        Assert.Equal("Chrome 백그라운드 대기 · 캐시(범위 밖) · 캐시 09-21 08:30", last!.Text);
+    }
 }

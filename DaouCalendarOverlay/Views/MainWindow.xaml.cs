@@ -119,6 +119,7 @@ public partial class MainWindow : Window
     public void SetEvents(IEnumerable<DaouCalendarEvent> events, DateTimeOffset updatedAt, string status)
     {
         _vm.SetEvents(events);
+        _vm.SetLastUpdated(updatedAt == default ? null : updatedAt);
         _vm.SetStatus(status, false);
     }
 

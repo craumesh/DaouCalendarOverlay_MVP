@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using MediaBrush = System.Windows.Media.Brush;
@@ -31,6 +32,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _filterText = "";
     private DateTime _displayMonth;
     private string _statusText = "준비 중";
+    private string? _statusToolTip;
     private bool _statusIsError;
     private bool _loginRequired;
     private readonly Func<DateTime> _today;
@@ -40,6 +42,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string MonthTitle => _displayMonth.ToString("yyyy년 M월");
     public DateTime DisplayMonth => _displayMonth;
     public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); } }
+    public string? StatusToolTip { get => _statusToolTip; private set { _statusToolTip = value; OnPropertyChanged(); } }
     public bool StatusIsError { get => _statusIsError; private set { _statusIsError = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusForeground)); } }
     public MediaBrush StatusForeground => StatusIsError ? CreateBrush(MediaColor.FromRgb(0xFF, 0x9C, 0x9C)) : CreateBrush(MediaColor.FromRgb(0x9E, 0xA3, 0xAD));
     public bool LoginRequired { get => _loginRequired; private set { _loginRequired = value; OnPropertyChanged(); } }
@@ -206,6 +209,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         StatusText = text;
         StatusIsError = isError;
     }
+
+    public void SetLastUpdated(DateTimeOffset? updatedAt) =>
+        StatusToolTip = updatedAt is DateTimeOffset value
+            ? "마지막 갱신 " + value.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+            : null;
 
     public void SetLoginRequired(bool required) => LoginRequired = required;
 
