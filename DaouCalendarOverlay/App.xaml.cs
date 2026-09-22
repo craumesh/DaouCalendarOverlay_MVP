@@ -93,7 +93,14 @@ public partial class App : WpfApplication
 
                 var cache = await _cacheService.LoadAsync();
                 if (cache.Events.Count > 0)
+                {
                     _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $"캐시 {cache.LastUpdated:HH:mm}");
+                    if (!CacheRangePolicy.CoversToday(cache.RangeFrom, cache.RangeTo, DateTimeOffset.Now))
+                    {
+                        _syncStatus.MarkCacheOutOfRange();
+                        LogService.Info("cache", "캐시 범위가 오늘을 포함하지 않아 범위 밖으로 표기합니다.");
+                    }
+                }
 
                 _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
                 _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
@@ -231,7 +238,13 @@ public partial class App : WpfApplication
 
                     try
                     {
-                        var cacheSaved = await _cacheService.SaveAsync(new CalendarCache { LastUpdated = now, Events = e.Events });
+                        var cacheSaved = await _cacheService.SaveAsync(new CalendarCache
+                        {
+                            LastUpdated = now,
+                            RangeFrom = e.RangeFrom,
+                            RangeTo = e.RangeTo,
+                            Events = e.Events
+                        });
                         if (!cacheSaved)
                             _syncStatus.MarkPersistenceError("캐시");
                     }

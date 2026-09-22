@@ -32,6 +32,9 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     /// <summary>설정 문제로 fetch를 내보내지 못했을 때의 사유 코드. lock 밖에서만 발생한다.</summary>
     public event EventHandler<string>? ConfigurationInvalid;
 
+    /// <summary>테스트가 HTTP 전송을 대체하기 위한 확장점. null이면 기본 HttpClientHandler를 만든다.</summary>
+    public Func<HttpMessageHandler>? HttpMessageHandlerFactory { get; set; }
+
     public void Start()
     {
         if (_acceptLoop is not null)
@@ -139,7 +142,7 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         await NativeBridgeProtocol.WriteFrameAsync(pipe, payload, cancellationToken);
     }
 
-    private async Task<NativeBridgeResponse> HandleRequestAsync(NativeBridgeRequest? request)
+    public async Task<NativeBridgeResponse> HandleRequestAsync(NativeBridgeRequest? request)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Type))
             return NativeBridgeResponse.Fail("Invalid native bridge request.");
@@ -274,7 +277,7 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         try
         {
             var requestUri = BuildCalendarUri(settingsSnapshot, fromSnapshot, toSnapshot);
-            using var handler = new HttpClientHandler
+            using var handler = HttpMessageHandlerFactory?.Invoke() ?? new HttpClientHandler
             {
                 UseCookies = false,
                 AllowAutoRedirect = false,
@@ -343,8 +346,14 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                 return;
             }
 
+            if (DiscardIfRangeChanged(fromSnapshot, toSnapshot))
+            {
+                LogService.Warn("bridge", "표시 범위가 변경되어 이전 범위의 동기화 결과를 버리고 즉시 재발행합니다.");
+                return;
+            }
+
             RecordSuccess(settingsSnapshot.RefreshMinutes);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data));
+            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data, fromSnapshot, toSnapshot));
         }
         catch (HttpRequestException ex)
         {
@@ -364,6 +373,25 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             LogService.Warn("bridge.http", "DaouOffice 세션 브리지 실패", ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($"DaouOffice 세션 브리지 실패: {ex.Message}", BridgeFailureKind.General, retryAt));
+        }
+    }
+
+    /// <summary>
+    /// HTTP 왕복 중 표시 범위가 바뀌었으면 결과를 버리고(true) 즉시 재발행되도록 lease/backoff 상태를 초기화한다.
+    /// 성공/실패 카운터(<c>_consecutiveFailures</c>)는 건드리지 않는다.
+    /// </summary>
+    private bool DiscardIfRangeChanged(DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot)
+    {
+        lock (_gate)
+        {
+            if (!BridgeRangeGuard.IsStale(fromSnapshot, toSnapshot, _from, _to))
+                return false;
+
+            _forceRefresh = true;
+            _activeRequestId = "";
+            _leaseUntil = DateTimeOffset.MinValue;
+            _nextAttemptAt = DateTimeOffset.MinValue;
+            return true;
         }
     }
 
@@ -493,10 +521,18 @@ public sealed class BridgeSyncEventArgs : EventArgs
     public DateTimeOffset? RetryAt { get; init; }
     public List<DaouCalendarEvent> Events { get; init; } = new();
 
-    public static BridgeSyncEventArgs Ok(List<DaouCalendarEvent> events) => new()
+    /// <summary>이 결과가 요청된 표시 범위의 시작(<c>CalendarGrid.GetVisibleRange</c> 결과).</summary>
+    public DateTimeOffset RangeFrom { get; init; }
+
+    /// <summary>이 결과가 요청된 표시 범위의 끝.</summary>
+    public DateTimeOffset RangeTo { get; init; }
+
+    public static BridgeSyncEventArgs Ok(List<DaouCalendarEvent> events, DateTimeOffset rangeFrom, DateTimeOffset rangeTo) => new()
     {
         Success = true,
-        Events = events
+        Events = events,
+        RangeFrom = rangeFrom,
+        RangeTo = rangeTo
     };
 
     public static BridgeSyncEventArgs AuthRequired(string error, DateTimeOffset? retryAt = null) => new()

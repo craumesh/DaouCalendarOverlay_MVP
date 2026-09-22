@@ -135,11 +135,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 다른 EXE가 파이프 이름을 선점한 상태에서 host가 쿠키를 보내지 않고 오류 응답. 단위 테스트는 경로 비교 함수만.
 - 적용 메모(2026-09-22): PipePeerVerifier: 파이프 서버 프로세스 신원 확인 순수 로직 + Win32 조회; NativeHostRelay 도입: 클라이언트 CurrentUserOnly + 서버 EXE 검증 후에만 전송; 문서 갱신: §7.2 코드 발췌·§15 위협 모델·§17 파일표·§18 장애 대응 + README + D1 §15 반영 수동 확인 4건 대기
 
-#### T1.6 stale 결과와 캐시 범위 — P1
+#### [부분] T1.6 stale 결과와 캐시 범위 — P1
 - 근거: `ProcessResultAsync(:209-222)`는 HTTP 호출 전에만 requestId를 검사하고 `_activeRequestId`를 지운다. 호출 중 사용자가 월을 이동하면(`UpdateRequest(:53-60)`가 새 범위 설정) 이전 범위 결과가 그대로 `SyncCompleted`로 전달돼 `App.xaml.cs:136-147`에서 UI와 캐시에 반영된다. 캐시(`App.xaml.cs:143-147`)는 마지막 성공 범위를 저장하므로, 다음 달을 보다가 종료하면 다음 기동 시 이번 달이 비어 보인다.
 - 검증 상태: 코드 확인.
 - 지시: HTTP 완료 후 `lock`에서 `fromSnapshot/toSnapshot == _from/_to`를 재확인, 다르면 결과를 버리고 즉시 재발행(`_forceRefresh = true`). 캐시에 `RangeFrom/RangeTo`를 저장하고, 기동 시 오늘이 범위 밖이면 캐시를 표시하되 상태에 "캐시(범위 밖)"로 표기하고 즉시 강제 동기화. 또는 현재 달 범위 결과만 캐시에 쓴다(둘 중 전자 권장).
 - 완료 기준: 월 이동 직후 이전 범위 응답이 UI를 덮지 않음(테스트로 `CalendarBridgeServer` 상태 전이 검증). 다음 달로 이동 후 재시작해도 이번 달 일정이 캐시로 보임.
+- 적용 메모(2026-09-22): HTTP 완료 후 범위 재확인으로 stale 동기화 결과 폐기 + 재발행; 캐시에 조회 범위 저장 + 기동 시 '캐시(범위 밖)' 표기 수동 확인 3건 대기
 
 #### T1.7 종료 지연 제거와 postResult 즉시 응답 — P1
 - 근거: `client.SendAsync(:264)`에 취소 토큰 없음. `DisposeAsync(:390-398)`가 `_acceptLoop`를 기다리므로 HTTP 진행 중 종료하면 트레이 아이콘이 사라진 뒤 최대 30초 프로세스 잔류(`App.xaml.cs:384-394`). 또 `HandlePipeClientAsync(:106-130)`가 HTTP 완료까지 응답을 미루고 `maxNumberOfServerInstances: 1`이라 그 사이 `getConfig`는 2.5초 timeout(`NativeMessagingHost.cs:41`)으로 실패해 heartbeat가 끊긴다. `_leaseUntil`은 postResult 도착 시 해제(:220-221)되고 `_nextAttemptAt`은 과거라, 처리가 직렬이 아니었다면 중복 fetch가 발생하는 구조.

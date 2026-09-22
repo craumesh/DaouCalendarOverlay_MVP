@@ -158,4 +158,69 @@ public sealed class SyncStatusServiceTests
         svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 13, 5, 0, TimeSpan.FromHours(9)));
         Assert.Equal("정상 · 동기화 13:05", events[5].Text);
     }
+
+    /// <summary>캐시 범위가 오늘을 벗어나면 대기 문구에 접미가 붙는다(T1.6).</summary>
+    [Fact]
+    public void MarkWaiting_AfterMarkCacheOutOfRange_AppendsOutOfRangeSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkCacheOutOfRange();
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.WaitingForChrome, captured!.State);
+        Assert.Equal("Chrome 백그라운드 대기 · 캐시(범위 밖)", captured.Text);
+        Assert.False(captured.IsError);
+    }
+
+    /// <summary>플래그가 없으면 기존 문구가 글자 그대로 유지된다.</summary>
+    [Fact]
+    public void MarkWaiting_WithoutCacheOutOfRange_KeepsBaseText()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 백그라운드 대기", captured!.Text);
+    }
+
+    /// <summary>브리지 연결 문구에도 같은 접미가 붙는다.</summary>
+    [Fact]
+    public void MarkHeartbeat_AfterMarkCacheOutOfRange_AppendsSuffixToConnectedText()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkCacheOutOfRange();
+        svc.MarkHeartbeat();
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.Connected, captured!.State);
+        Assert.Equal("Chrome 브리지 연결됨 · 동기화 대기 · 캐시(범위 밖)", captured.Text);
+    }
+
+    /// <summary>정상 동기화가 오면 접미가 사라진다.</summary>
+    [Fact]
+    public void MarkSuccess_ClearsCacheOutOfRangeSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkCacheOutOfRange();
+        svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 13, 5, 0, TimeSpan.FromHours(9)));
+
+        Assert.NotNull(captured);
+        Assert.Equal("정상 · 동기화 13:05", captured!.Text);
+
+        svc.MarkWaiting();
+        Assert.Equal("Chrome 백그라운드 대기", captured!.Text);
+    }
 }

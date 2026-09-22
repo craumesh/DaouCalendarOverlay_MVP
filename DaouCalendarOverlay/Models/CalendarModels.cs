@@ -213,5 +213,12 @@ public sealed class CalendarDescriptor
 public sealed class CalendarCache
 {
     public DateTimeOffset LastUpdated { get; set; }
+
+    /// <summary>이 캐시가 담고 있는 조회 범위의 시작(<see cref="CalendarGrid.GetVisibleRange"/> 결과). 옛 캐시에는 없어 null이다.</summary>
+    public DateTimeOffset? RangeFrom { get; set; }
+
+    /// <summary>이 캐시가 담고 있는 조회 범위의 끝. 옛 캐시에는 없어 null이다.</summary>
+    public DateTimeOffset? RangeTo { get; set; }
+
     public List<DaouCalendarEvent> Events { get; set; } = new();
 }
