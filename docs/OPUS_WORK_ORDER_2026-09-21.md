@@ -142,11 +142,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 월 이동 직후 이전 범위 응답이 UI를 덮지 않음(테스트로 `CalendarBridgeServer` 상태 전이 검증). 다음 달로 이동 후 재시작해도 이번 달 일정이 캐시로 보임.
 - 적용 메모(2026-09-22): HTTP 완료 후 범위 재확인으로 stale 동기화 결과 폐기 + 재발행; 캐시에 조회 범위 저장 + 기동 시 '캐시(범위 밖)' 표기 수동 확인 3건 대기
 
-#### T1.7 종료 지연 제거와 postResult 즉시 응답 — P1
+#### [부분] T1.7 종료 지연 제거와 postResult 즉시 응답 — P1
 - 근거: `client.SendAsync(:264)`에 취소 토큰 없음. `DisposeAsync(:390-398)`가 `_acceptLoop`를 기다리므로 HTTP 진행 중 종료하면 트레이 아이콘이 사라진 뒤 최대 30초 프로세스 잔류(`App.xaml.cs:384-394`). 또 `HandlePipeClientAsync(:106-130)`가 HTTP 완료까지 응답을 미루고 `maxNumberOfServerInstances: 1`이라 그 사이 `getConfig`는 2.5초 timeout(`NativeMessagingHost.cs:41`)으로 실패해 heartbeat가 끊긴다. `_leaseUntil`은 postResult 도착 시 해제(:220-221)되고 `_nextAttemptAt`은 과거라, 처리가 직렬이 아니었다면 중복 fetch가 발생하는 구조.
 - 검증 상태: 코드 확인.
 - 지시: (1) `_cts.Token`을 `SendAsync`에 전달. (2) `postResult`는 requestId 검증 후 즉시 ok 응답, HTTP는 백그라운드 Task로. (3) lease/`_activeRequestId` 해제를 HTTP 완료 시점으로 옮겨 중복 fetch 차단. (4) 파이프 서버 인스턴스를 2~4로 늘리거나 accept 루프를 요청 처리와 분리.
 - 완료 기준: 동기화 중 "종료" 클릭 시 1초 내 프로세스 종료. 30초짜리 가짜 HTTP 응답(테스트 서버)에서 `getConfig`가 실패하지 않음.
+- 적용 메모(2026-09-22): CalendarBridgeServer: postResult 즉시 ok 응답 + HTTP 백그라운드화 + lease 해제 시점 이동 + 취소 토큰 전달; 파이프 accept 루프와 요청 처리 분리(인스턴스 4) + 파이프 동시성 테스트 + 문서 §10.2/§10.3 정정 수동 확인 6건 대기
 
 #### T1.8 자정/월 전환 갱신 — P1
 - 근거: `MainViewModel.cs:32`의 `_displayMonth`는 생성 시 고정, `IsToday`(:185)는 `BuildCalendar` 시점 계산. `MainWindow.xaml.cs:543-561` 시계 타이머는 텍스트만 갱신. `App._refreshTimer(:297-306)`는 `RefreshAsync(false)`→`UpdateRequest(force:false)`가 범위/설정 불변이면 no-op이라 실질적으로 죽은 타이머(주기 동기화는 `RecordSuccess(:334-341)`의 `_nextAttemptAt`이 결정).

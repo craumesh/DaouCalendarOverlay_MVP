@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Pipes;
@@ -11,9 +12,14 @@ namespace DaouCalendarOverlay.Services;
 
 public sealed class CalendarBridgeServer : IAsyncDisposable
 {
+    /// <summary>결과를 받아 DaouOffice 조회를 진행하는 동안 유지하는 lease 길이(초).</summary>
+    private const int ResultLeaseSeconds = 60;
+
     private readonly object _gate = new();
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
+    private readonly string _pipeName;
     private Task? _acceptLoop;
 
     private AppSettings _settings = new();
@@ -22,6 +28,7 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     private DateTimeOffset _nextAttemptAt;
     private DateTimeOffset _leaseUntil;
     private string _activeRequestId = "";
+    private string _processingRequestId = "";
     private bool _forceRefresh = true;
     private int _consecutiveFailures;
 
@@ -34,6 +41,16 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
 
     /// <summary>테스트가 HTTP 전송을 대체하기 위한 확장점. null이면 기본 HttpClientHandler를 만든다.</summary>
     public Func<HttpMessageHandler>? HttpMessageHandlerFactory { get; set; }
+
+    /// <param name="httpHandlerFactory">HTTP 전송을 대체할 핸들러 팩터리(테스트용). null이면 기본 핸들러를 만든다.</param>
+    /// <param name="pipeName">파이프 이름 재정의(테스트용). null이면 운영 파이프 이름을 쓴다.</param>
+    public CalendarBridgeServer(Func<HttpMessageHandler>? httpHandlerFactory = null, string? pipeName = null)
+    {
+        if (httpHandlerFactory is not null)
+            HttpMessageHandlerFactory = httpHandlerFactory;
+
+        _pipeName = string.IsNullOrWhiteSpace(pipeName) ? NativeBridgeProtocol.PipeName : pipeName!;
+    }
 
     public void Start()
     {
@@ -81,21 +98,34 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 파이프 서버 인스턴스 수. accept 루프가 요청 처리와 분리돼 있어도 처리 중인 연결이 인스턴스를 차지하므로,
+    /// 조회가 길어지는 동안에도 <c>getConfig</c>/<c>ping</c>이 새 연결을 잡을 수 있게 여유를 둔다.
+    /// </summary>
+    private const int PipeServerInstances = 4;
+
+    /// <summary>
+    /// 연결을 받는 일만 한다. 요청 처리는 별도 Task로 넘기므로 한 요청이 길어져도 다음 연결이 막히지 않는다.
+    /// </summary>
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            NamedPipeServerStream? pipe = null;
             try
             {
-                await using var pipe = new NamedPipeServerStream(
-                    NativeBridgeProtocol.PipeName,
+                pipe = new NamedPipeServerStream(
+                    _pipeName,
                     PipeDirection.InOut,
-                    maxNumberOfServerInstances: 1,
+                    PipeServerInstances,
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
                 await pipe.WaitForConnectionAsync(cancellationToken);
-                await HandlePipeClientAsync(pipe, cancellationToken);
+
+                var accepted = pipe;
+                pipe = null;                      // 소유권 이전: 처리 Task가 dispose 한다
+                Track(Task.Run(() => ServeClientAsync(accepted, cancellationToken), CancellationToken.None));
             }
             catch (OperationCanceledException)
             {
@@ -103,11 +133,36 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             }
             catch (Exception ex)
             {
+                // 인스턴스가 모두 사용 중이면 생성이 실패한다. 잠깐 쉬었다가 다시 시도한다.
                 LogService.Warn("bridge.pipe", "파이프 accept 실패", ex);
                 if (cancellationToken.IsCancellationRequested)
                     break;
-                await Task.Delay(250, cancellationToken);
+
+                try { await Task.Delay(250, cancellationToken); }
+                catch (OperationCanceledException) { break; }
             }
+            finally
+            {
+                if (pipe is not null)
+                    await pipe.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>연결 하나를 끝까지 처리하고 반드시 파이프를 정리한다. 처리 실패가 accept 루프를 멈추지 않게 한다.</summary>
+    private async Task ServeClientAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await HandlePipeClientAsync(pipe, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("bridge.pipe", "파이프 요청 처리 실패", ex);
+        }
+        finally
+        {
+            await pipe.DisposeAsync();
         }
     }
 
@@ -142,17 +197,22 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         await NativeBridgeProtocol.WriteFrameAsync(pipe, payload, cancellationToken);
     }
 
-    public async Task<NativeBridgeResponse> HandleRequestAsync(NativeBridgeRequest? request)
+    /// <summary>파이프 요청 처리 진입점. 테스트에서 직접 호출한다.</summary>
+    /// <remarks>
+    /// 모든 분기가 즉시 반환한다. <c>postResult</c>의 DaouOffice 조회는 백그라운드 Task로 넘어가므로
+    /// 파이프 응답이 HTTP 왕복에 묶이지 않는다.
+    /// </remarks>
+    public Task<NativeBridgeResponse> HandleRequestAsync(NativeBridgeRequest? request)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Type))
-            return NativeBridgeResponse.Fail("Invalid native bridge request.");
+            return Task.FromResult(NativeBridgeResponse.Fail("Invalid native bridge request."));
 
         BridgeHeartbeat?.Invoke(this, EventArgs.Empty);
 
         switch (request.Type)
         {
             case "ping":
-                return NativeBridgeResponse.Success();
+                return Task.FromResult(NativeBridgeResponse.Success());
 
             case "getConfig":
             {
@@ -176,17 +236,16 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                     ConfigurationInvalid?.Invoke(this, config.NoFetchReason!);
                 }
 
-                return NativeBridgeResponse.Success(config);
+                return Task.FromResult(NativeBridgeResponse.Success(config));
             }
 
             case "postResult":
                 if (request.Result is null)
-                    return NativeBridgeResponse.Fail("Missing bridge result payload.");
-                await ProcessResultAsync(request.Result);
-                return NativeBridgeResponse.Success();
+                    return Task.FromResult(NativeBridgeResponse.Fail("Missing bridge result payload."));
+                return Task.FromResult(AcceptResult(request.Result));
 
             default:
-                return NativeBridgeResponse.Fail($"Unknown native bridge request: {request.Type}");
+                return Task.FromResult(NativeBridgeResponse.Fail($"Unknown native bridge request: {request.Type}"));
         }
     }
 
@@ -234,8 +293,13 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         }
     }
 
-    private async Task ProcessResultAsync(BridgeResultPayload result)
+    /// <summary>
+    /// 확장이 보낸 결과를 받아들이고 <b>즉시</b> 응답한다. 실제 DaouOffice 조회는 백그라운드 Task에서 수행한다.
+    /// lease는 여기서 갱신만 하고 <c>_activeRequestId</c>는 유지하므로 조회 중에는 새 fetch가 발행되지 않는다.
+    /// </summary>
+    private NativeBridgeResponse AcceptResult(BridgeResultPayload result)
     {
+        string requestId;
         AppSettings settingsSnapshot;
         DateTimeOffset fromSnapshot;
         DateTimeOffset toSnapshot;
@@ -245,16 +309,91 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(result.RequestId) ||
                 !string.Equals(result.RequestId, _activeRequestId, StringComparison.Ordinal))
             {
-                return;
+                LogService.Warn("bridge", $"postResult 무시: requestId 불일치 (cookies={result.CookieCount}, source={result.CookieSource ?? "none"})");
+                return NativeBridgeResponse.Success();
             }
 
+            if (string.Equals(_processingRequestId, result.RequestId, StringComparison.Ordinal))
+            {
+                LogService.Warn("bridge", "postResult 무시: 같은 requestId가 이미 처리 중");
+                return NativeBridgeResponse.Success();
+            }
+
+            requestId = _activeRequestId;
+            _processingRequestId = requestId;
             settingsSnapshot = _settings.Clone();
             fromSnapshot = _from;
             toSnapshot = _to;
+            _leaseUntil = DateTimeOffset.Now.AddSeconds(ResultLeaseSeconds);
+        }
+
+        var token = _cts.Token;
+        var task = Task.Run(
+            () => RunResultFetchAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
+            CancellationToken.None);
+        Track(task);
+
+        return NativeBridgeResponse.Success();
+    }
+
+    /// <summary>백그라운드 조회 래퍼. 성공/실패/취소 어느 쪽이든 마지막에 lease와 활성 요청을 해제한다.</summary>
+    private async Task RunResultFetchAsync(BridgeResultPayload result, string requestId, AppSettings settingsSnapshot,
+        DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ProcessResultAsync(result, settingsSnapshot, fromSnapshot, toSnapshot, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("bridge", "postResult 처리 실패", ex);
+        }
+        finally
+        {
+            ReleaseActiveRequest(requestId);
+        }
+    }
+
+    /// <summary>
+    /// 조회가 끝난 요청의 lease를 해제한다.
+    /// 그 사이 <c>UpdateRequest</c>/<c>ForceRefresh</c>/<c>DiscardIfRangeChanged</c>가 새 요청을 만들었으면 건드리지 않는다.
+    /// </summary>
+    private void ReleaseActiveRequest(string requestId)
+    {
+        lock (_gate)
+        {
+            if (string.Equals(_processingRequestId, requestId, StringComparison.Ordinal))
+                _processingRequestId = "";
+
+            if (!string.Equals(_activeRequestId, requestId, StringComparison.Ordinal))
+                return;
+
             _activeRequestId = "";
             _leaseUntil = DateTimeOffset.MinValue;
         }
+    }
 
+    /// <summary>종료 시 짧게 기다릴 수 있도록 백그라운드 Task를 추적한다.</summary>
+    private void Track(Task task)
+    {
+        _backgroundTasks[task] = 0;
+        _ = task.ContinueWith(
+            t => _backgroundTasks.TryRemove(t, out _),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private static HttpMessageHandler CreateDefaultHandler() => new HttpClientHandler
+    {
+        UseCookies = false,
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.All
+    };
+
+    private async Task ProcessResultAsync(BridgeResultPayload result, AppSettings settingsSnapshot,
+        DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot, CancellationToken cancellationToken)
+    {
         LogService.Info("bridge.result", BridgeLogSummary.DescribeResult(result));
 
         if (string.IsNullOrWhiteSpace(result.CookieHeader) || result.CookieCount <= 0)
@@ -277,13 +416,8 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         try
         {
             var requestUri = BuildCalendarUri(settingsSnapshot, fromSnapshot, toSnapshot);
-            using var handler = HttpMessageHandlerFactory?.Invoke() ?? new HttpClientHandler
-            {
-                UseCookies = false,
-                AllowAutoRedirect = false,
-                AutomaticDecompression = DecompressionMethods.All
-            };
-            using var client = new HttpClient(handler)
+            using var handler = HttpMessageHandlerFactory?.Invoke() ?? CreateDefaultHandler();
+            using var client = new HttpClient(handler, disposeHandler: false)
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
@@ -297,8 +431,8 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             if (Uri.TryCreate(settingsSnapshot.BaseUrl, UriKind.Absolute, out var baseUri))
                 request.Headers.Referrer = new Uri(baseUri, "/gw/app/calendar");
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-            var body = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
             var location = response.Headers.Location?.ToString() ?? "";
 
@@ -363,6 +497,12 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
         }
         catch (TaskCanceledException ex)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                LogService.Info("bridge", "종료 중 HTTP 요청 취소");
+                return;
+            }
+
             LogService.Warn("bridge.http", "DaouOffice 요청 취소/시간 초과", ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             var message = ex.InnerException is TimeoutException ? "DaouOffice 응답 시간 초과" : "네트워크 요청이 취소되었습니다.";
@@ -451,14 +591,29 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     private static string FormatDate(DateTimeOffset value) =>
         value.ToString("yyyy-MM-dd'T'HH:mm:ss.fffzzz", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// 진행 중인 HTTP를 취소하고 짧은 경계(최대 700ms)까지만 기다린 뒤 돌아온다.
+    /// 종료 클릭이 백그라운드 조회에 묶이지 않게 하기 위한 것이므로 무한 대기를 하지 않는다.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
+
         if (_acceptLoop is not null)
         {
-            try { await _acceptLoop; } catch { }
+            try { await _acceptLoop.WaitAsync(TimeSpan.FromMilliseconds(500)); }
+            catch (Exception ex) { LogService.Warn("bridge", "accept 루프 종료 대기 초과/오류", ex); }
         }
-        _cts.Dispose();
+
+        var pending = _backgroundTasks.Keys.ToArray();
+        if (pending.Length > 0)
+        {
+            try { await Task.WhenAll(pending).WaitAsync(TimeSpan.FromMilliseconds(200)); }
+            catch (Exception ex) { LogService.Warn("bridge", "백그라운드 작업 종료 대기 초과/오류", ex); }
+        }
+
+        try { _cts.Dispose(); }
+        catch (Exception ex) { LogService.Warn("bridge", "CTS dispose 실패", ex); }
     }
 }
 

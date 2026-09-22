@@ -288,6 +288,7 @@ git push
 4. Native Messaging 연결 상태 확인
 5. 네트워크 및 다우오피스 서비스 상태 확인
 6. 설정창의 DaouOffice 주소가 `https://회사이름.daouoffice.com` 형식인지 확인
+7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
 
 ## 라이선스
 

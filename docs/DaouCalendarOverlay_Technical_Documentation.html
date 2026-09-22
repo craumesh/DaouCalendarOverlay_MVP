@@ -456,21 +456,7 @@ public sealed class NativeMessagingRegistrationService
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;DaouOffice 세션 브리지 실패: {ex.Message}&quot;, BridgeFailureKind.General, retryAt));
         }</code></pre><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않는다. 조회 범위 내 occurrence가 API 결과의 개별 event로 내려오는 동작을 전제로 <code class="inline">startTime/endTime</code>을 그대로 표시한다. 음력 휴일도 서버 계산 결과를 신뢰한다.</p><p>같은 일정이 여러 캘린더에 공유되면 API는 동일한 <code class="inline">id</code>를 캘린더 수만큼 내려보낸다(실데이터 37건 중 5건). UI는 <code class="inline">Models/EventDeduplicator.cs</code>에서 <code class="inline">id</code> 기준으로 이를 1건으로 합치고, 소속 캘린더 ID/이름을 모두 <code class="inline">CalendarIds</code>/<code class="inline">CalendarNames</code>에 보존한다. 캐시 파일에는 병합 전 원본 이벤트를 그대로 저장하며(역호환), 병합은 캐시 로드 직후 화면에 표시하기 직전에 수행한다. 숨김 판정은 소속 캘린더가 모두 숨겨진 경우에만 적용되고, 하나라도 표시 중이면 일정은 계속 보인다.</p></section>
-<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다.</p></div><div class="card"><h3>앱 쪽</h3><p>사용자 설정의 <strong>N분(기본 5분)</strong>. 실제 fetch가 필요한 시점을 bridge가 결정한다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. GUI의 <code class="inline">ShouldFetch</code>가 false면 worker는 종료한다.</p><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease를 만든다. 같은 lease 동안 새 fetch를 발행하지 않고 결과도 현재 requestId와 일치할 때만 수용한다. <code class="inline">shouldFetch</code>가 false인 모든 응답에는 사유(<code class="inline">noFetchReason</code>: <code class="inline">not_configured</code>, <code class="inline">invalid_base_url</code>, <code class="inline">range_not_ready</code>, <code class="inline">lease_active</code>, <code class="inline">backoff</code>, <code class="inline">not_due</code>)가 함께 내려가고, 설정 문제(<code class="inline">not_configured</code>/<code class="inline">invalid_base_url</code>)는 상태 표시에 <code class="inline">설정 오류: …</code>로 노출된다. BaseUrl 정책은 <code class="inline">Services/BaseUrlPolicy</code>(https + <code class="inline">*.daouoffice.com</code>, apex 제외) 한 곳에서만 판정하며 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 일치한다.</p><pre><code>                return NativeBridgeResponse.Success(config);
-            }
-
-            case &quot;postResult&quot;:
-                if (request.Result is null)
-                    return NativeBridgeResponse.Fail(&quot;Missing bridge result payload.&quot;);
-                await ProcessResultAsync(request.Result);
-                return NativeBridgeResponse.Success();
-
-            default:
-                return NativeBridgeResponse.Fail($&quot;Unknown native bridge request: {request.Type}&quot;);
-        }
-    }
-
-    private BridgeConfigResponse BuildConfig()
+<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다.</p></div><div class="card"><h3>앱 쪽</h3><p>사용자 설정의 <strong>N분(기본 5분)</strong>. 실제 fetch가 필요한 시점을 bridge가 결정한다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. GUI의 <code class="inline">ShouldFetch</code>가 false면 worker는 종료한다.</p><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease를 만든다. <code class="inline">postResult</code>는 받은 <code class="inline">requestId</code>가 현재 활성 요청과 같은지만 확인하고 <strong>즉시 ok로 응답</strong>하며, 실제 DaouOffice HTTP 조회는 백그라운드 Task에서 수행한다. 결과를 받아들인 시점에 lease를 60초로 갱신하고 <code class="inline">_activeRequestId</code>는 그대로 두므로, 조회가 끝나기 전에는 새 fetch가 발행되지 않는다. lease와 <code class="inline">_activeRequestId</code>는 HTTP가 끝난 시점(성공·실패·취소 모두)에 그 사이 다른 요청으로 교체되지 않았을 때만 해제된다. 같은 <code class="inline">requestId</code>로 <code class="inline">postResult</code>가 두 번 들어와도 HTTP 조회는 한 번만 나간다. 파이프 서버 인스턴스는 4개이고 accept 루프가 요청 처리와 분리돼 있어, 조회가 오래 걸려도 <code class="inline">getConfig</code>/<code class="inline">ping</code>은 native host의 2.5초 connect timeout 안에 응답한다. <code class="inline">shouldFetch</code>가 false인 모든 응답에는 사유(<code class="inline">noFetchReason</code>: <code class="inline">not_configured</code>, <code class="inline">invalid_base_url</code>, <code class="inline">range_not_ready</code>, <code class="inline">lease_active</code>, <code class="inline">backoff</code>, <code class="inline">not_due</code>)가 함께 내려가고, 설정 문제(<code class="inline">not_configured</code>/<code class="inline">invalid_base_url</code>)는 상태 표시에 <code class="inline">설정 오류: …</code>로 노출된다. BaseUrl 정책은 <code class="inline">Services/BaseUrlPolicy</code>(https + <code class="inline">*.daouoffice.com</code>, apex 제외) 한 곳에서만 판정하며 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 일치한다.</p><pre><code>    private BridgeConfigResponse BuildConfig()
     {
         lock (_gate)
         {
@@ -511,6 +497,60 @@ public sealed class NativeMessagingRegistrationService
                 IncludingAttendees = true,
                 CalendarIds = new List&lt;string&gt;(_settings.CalendarIds)
             };
+        }
+    }
+
+    private NativeBridgeResponse AcceptResult(BridgeResultPayload result)
+    {
+        string requestId;
+        AppSettings settingsSnapshot;
+        DateTimeOffset fromSnapshot;
+        DateTimeOffset toSnapshot;
+
+        lock (_gate)
+        {
+            if (string.IsNullOrWhiteSpace(result.RequestId) ||
+                !string.Equals(result.RequestId, _activeRequestId, StringComparison.Ordinal))
+            {
+                LogService.Warn(&quot;bridge&quot;, $&quot;postResult 무시: requestId 불일치 (cookies={result.CookieCount}, source={result.CookieSource ?? &quot;none&quot;})&quot;);
+                return NativeBridgeResponse.Success();
+            }
+
+            if (string.Equals(_processingRequestId, result.RequestId, StringComparison.Ordinal))
+            {
+                LogService.Warn(&quot;bridge&quot;, &quot;postResult 무시: 같은 requestId가 이미 처리 중&quot;);
+                return NativeBridgeResponse.Success();
+            }
+
+            requestId = _activeRequestId;
+            _processingRequestId = requestId;
+            settingsSnapshot = _settings.Clone();
+            fromSnapshot = _from;
+            toSnapshot = _to;
+            _leaseUntil = DateTimeOffset.Now.AddSeconds(ResultLeaseSeconds);
+        }
+
+        var token = _cts.Token;
+        var task = Task.Run(
+            () =&gt; RunResultFetchAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
+            CancellationToken.None);
+        Track(task);
+
+        return NativeBridgeResponse.Success();
+    }
+
+    private void ReleaseActiveRequest(string requestId)
+    {
+        lock (_gate)
+        {
+            if (string.Equals(_processingRequestId, requestId, StringComparison.Ordinal))
+                _processingRequestId = &quot;&quot;;
+
+            if (!string.Equals(_activeRequestId, requestId, StringComparison.Ordinal))
+                return;
+
+            _activeRequestId = &quot;&quot;;
+            _leaseUntil = DateTimeOffset.MinValue;
         }
     }</code></pre><h3>10.3 backoff</h3><p>인증 실패는 1분 뒤 재시도한다. 일반 네트워크/API 실패는 30초 → 60초 → 120초 → 240초 → 480초 수준으로 증가한다. 성공하면 실패 카운터를 초기화하고 refresh interval 기준으로 다음 due를 잡는다. 인증 실패도 <code class="inline">_consecutiveFailures</code>를 함께 증가시키며, 일반 실패 지연의 실제 상한은 480초다(코드에 적힌 600초 상한은 지수 계산상 도달하지 않는다).</p><pre><code>    private void RecordSuccess(int refreshMinutes)
     {
