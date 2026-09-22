@@ -11,7 +11,8 @@ public enum OverlaySyncState
     AuthenticationRequired,
     NetworkError,
     ExtensionError,
-    GeneralError
+    GeneralError,
+    ConfigurationInvalid
 }
 
 public sealed class SyncStatusChangedEventArgs : EventArgs
@@ -27,6 +28,7 @@ public sealed class SyncStatusService
     private DateTimeOffset _lastHeartbeat;
     private DateTimeOffset _lastSuccess;
     private OverlaySyncState _state = OverlaySyncState.Starting;
+    private string _configurationInvalidReason = "";
 
     public event EventHandler<SyncStatusChangedEventArgs>? StatusChanged;
 
@@ -67,6 +69,23 @@ public sealed class SyncStatusService
 
     public void MarkExtensionError(string message) => Publish(OverlaySyncState.ExtensionError, message, true);
 
+    /// <summary>
+    /// BaseUrl·캘린더 ID 등 설정 문제로 동기화가 불가능할 때의 상태.
+    /// 확장이 30초마다 같은 사유를 다시 알려오므로 동일 사유의 재발행은 억제한다.
+    /// </summary>
+    public void MarkConfigurationInvalid(string reason)
+    {
+        lock (_gate)
+        {
+            if (_state == OverlaySyncState.ConfigurationInvalid &&
+                string.Equals(_configurationInvalidReason, reason, StringComparison.Ordinal))
+                return;
+            _configurationInvalidReason = reason;
+        }
+
+        Publish(OverlaySyncState.ConfigurationInvalid, $"설정 오류: {reason}", true);
+    }
+
     public void MarkGeneralError(string message, DateTimeOffset? retryAt = null)
     {
         var suffix = retryAt is DateTimeOffset retry ? $" · 재시도 {retry:HH:mm}" : "";
@@ -90,7 +109,7 @@ public sealed class SyncStatusService
             state = _state;
         }
 
-        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ExtensionError)
+        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ExtensionError or OverlaySyncState.ConfigurationInvalid)
             return;
 
         var now = DateTimeOffset.Now;
@@ -104,7 +123,11 @@ public sealed class SyncStatusService
     private void Publish(OverlaySyncState state, string text, bool isError)
     {
         lock (_gate)
+        {
             _state = state;
+            if (state != OverlaySyncState.ConfigurationInvalid)
+                _configurationInvalidReason = "";
+        }
 
         StatusChanged?.Invoke(this, new SyncStatusChangedEventArgs
         {

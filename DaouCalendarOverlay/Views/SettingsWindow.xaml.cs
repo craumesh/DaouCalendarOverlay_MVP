@@ -14,7 +14,7 @@ public partial class SettingsWindow : Window
 
     public AppSettings Result => _working;
 
-    public SettingsWindow(AppSettings source, bool firstRun)
+    public SettingsWindow(AppSettings source, bool firstRun, string? validationNotice = null)
     {
         InitializeComponent();
         _working = source.Clone();
@@ -26,6 +26,12 @@ public partial class SettingsWindow : Window
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
+
+        if (!string.IsNullOrWhiteSpace(validationNotice))
+        {
+            ValidationNoticeText.Text = validationNotice;
+            ValidationNoticeText.Visibility = Visibility.Visible;
+        }
     }
 
     private void Extract_Click(object sender, RoutedEventArgs e)
@@ -46,17 +52,24 @@ public partial class SettingsWindow : Window
 
         BaseUrlTextBox.Text = parsed.BaseUrl;
         CalendarIdsTextBox.Text = string.Join(Environment.NewLine, parsed.CalendarIds);
+
+        var extractedValidation = BaseUrlPolicy.Validate(parsed.BaseUrl);
+        if (!extractedValidation.IsValid)
+            WpfMessageBox.Show(this, extractedValidation.Reason, "주소 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        var baseUrl = BaseUrlTextBox.Text.Trim().TrimEnd('/');
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        var validation = BaseUrlPolicy.Validate(BaseUrlTextBox.Text);
+        if (!validation.IsValid)
         {
-            WpfMessageBox.Show(this, "DaouOffice 주소를 https://... 형식으로 입력해 주세요.", "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            WpfMessageBox.Show(this, validation.Reason, "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            BaseUrlTextBox.Focus();
+            BaseUrlTextBox.SelectAll();
             return;
         }
+
+        var baseUrl = validation.NormalizedBaseUrl!;
 
         var ids = CalendarIdsTextBox.Text
             .Split(new[] { '\r', '\n', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)

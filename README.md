@@ -156,6 +156,8 @@ powershell -ExecutionPolicy Bypass -File .\publish.ps1
 5. `DaouCalendarOverlay.exe`를 실행합니다.
 6. 애플리케이션에서 캘린더 동기화 상태를 확인합니다.
 
+DaouOffice 주소는 `https://회사이름.daouoffice.com` 형식만 허용합니다. `http://`, 다른 도메인, `daouoffice.com`(회사 이름 없는 주소)은 설정창에서 거부되며, 기존 설정에 이런 주소가 들어 있으면 앱 시작 시 설정창이 열리고 거부 사유가 표시됩니다.
+
 Chrome Extension ID 및 Native Messaging 설정은 프로젝트의 Extension/Native Messaging 관련 파일을 기준으로 구성되어 있습니다.
 
 ## 로컬 설정 및 인증 정보
@@ -277,6 +279,7 @@ git push
 3. Chrome Extension이 정상적으로 동작하는지 확인
 4. Native Messaging 연결 상태 확인
 5. 네트워크 및 다우오피스 서비스 상태 확인
+6. 설정창의 DaouOffice 주소가 `https://회사이름.daouoffice.com` 형식인지 확인
 
 ## 라이선스
 

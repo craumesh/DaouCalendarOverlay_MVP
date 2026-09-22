@@ -72,7 +72,7 @@ public partial class App : WpfApplication
 
                 if (!_settings.IsConfigured)
                 {
-                    var setup = new SettingsWindow(_settings, firstRun: true);
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
                     if (setup.ShowDialog() != true)
                     {
                         await ExitApplicationAsync();
@@ -98,6 +98,7 @@ public partial class App : WpfApplication
                 _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
                 _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
                 _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
+                _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
                 _bridgeServer.Start();
 
                 ConfigureRefreshTimer();
@@ -206,6 +207,10 @@ public partial class App : WpfApplication
 
     private void BridgeServer_FetchIssued(object? sender, EventArgs e) =>
         _syncStatus.MarkSyncing();
+
+    // 상태 텍스트의 UI 마샬링은 SyncStatus_StatusChanged가 처리하므로 여기서 Dispatcher를 쓰지 않는다.
+    private void BridgeServer_ConfigurationInvalid(object? sender, string reason) =>
+        _syncStatus.MarkConfigurationInvalid(NoFetchReasons.Describe(reason));
 
     private void BridgeServer_SyncCompleted(object? sender, BridgeSyncEventArgs e)
     {
@@ -520,6 +525,7 @@ public partial class App : WpfApplication
         _bridgeServer.SyncCompleted -= BridgeServer_SyncCompleted;
         _bridgeServer.BridgeHeartbeat -= BridgeServer_BridgeHeartbeat;
         _bridgeServer.FetchIssued -= BridgeServer_FetchIssued;
+        _bridgeServer.ConfigurationInvalid -= BridgeServer_ConfigurationInvalid;
         await _bridgeServer.DisposeAsync();
 
         if (_singleInstance is not null)

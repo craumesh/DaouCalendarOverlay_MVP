@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.Models;
 
@@ -17,8 +18,7 @@ public sealed class AppSettings
 
     [JsonIgnore]
     public bool IsConfigured =>
-        Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) &&
-        (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) &&
+        BaseUrlPolicy.Validate(BaseUrl).IsValid &&
         CalendarIds.Count > 0;
 
     public AppSettings Clone() => new()

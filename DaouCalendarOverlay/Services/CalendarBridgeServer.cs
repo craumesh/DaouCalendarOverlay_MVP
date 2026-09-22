@@ -29,6 +29,9 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     public event EventHandler? BridgeHeartbeat;
     public event EventHandler? FetchIssued;
 
+    /// <summary>설정 문제로 fetch를 내보내지 못했을 때의 사유 코드. lock 밖에서만 발생한다.</summary>
+    public event EventHandler<string>? ConfigurationInvalid;
+
     public void Start()
     {
         if (_acceptLoop is not null)
@@ -164,6 +167,11 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                     LogService.Info("bridge", $"fetch 발행 requestId={config.RequestId}");
                     FetchIssued?.Invoke(this, EventArgs.Empty);
                 }
+                else if (NoFetchReasons.IsConfigurationProblem(config.NoFetchReason))
+                {
+                    LogService.Warn("bridge", $"getConfig noFetch reason={config.NoFetchReason}");
+                    ConfigurationInvalid?.Invoke(this, config.NoFetchReason!);
+                }
 
                 return NativeBridgeResponse.Success(config);
             }
@@ -183,23 +191,27 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (!_settings.IsConfigured || _from == default || _to == default)
-                return BridgeConfigResponse.NoFetch();
+            if (!_settings.IsConfigured)
+                return BridgeConfigResponse.NoFetch(
+                    BaseUrlPolicy.Validate(_settings.BaseUrl).IsValid
+                        ? NoFetchReasons.NotConfigured
+                        : NoFetchReasons.InvalidBaseUrl);
 
-            if (!Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out var baseUri) ||
-                !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-                !(string.Equals(baseUri.Host, "daouoffice.com", StringComparison.OrdinalIgnoreCase) ||
-                  baseUri.Host.EndsWith(".daouoffice.com", StringComparison.OrdinalIgnoreCase)))
-            {
-                return BridgeConfigResponse.NoFetch();
-            }
+            if (_from == default || _to == default)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.RangeNotReady);
+
+            var validation = BaseUrlPolicy.Validate(_settings.BaseUrl);
+            if (!validation.IsValid)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.InvalidBaseUrl);
 
             var now = DateTimeOffset.Now;
             var leaseActive = !string.IsNullOrEmpty(_activeRequestId) && now < _leaseUntil;
-            var due = _forceRefresh || _nextAttemptAt == default || now >= _nextAttemptAt;
+            if (leaseActive)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.LeaseActive);
 
-            if (!due || leaseActive)
-                return BridgeConfigResponse.NoFetch();
+            var due = _forceRefresh || _nextAttemptAt == default || now >= _nextAttemptAt;
+            if (!due)
+                return BridgeConfigResponse.NoFetch(_consecutiveFailures > 0 ? NoFetchReasons.Backoff : NoFetchReasons.NotDue);
 
             _activeRequestId = Guid.NewGuid().ToString("N");
             _leaseUntil = now.AddSeconds(45);
@@ -210,7 +222,7 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                 Ok = true,
                 ShouldFetch = true,
                 RequestId = _activeRequestId,
-                BaseUrl = baseUri.GetLeftPart(UriPartial.Authority),
+                BaseUrl = validation.NormalizedBaseUrl!,
                 TimeMin = FormatDate(_from),
                 TimeMax = FormatDate(_to),
                 IncludingAttendees = true,
@@ -433,7 +445,12 @@ public sealed class BridgeConfigResponse
     public bool IncludingAttendees { get; init; }
     public List<string> CalendarIds { get; init; } = new();
 
-    public static BridgeConfigResponse NoFetch() => new() { Ok = true, ShouldFetch = false };
+    /// <summary><see cref="ShouldFetch"/>가 false인 모든 응답에 실리는 사유 코드(<see cref="NoFetchReasons"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? NoFetchReason { get; init; }
+
+    public static BridgeConfigResponse NoFetch(string reason) =>
+        new() { Ok = true, ShouldFetch = false, NoFetchReason = reason };
 }
 
 public sealed class BridgeResultPayload

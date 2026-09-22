@@ -114,11 +114,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 동시 저장 100회 테스트 통과. settings.json에 `IsConfigured` 키가 사라짐(기존 파일의 키는 무시됨을 확인).
 - 적용 메모(2026-09-22): 원자적 JSON 저장기(AtomicJsonFileWriter) 도입 — SettingsService/CacheService 저장 직렬화 + IsConfigured 직렬화 제외; 저장 실패 결과 관찰 및 상태 텍스트 노출 + README·기술문서 §13/§17 갱신 수동 확인 4건 대기
 
-#### T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 — P1 (Q1)
+#### [부분] T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 — P1 (Q1)
 - 근거: `AppSettings.cs:16-19`와 `SettingsWindow.xaml.cs:63-69`는 http/https + 임의 호스트 허용. `CalendarBridgeServer.cs:167-176`(`BuildConfig`)는 https + `daouoffice.com`/서브도메인만 통과, 아니면 `NoFetch()`를 상태 변화 없이 반환 → "Chrome 브리지 연결됨 · 동기화 대기"에서 영원히 멈춤. 확장 `manifest.json:15-17` `host_permissions`는 `https://*.daouoffice.com/*`이라 apex `daouoffice.com`은 포함하지 않지만 BuildConfig는 apex를 허용(불일치).
 - 검증 상태: 코드 확인.
 - 지시(기본안 Q1-a): 검증 규칙을 한 곳(`AppSettings.Validate()` 또는 `Services/BaseUrlPolicy.cs`)으로 모으고 설정창·IsConfigured·BuildConfig가 모두 그것을 쓴다. 규칙: https 필수, 호스트는 `*.daouoffice.com`(apex 제외). 설정창은 위반 시 구체적 문구로 거부. BuildConfig가 NoFetch를 돌려주는 모든 경우에 사유(`NoFetchReason`)를 응답에 포함하고 `SyncStatusService`에 새 상태(`ConfigurationInvalid`)로 표시.
 - 완료 기준: http:// 저장 시도 → 거부 메시지. 기존 settings.json에 http://가 있으면 시작 시 설정창이 열리며 사유 표시. 테스트: 정책 함수 단위 테스트 6케이스 이상.
+- 적용 메모(2026-09-22): BaseUrlPolicy 도입 및 설정창·IsConfigured 검증 통일; BuildConfig NoFetch 사유 응답과 ConfigurationInvalid 상태 노출; T1.3 문서 반영(§10.2·§10.4·§17·§18, README) 수동 확인 6건 대기
 
 #### T1.4 중복 이벤트 처리 — P1 (Q2)
 - 근거: 실데이터 37건 중 5건이 같은 `id`로 두 `calendarId`에 걸쳐 중복. `MainViewModel.SetEvents(:96-100)`/`ApplyFilter(:201-211)`에 id 기준 dedupe 없음 → 날짜 셀 "3개 이상" 규칙이 조기 발동하고 목록 카드에 같은 일정이 두 번.

@@ -17,7 +17,11 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="DaouOffice 연결" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,14"/>
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <TextBlock Text="DaouOffice 연결" FontSize="18" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ValidationNoticeText" Visibility="Collapsed" Foreground="#FFC0392B"
+                       TextWrapping="Wrap" Margin="0,8,0,0"/>
+        </StackPanel>
 
         <Grid Grid.Row="1" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
@@ -25,7 +29,7 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="DaouOffice 주소" VerticalAlignment="Center"/>
-            <TextBox x:Name="BaseUrlTextBox" Grid.Column="1" Padding="7" ToolTip="예: https://company.daouoffice.com"/>
+            <TextBox x:Name="BaseUrlTextBox" Grid.Column="1" Padding="7" ToolTip="예: https://회사이름.daouoffice.com (https 와 *.daouoffice.com 주소만 사용할 수 있습니다)"/>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,0,0,12">
