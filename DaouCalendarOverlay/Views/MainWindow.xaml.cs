@@ -282,7 +282,7 @@ public partial class MainWindow : Window
         DetailTimeText.Text = calendarEvent.IsAllDay
             ? $"{calendarEvent.StartTime:yyyy년 M월 d일} · 종일"
             : $"{calendarEvent.StartTime:yyyy년 M월 d일 HH:mm} ~ {calendarEvent.EndTime:HH:mm}";
-        DetailCalendarText.Text = calendarEvent.CalendarName;
+        DetailCalendarText.Text = calendarEvent.CalendarDisplayName;
         DetailOwnerText.Text = calendarEvent.OwnerOrCreatorDisplay;
         DetailAudienceText.Text = calendarEvent.AttendeeDisplay;
         DetailVisibilityText.Text = calendarEvent.VisibilityDisplay;

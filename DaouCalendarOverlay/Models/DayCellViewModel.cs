@@ -90,7 +90,7 @@ public sealed class EventChipViewModel
     public string TimeText => Event.IsAllDay
         ? "종일"
         : $"{Event.StartTime:HH:mm} - {Event.EndTime:HH:mm}";
-    public string CalendarName => Event.CalendarName;
+    public string CalendarName => Event.CalendarDisplayName;
     public string OwnerText => $"소유/작성 · {Event.OwnerOrCreatorDisplay}";
     public string AudienceText => $"공유/참석 · {Event.AttendeeDisplay}";
     public string VisibilityText => $"공개범위 · {Event.VisibilityDisplay}";

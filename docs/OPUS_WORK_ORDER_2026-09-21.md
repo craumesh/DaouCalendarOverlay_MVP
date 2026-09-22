@@ -121,11 +121,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: http:// 저장 시도 → 거부 메시지. 기존 settings.json에 http://가 있으면 시작 시 설정창이 열리며 사유 표시. 테스트: 정책 함수 단위 테스트 6케이스 이상.
 - 적용 메모(2026-09-22): BaseUrlPolicy 도입 및 설정창·IsConfigured 검증 통일; BuildConfig NoFetch 사유 응답과 ConfigurationInvalid 상태 노출; T1.3 문서 반영(§10.2·§10.4·§17·§18, README) 수동 확인 6건 대기
 
-#### T1.4 중복 이벤트 처리 — P1 (Q2)
+#### [부분] T1.4 중복 이벤트 처리 — P1 (Q2)
 - 근거: 실데이터 37건 중 5건이 같은 `id`로 두 `calendarId`에 걸쳐 중복. `MainViewModel.SetEvents(:96-100)`/`ApplyFilter(:201-211)`에 id 기준 dedupe 없음 → 날짜 셀 "3개 이상" 규칙이 조기 발동하고 목록 카드에 같은 일정이 두 번.
 - 검증 상태: 실데이터 확인 + 코드 확인.
 - 지시(기본안 Q2-a): 수신 시 `id`로 그룹화해 대표 1건을 만들고 `CalendarIds`(복수)와 `CalendarNames`를 보존. 숨김 판정은 "소속 캘린더가 모두 숨김일 때만 숨김". 색은 첫 캘린더 기준. 상세 카드의 "캘린더" 행에 복수 이름 표시. 캐시 포맷은 원본 그대로 저장(역호환), dedupe는 로드 후 수행.
 - 완료 기준: 위 실데이터로 목록 카드에 중복이 사라짐. 두 캘린더 중 하나만 숨겨도 일정이 남음. 테스트 3케이스.
+- 적용 메모(2026-09-22): DaouCalendarEvent에 소속 캘린더 목록 필드 추가 + Models/EventDeduplicator 신설(+단위 테스트); MainViewModel/상세 카드에 병합 적용(숨김은 전부 숨김일 때만) + 테스트·문서 갱신 수동 확인 3건 대기
 
 #### T1.5 Named Pipe 클라이언트 보호 — P1
 - 근거: 서버(`CalendarBridgeServer.cs:83-88`)는 `PipeOptions.CurrentUserOnly`지만, native host 클라이언트(`NativeMessagingHost.cs:35-41`)는 `PipeOptions.Asynchronous`만 사용. 다른 로컬 계정 프로세스가 같은 이름의 파이프를 먼저 만들면 host가 거기에 연결해 `postResult`(세션 쿠키 전량)를 보낸다. 같은 사용자 프로세스의 선점은 Chrome App-Bound Encryption을 우회해 쿠키를 얻는 경로가 된다.
