@@ -217,6 +217,7 @@ Extension의 고정 ID를 유지하기 위해 Extension manifest에 공개용 `k
 
 - 신뢰할 수 없는 Chrome Extension을 설치하지 않습니다.
 - Extension의 권한 범위를 불필요하게 확대하지 않습니다.
+- Native Messaging host는 Named Pipe 서버가 같은 Windows 계정이 실행한 동일 EXE일 때만 세션 쿠키를 전달합니다(다르면 전송하지 않고 오류를 반환).
 - 인증 Cookie나 토큰을 로그에 출력하지 않습니다.
 - 디버깅 로그에 개인정보가 남지 않도록 합니다.
 - GitHub 저장소를 Public으로 변경하기 전에 전체 소스와 Git history를 확인합니다.
@@ -273,6 +274,7 @@ git push
 4. Native Messaging Host가 가리키는 실행 파일 경로가 실제 파일과 일치하는지 확인
 5. Chrome을 완전히 재시작한 후 다시 시도
 6. WPF 애플리케이션의 로그 확인 (`%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`, Native Messaging Host 쪽은 같은 폴더의 `host-yyyyMMdd.log`)
+7. 실행 중인 오버레이 EXE와 Native Messaging Host manifest의 `path`가 **같은 파일**인지 확인(다르면 host가 쿠키 전송을 거부합니다. 오버레이를 재시작하면 manifest가 현재 EXE 경로로 갱신됩니다)
 
 ### 일정이 동기화되지 않는 경우
 

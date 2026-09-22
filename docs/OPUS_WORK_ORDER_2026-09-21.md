@@ -128,11 +128,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 위 실데이터로 목록 카드에 중복이 사라짐. 두 캘린더 중 하나만 숨겨도 일정이 남음. 테스트 3케이스.
 - 적용 메모(2026-09-22): DaouCalendarEvent에 소속 캘린더 목록 필드 추가 + Models/EventDeduplicator 신설(+단위 테스트); MainViewModel/상세 카드에 병합 적용(숨김은 전부 숨김일 때만) + 테스트·문서 갱신 수동 확인 3건 대기
 
-#### T1.5 Named Pipe 클라이언트 보호 — P1
+#### [부분] T1.5 Named Pipe 클라이언트 보호 — P1
 - 근거: 서버(`CalendarBridgeServer.cs:83-88`)는 `PipeOptions.CurrentUserOnly`지만, native host 클라이언트(`NativeMessagingHost.cs:35-41`)는 `PipeOptions.Asynchronous`만 사용. 다른 로컬 계정 프로세스가 같은 이름의 파이프를 먼저 만들면 host가 거기에 연결해 `postResult`(세션 쿠키 전량)를 보낸다. 같은 사용자 프로세스의 선점은 Chrome App-Bound Encryption을 우회해 쿠키를 얻는 경로가 된다.
 - 검증 상태: 코드 확인(공격 시나리오는 추정).
 - 지시: 클라이언트에 `PipeOptions.CurrentUserOnly` 추가(다른 계정 차단). 같은 계정 선점에 대해서는 연결 후 `GetNamedPipeServerProcessId`로 서버 PID를 얻어 실행 파일 경로가 자기 자신(`Environment.ProcessPath`)과 같은지 확인하고, 다르면 전송하지 않고 로그. 문서 §15 위협 모델에 "동일 사용자 프로세스는 신뢰 경계 안"임을 명시.
 - 완료 기준: 다른 EXE가 파이프 이름을 선점한 상태에서 host가 쿠키를 보내지 않고 오류 응답. 단위 테스트는 경로 비교 함수만.
+- 적용 메모(2026-09-22): PipePeerVerifier: 파이프 서버 프로세스 신원 확인 순수 로직 + Win32 조회; NativeHostRelay 도입: 클라이언트 CurrentUserOnly + 서버 EXE 검증 후에만 전송; 문서 갱신: §7.2 코드 발췌·§15 위협 모델·§17 파일표·§18 장애 대응 + README + D1 §15 반영 수동 확인 4건 대기
 
 #### T1.6 stale 결과와 캐시 범위 — P1
 - 근거: `ProcessResultAsync(:209-222)`는 HTTP 호출 전에만 requestId를 검사하고 `_activeRequestId`를 지운다. 호출 중 사용자가 월을 이동하면(`UpdateRequest(:53-60)`가 새 범위 설정) 이전 범위 결과가 그대로 `SyncCompleted`로 전달돼 `App.xaml.cs:136-147`에서 UI와 캐시에 반영된다. 캐시(`App.xaml.cs:143-147`)는 마지막 성공 범위를 저장하므로, 다음 달을 보다가 종료하면 다음 기동 시 이번 달이 비어 보인다.
