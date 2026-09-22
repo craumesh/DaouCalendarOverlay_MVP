@@ -156,11 +156,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 시스템 시각을 자정 넘겨 바꾸면 5초 내 오늘 배지가 이동. 테스트: `MainViewModel`에 `Now` 주입 가능하게 리팩터링 후 날짜 전환 케이스.
 - 적용 메모(2026-09-22): MainViewModel에 시계(Func<DateTime>) 주입 + RefreshTodayIfChanged 추가; 시계 틱에서 자정 전환 처리, App._refreshTimer 제거, §10.1/README 정정 수동 확인 3건 대기
 
-#### T1.9 설정 상한과 입력 검증 — P1
+#### [부분] T1.9 설정 상한과 입력 검증 — P1
 - 근거: `SettingsWindow.xaml.cs:84-88`은 `refreshMinutes < 1`만 검사. `App.xaml.cs:301-303`의 `DispatcherTimer.Interval`은 약 35,791분(Int32.MaxValue ms) 초과 시 예외 → 설정 저장 직후 종료. 캘린더 ID는 공백·쉼표·세미콜론으로 분리(`:71-76`)하나 숫자 형식 검증 없음.
 - 검증 상태: 코드 확인(상한 예외는 .NET 동작 기반 추정, 재현 후 확정).
 - 지시: RefreshMinutes 1~1440 제한, 캘린더 ID는 숫자만 허용(실데이터: 5자리 또는 19자리 정수). 설정창 안내 문구 갱신.
 - 완료 기준: 범위 밖 입력이 거부되고 앱이 종료되지 않음.
+- 적용 메모(2026-09-22): SettingsValidation 순수 정책 클래스 추가 + App의 RefreshMinutes 상한 클램프; 설정창 RefreshMinutes/캘린더 ID 검증 배선 + 안내 문구·문서(§13, §20, README) 갱신 수동 확인 4건 대기
 
 #### T1.10 캐시 시각 노출 — P1
 - 근거: `App.xaml.cs:86-98`에서 `SetEvents(..., "캐시 HH:mm")` 직후 `_syncStatus.MarkWaiting()`이 "Chrome 백그라운드 대기"로 덮어씀. `SyncStatusService._lastSuccess`는 캐시 로드 시 설정되지 않아 `EvaluateHealth(:76-98)`의 "마지막 HH:mm"도 안 나옴.

@@ -22,7 +22,7 @@ public partial class SettingsWindow : Window
 
         BaseUrlTextBox.Text = _working.BaseUrl;
         CalendarIdsTextBox.Text = string.Join(Environment.NewLine, _working.CalendarIds);
-        RefreshMinutesTextBox.Text = _working.RefreshMinutes.ToString();
+        RefreshMinutesTextBox.Text = SettingsValidation.ClampRefreshMinutes(_working.RefreshMinutes).ToString();
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
@@ -71,35 +71,28 @@ public partial class SettingsWindow : Window
 
         var baseUrl = validation.NormalizedBaseUrl!;
 
-        var ids = CalendarIdsTextBox.Text
-            .Split(new[] { '\r', '\n', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.Trim())
-            .Where(x => x.Length > 0)
-            .Distinct()
-            .ToList();
-
-        if (ids.Count == 0)
+        var idsValidation = SettingsValidation.ValidateCalendarIds(CalendarIdsTextBox.Text);
+        if (!idsValidation.IsValid)
         {
-            WpfMessageBox.Show(this, "캘린더 ID를 하나 이상 입력해 주세요.", "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            WpfMessageBox.Show(this, idsValidation.Reason ?? SettingsValidation.CalendarIdsEmptyReason, "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            CalendarIdsTextBox.Focus();
             return;
         }
 
-        if (!int.TryParse(RefreshMinutesTextBox.Text.Trim(), out var refreshMinutes) || refreshMinutes < 1)
+        if (!SettingsValidation.TryParseRefreshMinutes(RefreshMinutesTextBox.Text, out var refreshMinutes))
         {
-            WpfMessageBox.Show(this, "자동 새로고침은 1분 이상의 숫자로 입력해 주세요.", "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            WpfMessageBox.Show(this, SettingsValidation.RefreshMinutesReason, "설정 확인", WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            RefreshMinutesTextBox.Focus();
             return;
         }
 
         _working.BaseUrl = baseUrl;
-        _working.CalendarIds = ids;
+        _working.CalendarIds = idsValidation.Ids.ToList();
         _working.RefreshMinutes = refreshMinutes;
         _working.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         _working.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
         _working.PositionLocked = PositionLockedCheckBox.IsChecked == true;
-        _working.HiddenCalendarIds = _working.HiddenCalendarIds
-            .Where(id => ids.Contains(id, StringComparer.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        _working.HiddenCalendarIds = SettingsValidation.FilterHiddenCalendarIds(_working.HiddenCalendarIds, _working.CalendarIds).ToList();
 
         DialogResult = true;
         Close();

@@ -66,6 +66,10 @@ public partial class App : WpfApplication
             try
             {
                 _settings = await _settingsService.LoadAsync();
+                var loadedRefreshMinutes = _settings.RefreshMinutes;
+                _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(loadedRefreshMinutes);
+                if (loadedRefreshMinutes != _settings.RefreshMinutes)
+                    LogService.Warn("settings", $"RefreshMinutes {loadedRefreshMinutes} → {_settings.RefreshMinutes} 으로 보정");
                 _extensionInstaller.EnsureExtracted();
                 _nativeMessagingRegistration.EnsureRegistered();
 
@@ -307,6 +311,7 @@ public partial class App : WpfApplication
             return;
 
         _settings = dialog.Result;
+        _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(_settings.RefreshMinutes);
         _settings.HiddenCalendarIds = _settings.HiddenCalendarIds
             .Where(id => _settings.CalendarIds.Contains(id, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)

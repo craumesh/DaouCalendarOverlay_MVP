@@ -39,7 +39,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="캘린더 ID" VerticalAlignment="Top" Padding="0,7,0,0"/>
             <TextBox x:Name="CalendarIdsTextBox" Grid.Column="1" Height="92" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
-                     Padding="7" ToolTip="한 줄에 하나 또는 쉼표로 구분"/>
+                     Padding="7" ToolTip="숫자 ID만 입력. 한 줄에 하나 또는 쉼표로 구분"/>
         </Grid>
 
         <Border Grid.Row="3" Background="#FFF5F7FA" CornerRadius="6" Padding="10" Margin="0,0,0,14">
@@ -69,7 +69,7 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="자동 새로고침" VerticalAlignment="Center"/>
             <TextBox x:Name="RefreshMinutesTextBox" Grid.Column="1" Padding="7"/>
-            <TextBlock Grid.Column="2" Text="분 (최소 1분)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="#666"/>
+            <TextBlock Grid.Column="2" Text="분 (1~1440)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="#666"/>
         </Grid>
 
         <StackPanel Grid.Row="5" Orientation="Vertical" Margin="0,0,0,12">
