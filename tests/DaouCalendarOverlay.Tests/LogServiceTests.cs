@@ -100,6 +100,24 @@ public sealed class LogServiceTests : IDisposable
         Assert.True(new FileInfo(path).Length < 1024, "새 활성 파일에는 방금 쓴 한 줄만 있어야 한다.");
     }
 
+    /// <summary>
+    /// host 모드는 sendNativeMessage마다 새 프로세스가 뜨므로 같은 로그 파일을 다른 프로세스 핸들이
+    /// 열고 있을 수 있다. FileShare.ReadWrite로 여는 수정 덕분에 그 상태에서도 줄이 유실되지 않아야 한다.
+    /// </summary>
+    [Fact]
+    public void Info_WhenAnotherHandleHoldsFileOpen_LineIsNotLost()
+    {
+        var path = ActivePath;
+
+        using (var externalHandle = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            LogService.Info("share", "concurrent-write");
+        }
+
+        var lines = ReadAllLogLines();
+        Assert.Contains(lines, l => l.Contains("concurrent-write"));
+    }
+
     [Fact]
     public void Initialize_WithUnusableDirectory_DoesNotThrow()
     {

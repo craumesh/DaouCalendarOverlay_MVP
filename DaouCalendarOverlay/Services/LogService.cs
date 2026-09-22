@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading;
 
 namespace DaouCalendarOverlay.Services;
 
@@ -9,6 +10,11 @@ namespace DaouCalendarOverlay.Services;
 public static class LogService
 {
     private static readonly object Gate = new();
+
+    /// <summary>host 모드는 sendNativeMessage마다 새 프로세스가 뜨므로 같은 로그 파일을 다른 프로세스가
+    /// 동시에 열 수 있다. 공유 위반(IOException)에 대비해 짧게 재시도한다.</summary>
+    private const int MaxIoAttempts = 3;
+    private const int IoRetryDelayMs = 20;
 
     private static string? _directory;
     private static string _prefix = "app";
@@ -72,10 +78,13 @@ public static class LogService
                 var bytes = new UTF8Encoding(false).GetBytes(LogFormatter.FormatLine(now, level, category, message, ex) + Environment.NewLine);
 
                 if (File.Exists(path) && LogRotation.ShouldRotate(new FileInfo(path).Length, bytes.Length))
-                    Rotate(path);
+                {
+                    // 롤링은 overlay/host 프로세스 간 경합으로 실패할 수 있다. 실패해도 이번 줄 기록은 계속한다.
+                    try { Rotate(path); }
+                    catch { /* 롤링 실패는 무시하고 계속 기록한다. */ }
+                }
 
-                using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-                fs.Write(bytes, 0, bytes.Length);
+                AppendWithRetry(path, bytes);
             }
         }
         catch
@@ -84,16 +93,68 @@ public static class LogService
         }
     }
 
+    /// <summary>
+    /// 다른 프로세스(host 모드는 sendNativeMessage마다 새 프로세스)가 같은 파일을 열고 있을 수 있으므로
+    /// FileShare.ReadWrite로 열고, 그래도 IOException이 나면 짧게 재시도한다. 끝내 실패하면 예외를 던져
+    /// 호출자(Write)의 catch가 조용히 삼키게 한다.
+    /// </summary>
+    private static void AppendWithRetry(string path, byte[] bytes)
+    {
+        for (var attempt = 1; attempt <= MaxIoAttempts; attempt++)
+        {
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                fs.Write(bytes, 0, bytes.Length);
+                return;
+            }
+            catch (IOException) when (attempt < MaxIoAttempts)
+            {
+                Thread.Sleep(IoRetryDelayMs);
+            }
+        }
+    }
+
     private static void Rotate(string activePath)
     {
         var oldest = LogRotation.GetOldestArchivePath(activePath);
-        if (File.Exists(oldest))
-            File.Delete(oldest);
+        DeleteWithRetry(oldest);
 
         foreach (var (source, destination) in LogRotation.BuildRotationPlan(activePath))
+            MoveWithRetry(source, destination);
+    }
+
+    private static void DeleteWithRetry(string path)
+    {
+        for (var attempt = 1; attempt <= MaxIoAttempts; attempt++)
         {
-            if (File.Exists(source))
-                File.Move(source, destination, overwrite: true);
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+                return;
+            }
+            catch (IOException) when (attempt < MaxIoAttempts)
+            {
+                Thread.Sleep(IoRetryDelayMs);
+            }
+        }
+    }
+
+    private static void MoveWithRetry(string source, string destination)
+    {
+        for (var attempt = 1; attempt <= MaxIoAttempts; attempt++)
+        {
+            try
+            {
+                if (File.Exists(source))
+                    File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < MaxIoAttempts)
+            {
+                Thread.Sleep(IoRetryDelayMs);
+            }
         }
     }
 }

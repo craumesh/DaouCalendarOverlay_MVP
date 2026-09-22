@@ -185,6 +185,57 @@ public sealed class CalendarBridgeServerStaleResultTests
         }
     }
 
+    /// <summary>
+    /// HTTP 진행 중 표시 범위는 그대로인데 설정창 저장으로 캘린더 ID만 바뀌면, 이전 캘린더 집합으로
+    /// 받은 결과는 SyncCompleted로 올라가지 않아야 한다(범위 비교만으로는 이 경우를 잡지 못했다).
+    /// </summary>
+    [Fact]
+    public async Task ProcessResult_WhenCalendarIdsChangedDuringHttp_DoesNotRaiseSyncCompleted()
+    {
+        var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = CreateBlockingHandler(sendStarted, release);
+        await using var server = new CalendarBridgeServer(() => handler, pipeName: NewPipeName());
+
+        try
+        {
+            var settings = CreateSettings();
+            var (from1, to1) = CalendarGrid.GetVisibleRange(new DateTime(2026, 9, 1));
+            server.UpdateRequest(settings, from1, to1, force: true);
+
+            var config = await RequestConfigAsync(server);
+            Assert.True(config.ShouldFetch);
+
+            BridgeSyncEventArgs? captured = null;
+            var raised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            server.SyncCompleted += (_, e) =>
+            {
+                captured = e;
+                raised.TrySetResult();
+            };
+
+            var postResponse = await PostResultAsync(server, config.RequestId).WaitAsync(WaitLimit);
+            Assert.True(postResponse.Ok);
+            await sendStarted.Task.WaitAsync(WaitLimit);
+
+            // 범위는 그대로 두고 캘린더 ID만 바꾼다(설정창 저장 시나리오).
+            var changedSettings = CreateSettings();
+            changedSettings.CalendarIds.Clear();
+            changedSettings.CalendarIds.Add("99999");
+            server.UpdateRequest(changedSettings, from1, to1, force: false);
+
+            release.SetResult(CreateOkResponse());
+            await WaitForNewFetchConfigAsync(server, config.RequestId);
+
+            await AssertNoSyncCompletedAsync(raised.Task);
+            Assert.Null(captured);
+        }
+        finally
+        {
+            release.TrySetCanceled();
+        }
+    }
+
     /// <summary>폐기 직후의 getConfig는 새 범위로 새 requestId를 발행한다(즉시 재발행).</summary>
     [Fact]
     public async Task ProcessResult_WhenRangeChangedDuringHttp_NextGetConfigIssuesNewRange()

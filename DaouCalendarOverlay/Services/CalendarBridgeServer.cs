@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Http;
@@ -133,8 +134,13 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                // 인스턴스가 모두 사용 중이면 생성이 실패한다. 잠깐 쉬었다가 다시 시도한다.
-                LogService.Warn("bridge.pipe", "파이프 accept 실패", ex);
+                // 인스턴스(PipeServerInstances)가 모두 사용 중이면 생성이 IOException으로 실패한다.
+                // 흔한 배압 상황이므로 로그가 불어나지 않게 Info로 남기고, 그 외 예외만 Warn으로 남긴다.
+                if (ex is IOException)
+                    LogService.Info("bridge.pipe", $"파이프 accept 대기: 인스턴스 사용 중 ({ex.Message})");
+                else
+                    LogService.Warn("bridge.pipe", "파이프 accept 실패", ex);
+
                 if (cancellationToken.IsCancellationRequested)
                     break;
 
@@ -327,6 +333,14 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
             _leaseUntil = DateTimeOffset.Now.AddSeconds(ResultLeaseSeconds);
         }
 
+        // 종료 진행 중이면(Cancel()은 Dispose()보다 먼저 호출된다) _cts.Token을 읽지 않는다.
+        // 늦게 도착한 postResult가 이미 dispose된 CTS를 읽어 ObjectDisposedException을 내는 경로를 없앤다.
+        if (_cts.IsCancellationRequested)
+        {
+            ReleaseActiveRequest(requestId);
+            return NativeBridgeResponse.Success();
+        }
+
         var token = _cts.Token;
         var task = Task.Run(
             () => RunResultFetchAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
@@ -480,9 +494,9 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                 return;
             }
 
-            if (DiscardIfRangeChanged(fromSnapshot, toSnapshot))
+            if (DiscardIfRangeChanged(settingsSnapshot, fromSnapshot, toSnapshot))
             {
-                LogService.Warn("bridge", "표시 범위가 변경되어 이전 범위의 동기화 결과를 버리고 즉시 재발행합니다.");
+                LogService.Warn("bridge", "표시 범위 또는 설정이 변경되어 이전 결과를 버리고 즉시 재발행합니다.");
                 return;
             }
 
@@ -517,14 +531,21 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// HTTP 왕복 중 표시 범위가 바뀌었으면 결과를 버리고(true) 즉시 재발행되도록 lease/backoff 상태를 초기화한다.
+    /// HTTP 왕복 중 표시 범위 또는 설정(BaseUrl/캘린더 ID)이 바뀌었으면 결과를 버리고(true)
+    /// 즉시 재발행되도록 lease/backoff 상태를 초기화한다.
+    /// 범위는 같지만 설정창 저장으로 BaseUrl/캘린더 ID만 바뀐 경우도 폐기 대상이다.
     /// 성공/실패 카운터(<c>_consecutiveFailures</c>)는 건드리지 않는다.
     /// </summary>
-    private bool DiscardIfRangeChanged(DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot)
+    private bool DiscardIfRangeChanged(AppSettings settingsSnapshot, DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot)
     {
         lock (_gate)
         {
-            if (!BridgeRangeGuard.IsStale(fromSnapshot, toSnapshot, _from, _to))
+            var rangeStale = BridgeRangeGuard.IsStale(fromSnapshot, toSnapshot, _from, _to);
+            var settingsStale = BridgeRangeGuard.IsSettingsStale(
+                settingsSnapshot.BaseUrl, settingsSnapshot.CalendarIds,
+                _settings.BaseUrl, _settings.CalendarIds);
+
+            if (!rangeStale && !settingsStale)
                 return false;
 
             _forceRefresh = true;
