@@ -107,11 +107,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 앱 시작·동기화 성공·인증 실패·네트워크 실패·파이프 실패가 로그에 각각 한 줄 이상 남는다. 설정 저장 중 파일을 읽기 전용으로 만들어도 앱이 종료되지 않고 상태 텍스트에 오류가 보인다. 문서 §18에 로그 경로와 대표 로그 라인 추가.
 - 적용 메모(2026-09-22): LogService/LogFormatter/LogRotation 신설 + 순수 로직 단위 테스트; 전역 예외 처리기 + async void 전수 try/catch + catch{} 로그 + 트레이 "로그 폴더 열기"; 확장 7.1.0 개명 + lastError 전달 프로토콜 필드 + README/기술문서 로그 절 갱신 수동 확인 9건 대기
 
-#### T1.2 설정/캐시 저장 직렬화 — P1
+#### [부분] T1.2 설정/캐시 저장 직렬화 — P1
 - 근거: `SettingsService.cs:35-53` temp 경로가 `settings.json.tmp` 고정. `MainWindow.xaml.cs:624-629`(투명도 450ms)와 `643-648`(위치 400ms)의 `async void` 틱이 각각 `App.SaveWindowBoundsAsync`/`SetUiOpacityAsync`를 통해 `SaveAsync`를 호출하므로 await 지점에서 겹치면 `File.Create(temp)` 공유 위반 → 처리되지 않은 예외로 종료. `CacheService.cs:35-43`은 예외 시 temp 미정리이며 `App.xaml.cs:143-147`에서 결과가 관찰되지 않음. `AppSettings.IsConfigured`(`AppSettings.cs:16-19`)가 settings.json에 직렬화됨(실데이터 확인).
 - 검증 상태: 코드 확인(경쟁 조건은 추정이나 구조상 가능), IsConfigured 직렬화는 실데이터 확인.
 - 지시: `SemaphoreSlim(1,1)`로 저장 직렬화, temp 파일명에 Guid 사용, 실패 시 temp 삭제, `IsConfigured`에 `[JsonIgnore]`. 저장 실패는 T1.1 로그 + 상태 텍스트.
 - 완료 기준: 동시 저장 100회 테스트 통과. settings.json에 `IsConfigured` 키가 사라짐(기존 파일의 키는 무시됨을 확인).
+- 적용 메모(2026-09-22): 원자적 JSON 저장기(AtomicJsonFileWriter) 도입 — SettingsService/CacheService 저장 직렬화 + IsConfigured 직렬화 제외; 저장 실패 결과 관찰 및 상태 텍스트 노출 + README·기술문서 §13/§17 갱신 수동 확인 4건 대기
 
 #### T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 — P1 (Q1)
 - 근거: `AppSettings.cs:16-19`와 `SettingsWindow.xaml.cs:63-69`는 http/https + 임의 호스트 허용. `CalendarBridgeServer.cs:167-176`(`BuildConfig`)는 https + `daouoffice.com`/서브도메인만 통과, 아니면 `NoFetch()`를 상태 변화 없이 반환 → "Chrome 브리지 연결됨 · 동기화 대기"에서 영원히 멈춤. 확장 `manifest.json:15-17` `host_permissions`는 `https://*.daouoffice.com/*`이라 apex `daouoffice.com`은 포함하지 않지만 BuildConfig는 apex를 허용(불일치).

@@ -155,18 +155,20 @@ public partial class App : WpfApplication
         _syncStatus.MarkGeneralError(ex is null ? message : $"{message}: {ex.Message}");
     }
 
-    /// <summary>설정 저장 실패를 치명적 오류로 만들지 않는다.</summary>
+    /// <summary>설정 저장 실패를 치명적 오류로 만들지 않는다. 실패는 상태 표시줄과 로그로만 알린다.</summary>
     private async Task<bool> SaveSettingsAsync()
     {
         try
         {
-            await _settingsService.SaveAsync(_settings);
-            return true;
+            var saved = await _settingsService.SaveAsync(_settings);
+            if (!saved)
+                _syncStatus.MarkPersistenceError("설정");
+            return saved;
         }
         catch (Exception ex)
         {
             LogService.Error("settings", "설정 저장 실패", ex);
-            _syncStatus.MarkGeneralError($"설정 저장 실패: {ex.Message}");
+            _syncStatus.MarkPersistenceError("설정");
             return false;
         }
     }
@@ -224,14 +226,13 @@ public partial class App : WpfApplication
 
                     try
                     {
-                        await _cacheService.SaveAsync(new CalendarCache
-                        {
-                            LastUpdated = now,
-                            Events = e.Events
-                        });
+                        var cacheSaved = await _cacheService.SaveAsync(new CalendarCache { LastUpdated = now, Events = e.Events });
+                        if (!cacheSaved)
+                            _syncStatus.MarkPersistenceError("캐시");
                     }
                     catch (Exception cacheEx)
                     {
+                        // T1.2a 이후 SaveAsync 는 예외를 던지지 않지만 방어적으로 남겨 둔다.
                         LogService.Warn("cache", "캐시 저장 실패", cacheEx);
                     }
 

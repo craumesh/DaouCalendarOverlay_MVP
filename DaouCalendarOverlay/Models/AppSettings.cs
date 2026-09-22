@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DaouCalendarOverlay.Models;
 
 public sealed class AppSettings
@@ -13,6 +15,7 @@ public sealed class AppSettings
     public double? Left { get; set; }
     public double? Top { get; set; }
 
+    [JsonIgnore]
     public bool IsConfigured =>
         Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) &&
         (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) &&

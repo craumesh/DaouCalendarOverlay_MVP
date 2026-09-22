@@ -73,6 +73,10 @@ public sealed class SyncStatusService
         Publish(OverlaySyncState.GeneralError, message + suffix, true);
     }
 
+    /// <summary>설정·캐시 등 로컬 파일 저장이 실패했을 때의 상태 문구를 만든다.</summary>
+    public void MarkPersistenceError(string target) =>
+        Publish(OverlaySyncState.GeneralError, $"{target} 저장 실패 · 로그 확인", true);
+
     public void EvaluateHealth()
     {
         DateTimeOffset heartbeat;
