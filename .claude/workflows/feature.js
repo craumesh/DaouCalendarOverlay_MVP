@@ -1,7 +1,7 @@
 // 사용법: /feature "구현할 기능 설명"
 //
 // Design(Fable) → Plan(Opus) → Implement(Sonnet, 실패 시 Opus 승격) + Verify(Sonnet)
-//   → Mid-review(Fable, 주기적) → Final review(Fable)
+//   → Mid-review(Opus, 주기적) → Final review(Fable)
 //
 // 모델은 각 agentType의 .claude/agents/*.md 프론트매터에서 결정된다.
 // 이 스크립트는 "누가 언제 몇 번" 을 코드로 고정하는 역할만 한다.
@@ -11,7 +11,7 @@
 
 export const meta = {
   name: 'feature',
-  description: 'Fable 설계 → Opus 태스크 분해 → Sonnet 구현(실패 시 Opus 승격) → 검증 → Fable 검토',
+  description: 'Fable 설계 → Opus 태스크 분해 → Sonnet 구현(실패 시 Opus 승격) → 검증 → Opus 중간 검토 → Fable 최종 검토',
   phases: [
     { title: 'Design' },
     { title: 'Plan' },
@@ -23,7 +23,7 @@ export const meta = {
 // ---- 튜닝 포인트 -----------------------------------------------------------
 const MAX_SONNET_ATTEMPTS = 2   // Sonnet이 이 횟수 실패하면 Opus로 승격
 const MAX_TOTAL_ATTEMPTS = 4    // 승격 후 포함 총 시도 상한 (초과 시 태스크 실패로 기록)
-const MID_REVIEW_EVERY = 3      // N개 태스크마다 Fable 중간 검토 (0이면 비활성)
+const MID_REVIEW_EVERY = 3      // N개 태스크마다 Opus 중간 검토 (0이면 비활성)
 // ---------------------------------------------------------------------------
 
 const goal =
@@ -132,7 +132,7 @@ for (let i = 0; i < plan.tasks.length; i++) {
   if (MID_REVIEW_EVERY > 0 && (i + 1) % MID_REVIEW_EVERY === 0 && !isLast) {
     const mid = await agent(
       `중간 검토. 지금까지 완료된 태스크(${results.map(x => x.id).join(', ')})의 변경(git diff)이 설계 문서와 일치하는지 확인하라. 이후 태스크에 적용할 제약이 있으면 constraints_for_next_tasks에 적어라.\n\n설계 문서:\n${design}`,
-      { agentType: 'reviewer', label: `mid-review@${task.id}`, phase: 'Implement', schema: REVIEW_SCHEMA },
+      { agentType: 'mid-reviewer', label: `mid-review@${task.id}`, phase: 'Implement', schema: REVIEW_SCHEMA },
     )
     if (mid) {
       extraConstraints = extraConstraints.concat(mid.constraints_for_next_tasks || [])

@@ -10,14 +10,15 @@
 | `lead` | Opus | 설계를 태스크로 분해, 각 태스크의 spec·tier·blast_radius·acceptance 지정. 하위 모델이 헤맬 때 방향 재설정. |
 | `implementer` | Sonnet | **일반 구현 기본값.** spec이 명확한 구현, 테스트 작성, 국소 수정. |
 | `senior-implementer` | Opus | tier=opus 또는 blast_radius=high 태스크, implementer가 2회 실패한 태스크, 작은 누락이 큰 재작업이 되는 작업. |
+| `mid-reviewer` | Opus | 태스크 3개마다 **중간 검토**. 설계 이탈 조기 발견, 이후 태스크 제약 도출. |
 | `verifier` | Sonnet | 구현 후 독립 검증. 구현자 자가 보고를 믿지 말고 항상 거친다. |
-| `reviewer` | Fable | **중간 검토와 최종 검토**만. |
+| `reviewer` | Fable | **최종 검토**만. |
 | `Explore` | Sonnet | 코드베이스 탐색. |
 
 ## 절차
 
 1. **규모 판단.** 파일 3개 이상을 새로 만들거나 여러 모듈에 걸치는 작업이면 "큰 작업"이다. 큰 작업은 사용자에게 `/feature "<목표>"` 워크플로 실행을 제안한다(에스컬레이션 루프가 코드로 고정돼 있어 더 안정적이다).
-2. 큰 작업을 대화로 진행할 때는 순서를 지킨다: `architect` → `lead` → 태스크별 (`implementer` 또는 `senior-implementer`) → `verifier` → 태스크 3개마다 `reviewer` 중간 검토 → 마지막에 `reviewer` 최종 검토.
+2. 큰 작업을 대화로 진행할 때는 순서를 지킨다: `architect` → `lead` → 태스크별 (`implementer` 또는 `senior-implementer`) → `verifier` → 태스크 3개마다 `mid-reviewer` 중간 검토 → 마지막에 `reviewer` 최종 검토.
 3. 작은 작업(단일 파일 수정, 명백한 버그 수정)은 `architect`/`lead` 없이 `implementer` → `verifier`만 거친다.
 
 ## 에스컬레이션 규칙 (반드시 지킬 것)
@@ -28,7 +29,7 @@
 
 ## Fable 사용 상한
 
-- `architect`는 기능당 1회. `reviewer`는 중간 검토 + 최종 검토. 그 외 용도로 Fable 에이전트를 호출하지 않는다. 구현, 디버깅, 탐색에 Fable을 쓰지 않는다.
+- `architect`는 기능당 1회, `reviewer`는 최종 검토 1회. 즉 기능당 Fable 호출은 최대 2회다. 중간 검토는 `mid-reviewer`(Opus)가 한다. 구현, 디버깅, 탐색에 Fable을 쓰지 않는다.
 
 ## 위임 프롬프트 작성 규칙
 
