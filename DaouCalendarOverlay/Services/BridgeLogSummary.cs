@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -31,6 +32,12 @@ public static class BridgeLogSummary
 
             var builder = new StringBuilder("type=");
             builder.Append(string.IsNullOrWhiteSpace(type) ? "unknown" : type);
+
+            // 확장이 getConfig에 싣는 프로토콜 버전. 보내지 않는 구버전 확장이면 아무것도 붙이지 않는다.
+            if (root.TryGetProperty("protocolVersion", out var protocolVersion) &&
+                protocolVersion.ValueKind == JsonValueKind.Number &&
+                protocolVersion.TryGetInt32(out var protocolVersionValue))
+                builder.Append(" protocolVersion=").Append(protocolVersionValue.ToString(CultureInfo.InvariantCulture));
 
             if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
             {

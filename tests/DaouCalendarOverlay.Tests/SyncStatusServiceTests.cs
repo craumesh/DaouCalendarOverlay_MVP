@@ -370,9 +370,12 @@ public sealed class SyncStatusServiceTests
         Assert.True(captured.IsError);
     }
 
-    /// <summary>확장이 버전을 보고하지 않으면 "알 수 없음"으로 표시한다.</summary>
+    /// <summary>
+    /// 확장이 버전을 보고하지 않으면 "7.0.0 이하"로 표시한다.
+    /// 7.0.0은 getConfig에 extensionVersion을 보내지 않은 마지막 버전이다.
+    /// </summary>
     [Fact]
-    public void MarkExtensionVersionMismatch_UsesUnknownTextWhenReportedMissing()
+    public void MarkExtensionVersionMismatch_UsesLegacyVersionTextWhenReportedMissing()
     {
         var svc = new SyncStatusService();
         SyncStatusChangedEventArgs? captured = null;
@@ -381,7 +384,157 @@ public sealed class SyncStatusServiceTests
         svc.MarkExtensionVersionMismatch(null, "7.1.0");
 
         Assert.NotNull(captured);
-        Assert.Equal("Chrome 확장 새로고침 필요 (알 수 없음 → 7.1.0)", captured!.Text);
+        Assert.Equal(OverlaySyncState.ExtensionError, captured!.State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.1.0)", captured.Text);
+        Assert.DoesNotContain("알 수 없음", captured.Text);
+    }
+
+    /// <summary>빈 문자열·공백만 보고한 경우도 버전 미보고로 보고 "7.0.0 이하"로 표시한다.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MarkExtensionVersionMismatch_UsesLegacyVersionTextWhenReportedBlank(string reported)
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkExtensionVersionMismatch(reported, "7.1.0");
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.1.0)", captured!.Text);
+    }
+
+    /// <summary>재로그인 필요 상태에서는 버전 불일치가 상태를 덮어쓰지 않는다(재로그인 안내가 더 급하다).</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_DoesNotOverrideAuthenticationRequired()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkAuthenticationRequired();
+        events.Clear();
+
+        // 확장은 30초마다 불일치를 다시 보고한다. 몇 번이 와도 재로그인 상태는 유지된다.
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkExtensionVersionMismatch(null, "7.1.0");
+
+        Assert.Empty(events);
+
+        // 상태가 여전히 AuthenticationRequired인지: ExtensionError였다면 버전 일치 확인이 연결됨으로 해제했을 것이다.
+        svc.MarkExtensionVersionConfirmed();
+        Assert.Empty(events);
+    }
+
+    /// <summary>재로그인이 해결되면(동기화 성공) 억제됐던 불일치가 다음 보고에서 바로 게시된다.</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_PublishesAfterAuthenticationResolved()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkAuthenticationRequired();
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 14, 5, 0, TimeSpan.FromHours(9)));
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.Equal(3, events.Count);
+        Assert.Equal(OverlaySyncState.AuthenticationRequired, events[0].State);
+        Assert.Equal(OverlaySyncState.Synced, events[1].State);
+        Assert.Equal(OverlaySyncState.ExtensionError, events[2].State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", events[2].Text);
+    }
+
+    /// <summary>
+    /// 불일치 표시 중 Chrome이 꺼져 heartbeat가 95초 넘게 끊기면 health timer가 "Chrome 확장 연결 대기"로 바꾼다.
+    /// ExtensionError는 heartbeat 만료 평가에서 제외하지 않는다(설계 결정 고정).
+    /// </summary>
+    [Fact]
+    public void EvaluateHealth_InExtensionError_PublishesWaitingWhenHeartbeatExpired()
+    {
+        var now = new DateTimeOffset(2026, 9, 23, 10, 0, 0, TimeSpan.FromHours(9));
+        var svc = new SyncStatusService(() => now);
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        // getConfig 한 번: heartbeat 기록 → 불일치 게시(CalendarBridgeServer가 부르는 순서).
+        svc.MarkHeartbeat();
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        Assert.Equal(OverlaySyncState.ExtensionError, events[^1].State);
+        events.Clear();
+
+        now = now.AddSeconds(96);
+        svc.EvaluateHealth();
+
+        var published = Assert.Single(events);
+        Assert.Equal(OverlaySyncState.WaitingForChrome, published.State);
+        Assert.Equal("Chrome 확장 연결 대기", published.Text);
+        Assert.False(published.IsError);
+    }
+
+    /// <summary>heartbeat가 살아 있는 동안에는 health timer가 불일치 문구를 덮어쓰지 않는다.</summary>
+    [Fact]
+    public void EvaluateHealth_InExtensionError_KeepsMismatchWhileHeartbeatFresh()
+    {
+        var now = new DateTimeOffset(2026, 9, 23, 10, 0, 0, TimeSpan.FromHours(9));
+        var svc = new SyncStatusService(() => now);
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkHeartbeat();
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        events.Clear();
+
+        now = now.AddSeconds(60);
+        svc.EvaluateHealth();
+
+        Assert.Empty(events);
+    }
+
+    /// <summary>연결 대기로 바뀐 뒤 Chrome이 돌아와 다시 불일치를 보고하면 억제 없이 불일치 문구가 재게시된다.</summary>
+    [Fact]
+    public void EvaluateHealth_AfterExtensionErrorExpired_MismatchRepublishesWhenChromeReturns()
+    {
+        var now = new DateTimeOffset(2026, 9, 23, 10, 0, 0, TimeSpan.FromHours(9));
+        var svc = new SyncStatusService(() => now);
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkHeartbeat();
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        now = now.AddSeconds(96);
+        svc.EvaluateHealth();
+        events.Clear();
+
+        now = now.AddSeconds(30);
+        svc.MarkHeartbeat();
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(OverlaySyncState.Connected, events[0].State);
+        Assert.Equal(OverlaySyncState.ExtensionError, events[1].State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", events[1].Text);
+    }
+
+    /// <summary>health timer는 재로그인 필요 상태를 heartbeat가 만료돼도 덮어쓰지 않는다(기존 동작 가드).</summary>
+    [Fact]
+    public void EvaluateHealth_DoesNotOverrideAuthenticationRequiredEvenWhenHeartbeatExpired()
+    {
+        var now = new DateTimeOffset(2026, 9, 23, 10, 0, 0, TimeSpan.FromHours(9));
+        var svc = new SyncStatusService(() => now);
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkHeartbeat();
+        svc.MarkAuthenticationRequired();
+        events.Clear();
+
+        now = now.AddSeconds(96);
+        svc.EvaluateHealth();
+
+        Assert.Empty(events);
     }
 
     /// <summary>같은 버전 조합이 반복 보고되면 상태는 한 번만 게시된다.</summary>

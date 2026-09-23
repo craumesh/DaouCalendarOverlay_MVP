@@ -322,20 +322,23 @@ public partial class App : WpfApplication
                     return;
                 }
 
-                _overlayWindow.SetLoginRequired(false);
                 switch (e.FailureKind)
                 {
                     case BridgeFailureKind.Network:
+                        _overlayWindow.SetLoginRequired(false);
                         LogService.Warn("sync", $"네트워크 실패: {e.Error}");
                         _syncStatus.MarkNetworkError(e.Error, e.RetryAt);
                         break;
                     case BridgeFailureKind.Extension:
+                        // 버전 불일치는 동기화 결과가 아니라 getConfig마다(30초) 올라오는 신호다.
+                        // 재로그인 배너는 동기화 결과만 바꾸므로 여기서는 건드리지 않는다.
                         LogService.Warn("sync", $"확장 버전 불일치: reported={e.ExtensionVersion ?? "(없음)"} expected={e.ExpectedExtensionVersion}");
                         _syncStatus.MarkExtensionVersionMismatch(
                             e.ExtensionVersion,
                             e.ExpectedExtensionVersion ?? ChromeExtensionInstaller.ExpectedExtensionVersion);
                         break;
                     default:
+                        _overlayWindow.SetLoginRequired(false);
                         LogService.Warn("sync", $"동기화 실패: {e.Error}");
                         _syncStatus.MarkGeneralError(e.Error ?? "동기화 실패", e.RetryAt);
                         break;

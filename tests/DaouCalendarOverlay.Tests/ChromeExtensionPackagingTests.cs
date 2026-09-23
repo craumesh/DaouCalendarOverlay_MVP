@@ -75,6 +75,53 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Null(legacy.ExtensionVersion);
     }
 
+    /// <summary>worker의 getConfig 요청에 protocolVersion: 1이 실리고, 그 값이 앱의 프로토콜 상수와 같은지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_SendsProtocolVersionInGetConfig()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains($"protocolVersion: {NativeBridgeProtocol.ProtocolVersion}", worker);
+        Assert.Contains("protocolVersion: 1", worker);
+
+        // getConfig 메시지 리터럴 안에 있어야 한다(type: "getConfig" 뒤, 메시지를 닫는 "});" 앞).
+        var getConfigIndex = worker.IndexOf("type: \"getConfig\"", StringComparison.Ordinal);
+        Assert.True(getConfigIndex >= 0, "worker에 getConfig 요청이 없습니다.");
+        var messageEnd = worker.IndexOf("});", getConfigIndex, StringComparison.Ordinal);
+        Assert.True(messageEnd > getConfigIndex, "getConfig 요청 리터럴의 끝을 찾지 못했습니다.");
+        var message = worker.Substring(getConfigIndex, messageEnd - getConfigIndex);
+        Assert.Contains("protocolVersion: 1", message);
+        Assert.Contains("extensionVersion", message);
+    }
+
+    /// <summary>
+    /// getConfig 역직렬화는 protocolVersion이 있으면 값을 읽고, 없는 구버전 확장 요청은 null로 두어 그대로 처리한다.
+    /// 앱 파이프 서버와 같은 Web 기본 옵션을 쓴다.
+    /// </summary>
+    [Fact]
+    public void NativeBridgeRequest_AcceptsProtocolVersionWhenPresentAndAbsent()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        var current = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            "{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"7.1.0\",\"protocolVersion\":1}",
+            options);
+
+        Assert.NotNull(current);
+        Assert.Equal("getConfig", current!.Type);
+        Assert.Equal("7.1.0", current.ExtensionVersion);
+        Assert.Equal(1, current.ProtocolVersion);
+
+        var legacy = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            "{\"type\":\"getConfig\",\"lastError\":\"\"}",
+            options);
+
+        Assert.NotNull(legacy);
+        Assert.Equal("getConfig", legacy!.Type);
+        Assert.Null(legacy.ExtensionVersion);
+        Assert.Null(legacy.ProtocolVersion);
+    }
+
     /// <summary>worker 최상위의 즉시 동기화 호출이 없고 쿠키 변경은 5초 debounce로 예약되는지 확인한다.</summary>
     [Fact]
     public void EmbeddedServiceWorker_RemovesTopLevelSyncAndDebouncesCookieChanges()

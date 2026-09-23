@@ -134,7 +134,7 @@
 - T2.1: 실제 Chrome 연동 상태에서 30초 알람 1회당 host 스폰 횟수와 host-yyyyMMdd.log의 `요청 완료 elapsed=` 값이 성능 절 측정치와 모순되지 않는지 확인 — 미확인
 - T2.2: chrome://extensions에서 확장을 새로고침한 뒤 DaouOffice 페이지를 새로고침했을 때 5초 안에 host 스폰이 1회 이하인지 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\host-*.log`로 확인 — 미확인
 - T2.2: 오버레이를 종료하고 5분 뒤 chrome://extensions 서비스 워커 콘솔에서 `chrome.alarms.get('daou-calendar-overlay-sync')`의 periodInMinutes가 5인지 확인, 오버레이 재기동 후 0.5로 복귀하는지 확인 — 미확인
-- T2.2: 구버전(7.0.0) unpacked 확장을 Chrome에 로드한 상태로 오버레이를 기동해 상태 표시줄에 `Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)`가 나타나는지, chrome://extensions에서 최신 확장으로 새로고침한 뒤 30초 안에 문구가 `Chrome 브리지 연결됨 · 동기화 대기`(또는 곧바로 `동기화 중…`/`정상 · 동기화 HH:mm`)로 바뀌는지 확인 — 미확인
+- T2.2: 구버전(7.0.0) unpacked 확장을 Chrome에 로드한 상태로 오버레이를 기동해 상태 표시줄에 `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.1.0)`가 나타나는지, chrome://extensions에서 최신 확장으로 새로고침한 뒤 30초 안에 문구가 `Chrome 브리지 연결됨 · 동기화 대기`(또는 곧바로 `동기화 중…`/`정상 · 동기화 HH:mm`)로 바뀌는지 확인 — 미확인 (7.0.0은 버전 필드를 보내지 않으므로 "7.0.0 이하"로 표시된다. 2026-09-23 최종 검토 반영)
 - T2.3: publish EXE의 Windows 속성 창 > 자세히 탭에서 파일 버전이 7.1.0.0, 제품 버전이 7.1.0+<커밋 SHA>로 보이는지 확인(publish 실행이 필요하므로 자동 검증 제외) — 미확인
 - T2.3: 오버레이 실행 후 트레이 아이콘에 마우스를 올려 툴팁이 "Daou Calendar Overlay 7.1.0"으로 보이는지 확인 — 미확인
 - T2.3: 트레이 > 설정 을 열어 창 하단 왼쪽에 "버전 7.1.0 · 프로토콜 v1"이 보이고 취소/저장 버튼 배치가 깨지지 않았는지 확인 — 미확인

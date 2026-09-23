@@ -28,7 +28,14 @@ public sealed class SyncStatusService
 {
     private const string CacheOutOfRangeSuffix = " · 캐시(범위 밖)";
 
+    /// <summary>
+    /// 확장이 버전을 보고하지 않았을 때 보고 버전 자리에 쓰는 표기.
+    /// 7.0.0은 getConfig에 extensionVersion을 보내지 않은 마지막 버전이다.
+    /// </summary>
+    private const string UnreportedExtensionVersionText = "7.0.0 이하";
+
     private readonly object _gate = new();
+    private readonly Func<DateTimeOffset> _now;
     private DateTimeOffset _lastHeartbeat;
     private DateTimeOffset _lastSuccess;
     private bool _cacheOutOfRange;
@@ -39,6 +46,12 @@ public sealed class SyncStatusService
     private readonly List<string> _startupIssues = new();
 
     public event EventHandler<SyncStatusChangedEventArgs>? StatusChanged;
+
+    /// <param name="now">heartbeat 기록과 만료 판정에 쓰는 시계(테스트용). null이면 <see cref="DateTimeOffset.Now"/>.</param>
+    public SyncStatusService(Func<DateTimeOffset>? now = null)
+    {
+        _now = now ?? (() => DateTimeOffset.Now);
+    }
 
     public void MarkStarting() => Publish(OverlaySyncState.Starting, "시작 중…", false);
 
@@ -73,7 +86,7 @@ public sealed class SyncStatusService
     public void MarkHeartbeat()
     {
         lock (_gate)
-            _lastHeartbeat = DateTimeOffset.Now;
+            _lastHeartbeat = _now();
 
         if (_state is OverlaySyncState.Starting or OverlaySyncState.WaitingForChrome)
             Publish(OverlaySyncState.Connected, Decorate("Chrome 브리지 연결됨 · 동기화 대기"), false);
@@ -110,14 +123,18 @@ public sealed class SyncStatusService
     /// <summary>
     /// 확장 버전이 EXE가 기대하는 버전과 다를 때의 상태 문구를 만든다.
     /// 확장이 30초마다 같은 버전을 보고하므로 동일 조합의 재발행은 억제한다(MarkConfigurationInvalid와 같은 방식).
+    /// 확장이 버전을 보고하지 않았으면(null·빈 값) 보고 버전 자리에 "7.0.0 이하"를 쓴다.
+    /// 재로그인 안내가 더 급하므로 AuthenticationRequired 상태는 덮어쓰지 않는다(아무것도 게시하지 않는다).
     /// </summary>
     public void MarkExtensionVersionMismatch(string? reportedVersion, string expectedVersion)
     {
-        var reported = string.IsNullOrWhiteSpace(reportedVersion) ? "알 수 없음" : reportedVersion!.Trim();
+        var reported = string.IsNullOrWhiteSpace(reportedVersion) ? UnreportedExtensionVersionText : reportedVersion!.Trim();
         var expected = (expectedVersion ?? "").Trim();
         var key = reported + "→" + expected;
         lock (_gate)
         {
+            if (_state == OverlaySyncState.AuthenticationRequired)
+                return;
             if (_state == OverlaySyncState.ExtensionError &&
                 string.Equals(_extensionMismatchKey, key, StringComparison.Ordinal))
                 return;
@@ -200,6 +217,11 @@ public sealed class SyncStatusService
             _startupIssues.RemoveAll(x => string.Equals(x, label, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// health timer(20초)가 호출한다. heartbeat가 95초 넘게 없으면 "Chrome 확장 연결 대기"를 게시한다.
+    /// AuthenticationRequired·ConfigurationInvalid는 덮어쓰지 않는다. ExtensionError는 heartbeat가 살아 있는 동안만
+    /// 유지하고, 만료되면(불일치 표시 중 Chrome이 꺼진 경우) 연결 대기로 바꾼다.
+    /// </summary>
     public void EvaluateHealth()
     {
         DateTimeOffset heartbeat;
@@ -213,10 +235,10 @@ public sealed class SyncStatusService
             state = _state;
         }
 
-        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ExtensionError or OverlaySyncState.ConfigurationInvalid)
+        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ConfigurationInvalid)
             return;
 
-        var now = DateTimeOffset.Now;
+        var now = _now();
         if (heartbeat == default || now - heartbeat > TimeSpan.FromSeconds(95))
         {
             var suffix = lastSuccess == default ? "" : $" · 마지막 {lastSuccess:HH:mm}";

@@ -218,10 +218,13 @@ async function syncOnce() {
     const lastError = await readLastError();
     let bridgeResponse;
     try {
+      // protocolVersion은 앱의 NativeBridgeProtocol.ProtocolVersion과 같은 값이다.
+      // 앱은 이 필드가 없는 구버전 확장도 호환으로 취급한다.
       bridgeResponse = await sendNative({
         type: "getConfig",
         lastError,
-        extensionVersion: chrome.runtime.getManifest().version
+        extensionVersion: chrome.runtime.getManifest().version,
+        protocolVersion: 1
       });
     } catch (error) {
       await recordLastError("getConfig", error);

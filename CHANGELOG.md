@@ -2,6 +2,7 @@
 
 이 파일은 Keep a Changelog 형식을 따르고 버전은 유의적 버전(SemVer)을 따릅니다.
 WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브 브리지 프로토콜 버전은 별도로 `NativeBridgeProtocol.ProtocolVersion` 으로 관리합니다(현재 v1, 파이프 이름 `DaouCalendarOverlay.NativeBridge.v7`).
+릴리스 이후에는 Chrome 확장 서비스 워커를 바꾸면 확장 버전을 반드시 올립니다(worker 파일명 `service-worker-v<버전>.js`, `ChromeExtensionInstaller` obsolete 목록, 패키징 테스트를 함께 갱신).
 
 ## 7.1.0 - 2026-09-23
 
@@ -10,7 +11,7 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - 설정·캐시 저장의 원자적 쓰기(임시 파일 + 교체)
 - 캐시에 마지막 동기화 시각과 조회 범위(`LastUpdated`/`RangeFrom`/`RangeTo`) 기록, 범위 밖 캐시 표기
 - `tools/Measure-HostSpawn.ps1`: native host 스폰당 경과 시간·CPU 측정 스크립트(측정 결과는 기술 문서 성능 절)
-- Chrome 확장 버전 불일치 감지: `getConfig`의 `extensionVersion`을 EXE 기대 버전(`ChromeExtensionInstaller.ExpectedExtensionVersion`)과 비교해 상태에 "Chrome 확장 새로고침 필요 (x → y)" 표시(`ExtensionVersionGuard`)
+- Chrome 확장 버전 불일치 감지: `getConfig`의 `extensionVersion`을 EXE 기대 버전(`ChromeExtensionInstaller.ExpectedExtensionVersion`)과 비교해 상태에 "Chrome 확장 새로고침 필요 (x → y)" 표시(`ExtensionVersionGuard`). 확장이 버전을 보내지 않으면 x는 "7.0.0 이하", 재로그인 필요 상태와 재로그인 배너는 덮어쓰지 않으며, 불일치 표시 중 heartbeat가 끊기면 "Chrome 확장 연결 대기"로 바뀜
 - 버전 체계: EXE `Version`/`FileVersion`/`InformationalVersion`(빌드 커밋 SHA 자동 포함), `NativeBridgeProtocol.ProtocolVersion = 1`, 트레이 툴팁·설정창 하단·로그 첫 줄에 버전 표시, 이 CHANGELOG 신설
 - 제거 경로: `--uninstall` 명령줄 인자(`/uninstall`, `-uninstall`도 인식)와 트레이 "완전 제거…" — HKCU Run 값과 Chrome/Edge NativeMessagingHosts 키를 삭제하고 `%LOCALAPPDATA%\DaouCalendarOverlay` 삭제 여부를 확인 창으로 묻는다(`UninstallService`, `UninstallFlow`)
 - README와 기술 문서에 설치·업그레이드(EXE 종료 → 교체 → 실행 → 확장 새로고침)·제거 절차
@@ -22,7 +23,7 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - 캘린더 표시 이름 기억: settings.json 새 키 `CalendarNames`(캘린더 ID → 마지막으로 확인한 이름, 최대 200개, 없으면 빈 사전)에 동기화로 확인된 이름을 바뀐 경우에만 저장해, 조회 범위에 일정이 없는 캘린더도 컨텍스트 메뉴 "캘린더 표시"에서 ID 대신 이름으로 표시(`CalendarNameStore`)
 
 ### Changed
-- Chrome 확장 7.0.0 → 7.1.0, 서비스 워커 파일명 `service-worker-v710.js`, 확장이 `extensionVersion`을 앱에 전달
+- Chrome 확장 7.0.0 → 7.1.0, 서비스 워커 파일명 `service-worker-v710.js`, 확장이 `getConfig`에 `extensionVersion`과 `protocolVersion`(현재 1)을 실어 앱에 전달. 앱은 `protocolVersion`을 로그 요약(`protocolVersion=1`)에 남기고, 이 필드가 없는 구버전 확장도 호환으로 처리
 - Native host 경량화: 커스텀 `Program.Main`이 WPF `Application` 생성 전에 host 모드를 분기해, host 스폰마다 `App`·App.xaml 리소스를 만들지 않음(`StartupModeParser`)
 - 확장 동기화 트리거 정리: 서비스 워커 최상위 `syncOnce()` 호출 제거, 쿠키 변경 5초 debounce, host 연결 3회 연속 실패 시 알람 주기 1 → 2 → 5분 백오프 후 성공 시 30초 복귀, 알람 주기 불일치 시 재생성
 - DaouOffice 주소 검증을 https + `*.daouoffice.com` 정책 한 곳(`BaseUrlPolicy`)으로 통일

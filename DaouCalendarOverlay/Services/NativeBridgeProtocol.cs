@@ -72,6 +72,13 @@ public sealed class NativeBridgeRequest
 
     [JsonPropertyName("extensionVersion")]
     public string? ExtensionVersion { get; set; }
+
+    /// <summary>
+    /// 확장이 getConfig에 싣는 메시지 프로토콜 버전(7.1.0 worker부터 <see cref="NativeBridgeProtocol.ProtocolVersion"/>과 같은 값).
+    /// 이 필드를 보내지 않는 구버전 확장(null)도 호환으로 취급한다. 현재는 로그 요약에만 남기고 협상에는 쓰지 않는다.
+    /// </summary>
+    [JsonPropertyName("protocolVersion")]
+    public int? ProtocolVersion { get; set; }
 }
 
 public sealed class NativeBridgeResponse
