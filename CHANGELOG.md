@@ -33,6 +33,7 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - 여러 캘린더에 공유된 일정을 `id` 기준 1건으로 합치고 소속 캘린더 이름을 모두 표기
 - 자정·월 전환 시 오늘 날짜 갱신 누락
 - `publish.ps1`이 `dotnet` 실패(0이 아닌 종료 코드)에도 "Publish completed"를 출력하고 정상 종료하던 문제
+- 기동 시 Chrome 확장 파일 추출·Native Messaging 등록 실패(GPO·ACL로 HKCU 쓰기 차단 등)가 앱을 종료시키던 문제: 이제 로그(`startup.extension`/`startup.nativehost`)와 상태 문구("Native host 등록 실패: … · 로그 확인")로만 알리고 캐시 표시를 계속하며, 초기화 오류 문구가 원인과 무관하게 settings.json을 지목하던 것을 예외 종류별 사유와 로그 폴더 안내로 바꿈(`StartupFailureReasons`)
 
 ### Security
 - 네임드 파이프 `CurrentUserOnly` + 서버 프로세스 실행 파일 경로 대조 후에만 쿠키 전달

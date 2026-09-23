@@ -36,6 +36,7 @@ public sealed class SyncStatusService
     private OverlaySyncState _state = OverlaySyncState.Starting;
     private string _configurationInvalidReason = "";
     private string _extensionMismatchKey = "";
+    private readonly List<string> _startupIssues = new();
 
     public event EventHandler<SyncStatusChangedEventArgs>? StatusChanged;
 
@@ -167,6 +168,38 @@ public sealed class SyncStatusService
     public void MarkPersistenceError(string target) =>
         Publish(OverlaySyncState.GeneralError, $"{target} 저장 실패 · 로그 확인", true);
 
+    /// <summary>확장 추출·native host 등록처럼 기동 시 선택적 구성 요소가 실패했을 때. 오버레이는 계속 동작한다.</summary>
+    /// <remarks>
+    /// "{component} 실패: {reason} · 로그 확인"을 GeneralError로 게시하고, 이후 대기/연결 대기 문구 끝에
+    /// " · {component} 실패" 접미를 붙인다. 같은 구성 요소는 접미에 한 번만 들어간다.
+    /// </remarks>
+    public void MarkStartupComponentError(string component, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(component))
+            return;
+
+        var label = component + " 실패";
+        lock (_gate)
+        {
+            if (!_startupIssues.Any(x => string.Equals(x, label, StringComparison.Ordinal)))
+                _startupIssues.Add(label);
+        }
+
+        var detail = string.IsNullOrWhiteSpace(reason) ? "" : ": " + reason;
+        Publish(OverlaySyncState.GeneralError, $"{label}{detail} · 로그 확인", true);
+    }
+
+    /// <summary>같은 구성 요소가 나중에 성공하면 접미에서 제거한다(새 상태를 게시하지 않는다).</summary>
+    public void MarkStartupComponentResolved(string component)
+    {
+        if (string.IsNullOrWhiteSpace(component))
+            return;
+
+        var label = component + " 실패";
+        lock (_gate)
+            _startupIssues.RemoveAll(x => string.Equals(x, label, StringComparison.Ordinal));
+    }
+
     public void EvaluateHealth()
     {
         DateTimeOffset heartbeat;
@@ -192,23 +225,27 @@ public sealed class SyncStatusService
     }
 
     /// <summary>
-    /// 대기/연결 대기 문구에 붙는 접미를 한 곳에서 합성한다.
+    /// 대기/연결 대기 문구에 붙는 접미를 한 곳에서 합성한다(범위 밖 → 캐시 시각 → 시작 이슈 순).
     /// 붙일 것이 없으면 입력 문자열을 그대로 돌려준다.
     /// </summary>
     private string Decorate(string text)
     {
         bool outOfRange;
         DateTimeOffset cachedAt;
+        string[] issues;
         lock (_gate)
         {
             outOfRange = _cacheOutOfRange;
             cachedAt = _cachedAt;
+            issues = _startupIssues.ToArray();
         }
 
         if (outOfRange)
             text += CacheOutOfRangeSuffix;
         if (cachedAt != default)
             text += " · 캐시 " + cachedAt.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
+        foreach (var issue in issues)
+            text += " · " + issue;
         return text;
     }
 

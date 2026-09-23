@@ -221,11 +221,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 비교표가 문서에 있음.
 - 적용 메모(2026-09-23): .NET 10 시험 측정 스크립트(tools/net10-trial.ps1)와 TFM 가드 테스트 추가; .NET 10 시험 실행 결과를 docs/net10-migration.md에 기록하고 README·기술 문서 반영 수동 확인 4건 대기
 
-#### T2.8 시작 실패 비치명화 — P2
+#### [부분] T2.8 시작 실패 비치명화 — P2
 - 근거: `App.xaml.cs:59-108`에서 `EnsureExtracted`/`EnsureRegistered` 예외가 최상위 catch로 가 MessageBox 후 종료. GPO로 HKCU 쓰기가 막히면 캐시 표시조차 불가. 오류 문구가 원인과 무관하게 settings.json을 지목(`:103-104`).
 - 검증 상태: 코드 확인.
 - 지시: 두 호출을 개별 try/catch로 감싸 실패는 로그 + 상태 "Native host 등록 실패: …"로 표시하고 오버레이는 계속. 오류 문구는 실제 예외 종류별로.
 - 완료 기준: 레지스트리 키를 읽기 전용으로 만든 상태에서 앱이 캐시로 기동.
+- 적용 메모(2026-09-23): 기동 실패 사유 분류기(StartupFailureReasons)와 SyncStatusService 비치명 상태 API 추가; App.OnStartup의 확장 추출·native host 등록 실패를 비치명화하고 오류 문구·문서 갱신 수동 확인 4건 대기
 
 #### T2.9 UX 소소한 개선 묶음 — P2
 - 근거·지시(각각 한 커밋):

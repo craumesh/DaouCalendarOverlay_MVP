@@ -62,8 +62,8 @@ public partial class App : WpfApplication
                 _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(loadedRefreshMinutes);
                 if (loadedRefreshMinutes != _settings.RefreshMinutes)
                     LogService.Warn("settings", $"RefreshMinutes {loadedRefreshMinutes} → {_settings.RefreshMinutes} 으로 보정");
-                _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
+                TryEnsureExtensionExtracted();
+                TryEnsureNativeHostRegistered();
 
                 if (!_settings.IsConfigured)
                 {
@@ -76,8 +76,8 @@ public partial class App : WpfApplication
 
                     _settings = setup.Result;
                     await SaveSettingsAsync();
-                    _extensionInstaller.EnsureExtracted();
-                    _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
+                    TryEnsureExtensionExtracted();
+                    TryEnsureNativeHostRegistered();
                 }
 
                 _startupService.Apply(_settings.StartWithWindows);
@@ -113,7 +113,7 @@ public partial class App : WpfApplication
             {
                 LogService.Error("startup", "앱 초기화 실패", ex);
                 System.Windows.MessageBox.Show(
-                    $"앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json",
+                    $"앱 초기화 중 오류가 발생했습니다.\n\n{StartupFailureReasons.Describe(ex)}\n\n로그 폴더: {LogService.LogDirectory ?? LogService.DefaultLogDirectory}",
                     "Daou Calendar Overlay",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -123,7 +123,17 @@ public partial class App : WpfApplication
         catch (Exception ex)
         {
             LogService.Error("startup", "OnStartup 실패", ex);
-            _syncStatus.MarkGeneralError($"시작 실패: {ex.Message}");
+            _syncStatus.MarkGeneralError($"시작 실패: {StartupFailureReasons.Describe(ex)}");
+            if (_overlayWindow is null)
+            {
+                // 창도 트레이도 없어 상태 문구가 보이지 않는다. 사용자에게 알린 뒤 좀비 프로세스로 남지 않게 종료한다.
+                System.Windows.MessageBox.Show(
+                    $"앱을 시작하지 못했습니다.\n\n{StartupFailureReasons.Describe(ex)}\n\n로그 폴더: {LogService.LogDirectory ?? LogService.DefaultLogDirectory}",
+                    "Daou Calendar Overlay",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Shutdown();
+            }
         }
     }
 
@@ -157,6 +167,40 @@ public partial class App : WpfApplication
     {
         LogService.Error(category, message, ex);
         _syncStatus.MarkGeneralError(ex is null ? message : $"{message}: {ex.Message}");
+    }
+
+    /// <summary>확장 파일 추출 실패를 치명적 오류로 만들지 않는다. 실패해도 오버레이는 계속 동작한다.</summary>
+    private bool TryEnsureExtensionExtracted()
+    {
+        try
+        {
+            _extensionInstaller.EnsureExtracted();
+            _syncStatus.MarkStartupComponentResolved(StartupFailureReasons.ExtensionComponent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("startup.extension", "Chrome 확장 파일 추출 실패", ex);
+            _syncStatus.MarkStartupComponentError(StartupFailureReasons.ExtensionComponent, StartupFailureReasons.Describe(ex));
+            return false;
+        }
+    }
+
+    /// <summary>Native Messaging 등록 실패를 치명적 오류로 만들지 않는다. 등록이 없으면 동기화만 막히고 캐시는 계속 표시된다.</summary>
+    private bool TryEnsureNativeHostRegistered()
+    {
+        try
+        {
+            _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
+            _syncStatus.MarkStartupComponentResolved(StartupFailureReasons.NativeHostComponent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("startup.nativehost", "Native Messaging 등록 실패", ex);
+            _syncStatus.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, StartupFailureReasons.Describe(ex));
+            return false;
+        }
     }
 
     /// <summary>설정 저장 실패를 치명적 오류로 만들지 않는다. 실패는 상태 표시줄과 로그로만 알린다.</summary>
@@ -318,8 +362,8 @@ public partial class App : WpfApplication
 
         await SaveSettingsAsync();
         _startupService.Apply(_settings.StartWithWindows);
-        _extensionInstaller.EnsureExtracted();
-        _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
+        TryEnsureExtensionExtracted();
+        TryEnsureNativeHostRegistered();
         _overlayWindow.ApplySettings(_settings);
         await RefreshAsync(true);
     }

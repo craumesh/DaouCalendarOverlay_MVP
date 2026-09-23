@@ -407,6 +407,15 @@ git push
 DaouOffice "열기" 버튼(트레이 "DaouOffice 열기" 포함)은 기본 브라우저가 무엇이든 Chrome을 직접 실행합니다. Chrome을 찾지 못하면(`App Paths` 레지스트리에 `chrome.exe`가 없음) 기본 브라우저로 엽니다.
 이 경우 기본 브라우저에 확장이 설치돼 있지 않으면 그 브라우저에서 로그인해도 동기화에 반영되지 않으므로, 확장이 설치된 Chrome을 직접 열어 다우오피스에 로그인하세요.
 
+### "Native host 등록 실패" 또는 "확장 파일 설치 실패" 상태가 표시되는 경우
+
+오버레이는 기동할 때와 설정을 저장할 때 Chrome 확장 파일을 `%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension`에 추출하고 HKCU에 Native Messaging Host를 등록합니다. 이 두 작업이 실패해도(그룹 정책·ACL로 HKCU 쓰기가 막힌 경우, 폴더 권한·디스크 문제 등) 더 이상 앱을 종료시키지 않고, 로그와 상태 표시줄 문구로만 알립니다.
+
+- 상태 표시줄: `Native host 등록 실패: 쓰기 권한이 없습니다(정책 또는 ACL 제한) · 로그 확인`, `확장 파일 설치 실패: … · 로그 확인`처럼 실패한 구성 요소와 예외 종류별 사유가 표시됩니다.
+- 로그: `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`에 카테고리 `startup.extension`(확장 파일 추출) / `startup.nativehost`(Native Messaging 등록)로 오류와 예외 정보가 남습니다.
+- 이 상태에서도 저장된 캐시 일정은 계속 표시되지만, 새 동기화는 Native Messaging 등록이 복구될 때까지 되지 않습니다.
+- 이후 대기 문구 끝에 ` · Native host 등록 실패`(또는 ` · 확장 파일 설치 실패`) 접미가 붙어 있습니다. 원인을 해소한 뒤 트레이 → **설정**을 열어 저장하거나 오버레이를 다시 시작해 재시도가 성공하면 이 접미는 사라집니다.
+
 ## 버전
 
 | 구성 요소 | 버전 |

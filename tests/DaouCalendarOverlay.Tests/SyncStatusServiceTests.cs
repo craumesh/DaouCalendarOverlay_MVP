@@ -454,4 +454,138 @@ public sealed class SyncStatusServiceTests
         Assert.Single(events);
         Assert.Equal(OverlaySyncState.Synced, events[0].State);
     }
+
+    /// <summary>기동 구성 요소 실패는 GeneralError 상태와 "{구성 요소} 실패: {사유} · 로그 확인" 문구로 게시된다(T2.8).</summary>
+    [Fact]
+    public void MarkStartupComponentError_PublishesGeneralErrorWithReason()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.GeneralError, captured!.State);
+        Assert.Equal("Native host 등록 실패: 쓰기 권한이 없습니다(정책 또는 ACL 제한) · 로그 확인", captured.Text);
+        Assert.True(captured.IsError);
+    }
+
+    /// <summary>기동 구성 요소 실패 이후 대기 문구 끝에 " · {구성 요소} 실패" 접미가 붙는다.</summary>
+    [Fact]
+    public void MarkStartupComponentError_AppendsSuffixToWaitingText()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.WaitingForChrome, captured!.State);
+        Assert.Equal("Chrome 백그라운드 대기 · Native host 등록 실패", captured.Text);
+    }
+
+    /// <summary>같은 구성 요소가 반복 실패해도 접미는 한 번만 붙는다.</summary>
+    [Fact]
+    public void MarkStartupComponentError_DoesNotDuplicateSuffixOnRepeat()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 백그라운드 대기 · Native host 등록 실패", captured!.Text);
+    }
+
+    /// <summary>같은 구성 요소가 나중에 성공하면 대기 문구에서 접미가 사라진다.</summary>
+    [Fact]
+    public void MarkStartupComponentResolved_RemovesSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkStartupComponentResolved(StartupFailureReasons.NativeHostComponent);
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 백그라운드 대기", captured!.Text);
+    }
+
+    /// <summary>시작 이슈 접미는 범위 밖 → 캐시 시각 접미 뒤, 맨 끝에 붙는다.</summary>
+    [Fact]
+    public void MarkStartupComponentError_SuffixFollowsCacheSuffixes()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkCacheOutOfRange();
+        svc.MarkCacheLoaded(new DateTimeOffset(2026, 9, 22, 14, 5, 0, TimeSpan.FromHours(9)));
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkWaiting();
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 백그라운드 대기 · 캐시(범위 밖) · 캐시 09-22 14:05 · Native host 등록 실패", captured!.Text);
+    }
+
+    /// <summary>동기화가 성공해도 등록 실패 사실은 지워지지 않아 이후 대기 문구에 접미가 남는다.</summary>
+    [Fact]
+    public void MarkSuccess_DoesNotClearStartupIssueSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 14, 5, 0, TimeSpan.FromHours(9)));
+
+        Assert.NotNull(captured);
+        Assert.Equal("정상 · 동기화 14:05", captured!.Text);
+
+        svc.MarkWaiting();
+        Assert.EndsWith(" · Native host 등록 실패", captured!.Text);
+    }
+
+    /// <summary>
+    /// 확장 버전 불일치(ExtensionError) 문구는 Decorate를 거치지 않으므로 시작 이슈 접미가 붙지 않는다(의도된 동작 고정).
+    /// </summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_DoesNotAppendStartupIssueSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.ExtensionError, captured!.State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", captured.Text);
+    }
+
+    /// <summary>버전 일치 확인으로 연결됨 상태에 돌아올 때는 Decorate를 거치므로 시작 이슈 접미가 붙는다(의도된 동작 고정).</summary>
+    [Fact]
+    public void MarkExtensionVersionConfirmed_AppendsStartupIssueSuffix()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, "쓰기 권한이 없습니다(정책 또는 ACL 제한)");
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkExtensionVersionConfirmed();
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.Connected, captured!.State);
+        Assert.Equal("Chrome 브리지 연결됨 · 동기화 대기 · Native host 등록 실패", captured.Text);
+    }
 }
