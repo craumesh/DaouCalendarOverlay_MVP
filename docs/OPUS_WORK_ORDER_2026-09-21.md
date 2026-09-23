@@ -172,11 +172,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 ### P2. 아키텍처·성능·배포 개선
 
-#### T2.1 Native host 경량화 — P2 (Q3)
+#### [부분] T2.1 Native host 경량화 — P2 (Q3)
 - 근거: `sendNativeMessage`(`service-worker-v700.js:36-38, 145, 160`)는 호출마다 host를 새로 띄움(웹 확인). host 모드에서도 `App` 필드 초기화(`App.xaml.cs:14-20`: `SettingsService`/`CacheService` 생성자가 `Directory.CreateDirectory`)와 WPF `Application`/`App.xaml` 리소스 로드가 끝난 뒤에야 분기(`:38-43`). self-contained + `EnableCompressionInSingleFile`(csproj:12-15)이라 기동마다 압축 해제 비용. 30초마다 1회, fetch 시 2회, 오버레이가 꺼져 있어도 2.5초 대기 후 실패를 무한 반복(`NativeMessagingHost.cs:41`).
 - 검증 상태: 코드 확인 + 웹 확인. 실제 스폰당 CPU/시간은 미측정.
 - 지시(기본안 Q3-a): (1) `Program.cs`에 `[STAThread] Main` 추가, `<StartupObject>` 지정, `App.xaml`의 자동 Main 비활성화. Main에서 `IsNativeInvocation(args)`이면 WPF를 만들지 않고 `NativeMessagingHost.RunAsync()`만 실행. 서비스 필드 초기화는 GUI 경로로 이동. (2) 스폰당 시간(프로세스 시작~응답)과 CPU를 before/after로 측정해 문서 성능 절에 기록. (3) Q3-b(`connectNative` 장수명 포트)는 측정치가 기준(예: 스폰당 300ms 초과)을 넘으면 별도 작업으로.
 - 완료 기준: host 모드에서 `App` 생성이 일어나지 않음(로그로 확인). 측정치가 문서에 기록됨.
+- 적용 메모(2026-09-23): 커스텀 Program.Main + StartupModeParser로 host 모드에서 WPF App 생성 제거; host 스폰 비용 측정 스크립트와 성능·시작 모드 문서 갱신 수동 확인 6건 대기
 
 #### T2.2 확장 트리거·백오프·버전 협상 — P2
 - 근거: `service-worker-v700.js:181-208`에서 onInstalled/onStartup/cookies.onChanged/onAlarm/action.onClicked/최상위 호출 6개가 모두 `syncOnce` → DaouOffice 페이지 로드 시 쿠키 변경마다 host 스폰. `inFlight`는 동시 실행만 막고 연속 실행은 못 막음. `getConfig` 실패 시 백오프 없음(`:144-148`). `ensureAlarm(:172-179)`은 기존 알람 주기 미갱신. 확장 버전을 앱에 전달하지 않아 EXE가 확장 파일을 덮어써도(`ChromeExtensionInstaller.cs:29-54`) 불일치를 감지 못함. `BridgeFailureKind.Extension`/`ExtensionFailure(:469-473)`/`MarkExtensionError`/`OverlaySyncState.ExtensionError`는 생성 경로가 없어 도달 불가.

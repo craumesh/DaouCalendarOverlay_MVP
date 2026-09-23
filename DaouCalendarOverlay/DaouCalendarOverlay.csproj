@@ -18,6 +18,8 @@
     <DebugSymbols>false</DebugSymbols>
     <ApplicationIcon>Assets\DaouCalendarOverlayIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <StartupObject>DaouCalendarOverlay.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>

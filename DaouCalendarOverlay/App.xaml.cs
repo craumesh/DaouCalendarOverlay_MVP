@@ -36,15 +36,6 @@ public partial class App : WpfApplication
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
-            if (NativeMessagingHost.IsNativeInvocation(e.Args))
-            {
-                LogService.Initialize(LogService.DefaultLogDirectory, "host");
-                await NativeMessagingHost.RunAsync();
-                Shutdown();
-                return;
-            }
-
             LogService.Initialize(LogService.DefaultLogDirectory, "overlay");
             RegisterGlobalExceptionHandlers();
             LogService.Info("startup", $"overlay 시작 pid={Environment.ProcessId}");

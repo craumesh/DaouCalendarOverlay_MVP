@@ -36,8 +36,10 @@ DaouCalendarOverlay_MVP/
 ├─ README.md
 ├─ .gitignore
 ├─ publish.ps1
+├─ tools/
 │
 └─ DaouCalendarOverlay/
+   ├─ Program.cs
    ├─ App.xaml
    ├─ App.xaml.cs
    ├─ app.manifest
@@ -62,6 +64,7 @@ DaouCalendarOverlay_MVP/
 | `ChromeExtension/` | Chrome Extension 및 Native Messaging 관련 파일 |
 | `Assets/` | 아이콘 및 기타 리소스 |
 | `publish.ps1` | 배포용 빌드/설치 작업 |
+| `tools/` | host 스폰 비용 측정 스크립트 |
 
 ## 동작 구조
 
@@ -99,6 +102,8 @@ DaouCalendarOverlay_MVP/
 동기화 주기는 앱의 타이머가 아니라 `CalendarBridgeServer`가 결정합니다. Chrome 확장이 30초마다 `getConfig`를 물어보고, 앱이 가져올 때가 됐다고 답한 회차에만 일정을 가져옵니다(성공 후 다음 시도 시각은 설정의 새로고침 주기, 실패 시 backoff로 정해집니다).
 
 달력의 '오늘' 표시 기준은 Windows 로컬 날짜입니다. 자정이 지나면 1초 시계 틱에서 오늘 배지가 자동으로 이동하고, 이번 달을 보고 있었다면 새 달로 이동한 뒤 한 번 동기화합니다. (일정이 어느 날짜에 속하는지 판정할 때는 KST +09:00을 사용합니다.)
+
+Chrome이 Native Messaging host로 같은 EXE를 실행할 때는 `Program.Main`이 실행 인자를 보고 WPF 창/리소스를 만들지 않은 채 stdin↔Named Pipe 중계만 수행한 뒤 종료합니다. 이때의 기록은 `host-yyyyMMdd.log`에 남습니다.
 
 ## 요구 사항
 
