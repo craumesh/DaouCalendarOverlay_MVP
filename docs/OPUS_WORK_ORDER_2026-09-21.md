@@ -242,10 +242,11 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 각 항목 수동 확인 기록.
 - 적용 메모(2026-09-23): 그리드 칩/상태 툴팁, 키 입력 정리, 첫 실행 창 위치, 초기화 1회 재구성; 이벤트 색상 매핑 분리와 int.MinValue 방어, 투명도 문서화, 확장 쿠키 스토어 우선순위; 캘린더 표시 이름 기억(settings.json CalendarNames) 수동 확인 12건 대기
 
-#### T2.10 죽은 코드 정리 — P2
+#### [부분] T2.10 죽은 코드 정리 — P2
 - 근거: `MainWindow.xaml.cs:649-661` `HasButtonAncestor` 미사용. `App.xaml:78-103` `MoreButtonStyle` 미사용. `EventChipViewModel.Tooltip`(T2.9-1에서 사용). `MainWindow.SetEvents`의 `updatedAt`(T1.10에서 사용). `BridgeSyncEventArgs.ExtensionFailure`(T2.2에서 사용). `App._refreshTimer`(T1.8에서 재정의). `NativeBridgeProtocol.Utf8(:43)` 미사용. 실행 파일 경로 획득이 두 방식(`Environment.ProcessPath` vs `Process.MainModule`, `App.xaml.cs:324-327`).
 - 지시: 사용처가 생기지 않는 항목은 삭제, 경로 획득은 `Environment.ProcessPath`로 통일.
 - 완료 기준: 빌드 경고 0 유지.
+- 적용 메모(2026-09-23): 미사용 멤버·스타일 삭제와 보존 대상 확정; 실행 파일 경로 획득을 Environment.ProcessPath로 통일 수동 확인 6건 대기
 
 ### P3. 문서 보완 (기술 문서 HTML + README)
 

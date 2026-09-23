@@ -492,7 +492,7 @@ public partial class App : WpfApplication
         var trayIcon = System.Drawing.SystemIcons.Application;
         try
         {
-            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            var exePath = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exePath))
             {
                 var extracted = System.Drawing.Icon.ExtractAssociatedIcon(exePath);

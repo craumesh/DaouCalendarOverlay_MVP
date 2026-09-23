@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -57,7 +56,6 @@ public sealed class NativeMessagingRegistrationService
     public void EnsureRegistered(bool registerEdge)
     {
         var executablePath = Environment.ProcessPath
-            ?? Process.GetCurrentProcess().MainModule?.FileName
             ?? throw new InvalidOperationException("현재 실행 파일 경로를 확인할 수 없습니다.");
 
         Directory.CreateDirectory(Path.GetDirectoryName(ManifestPath)!);

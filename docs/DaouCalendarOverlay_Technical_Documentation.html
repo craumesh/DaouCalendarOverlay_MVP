@@ -246,8 +246,7 @@ public static async Task&lt;byte[]&gt; ConnectAndExchangeAsync(
         LogService.Warn(LogCategory, &quot;파이프 연결 실패&quot;, ex);
         return SerializeError($&quot;Daou Calendar Overlay가 실행 중이지 않거나 Native Bridge에 연결할 수 없습니다: {ex.Message}&quot;);
     }
-}</code></pre><p>클라이언트 쪽 파이프도 <code class="inline">PipeOptions.CurrentUserOnly</code>를 지정하므로 다른 Windows 계정이 만든 파이프에는 애초에 연결되지 않는다. 같은 계정이 파이프 이름을 선점한 경우를 대비해, 연결 직후 <code class="inline">GetNamedPipeServerProcessId</code>로 서버 PID를 얻고 그 프로세스의 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조한다. 경로가 다르거나 확인할 수 없으면 <strong>요청 프레임을 한 바이트도 쓰지 않고</strong> 오류 응답만 stdout으로 돌려주므로, 세션 쿠키가 담긴 <code class="inline">postResult</code> 페이로드가 선점 프로세스로 넘어가지 않는다.</p><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다. 설정 <code class="inline">RegisterEdge</code>가 켜져 있으면 같은 manifest를 Edge 키(<code class="inline">HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay</code>)에도 등록하고, 꺼져 있으면 Edge 키만 삭제한다. Chrome/Edge 레지스트리 경로는 <code class="inline">UninstallService.BuildNativeHostKeyPath</code>에서 만들어 제거 경로(§22)와 같은 출처를 쓴다.</p><pre><code>using System.Diagnostics;
-using System.IO;
+}</code></pre><p>클라이언트 쪽 파이프도 <code class="inline">PipeOptions.CurrentUserOnly</code>를 지정하므로 다른 Windows 계정이 만든 파이프에는 애초에 연결되지 않는다. 같은 계정이 파이프 이름을 선점한 경우를 대비해, 연결 직후 <code class="inline">GetNamedPipeServerProcessId</code>로 서버 PID를 얻고 그 프로세스의 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조한다. 경로가 다르거나 확인할 수 없으면 <strong>요청 프레임을 한 바이트도 쓰지 않고</strong> 오류 응답만 stdout으로 돌려주므로, 세션 쿠키가 담긴 <code class="inline">postResult</code> 페이로드가 선점 프로세스로 넘어가지 않는다.</p><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다. 설정 <code class="inline">RegisterEdge</code>가 켜져 있으면 같은 manifest를 Edge 키(<code class="inline">HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay</code>)에도 등록하고, 꺼져 있으면 Edge 키만 삭제한다. Chrome/Edge 레지스트리 경로는 <code class="inline">UninstallService.BuildNativeHostKeyPath</code>에서 만들어 제거 경로(§22)와 같은 출처를 쓴다.</p><pre><code>using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -305,7 +304,6 @@ public sealed class NativeMessagingRegistrationService
     public void EnsureRegistered(bool registerEdge)
     {
         var executablePath = Environment.ProcessPath
-            ?? Process.GetCurrentProcess().MainModule?.FileName
             ?? throw new InvalidOperationException(&quot;현재 실행 파일 경로를 확인할 수 없습니다.&quot;);
 
         Directory.CreateDirectory(Path.GetDirectoryName(ManifestPath)!);

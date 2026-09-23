@@ -12,7 +12,6 @@ using DaouCalendarOverlay.ViewModels;
 using WpfApplication = System.Windows.Application;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 using WpfButton = System.Windows.Controls.Button;
-using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
 using WpfScrollBar = System.Windows.Controls.Primitives.ScrollBar;
@@ -775,20 +774,6 @@ public partial class MainWindow : Window
     {
         _saveBoundsTimer?.Stop();
         await RunGuardedAsync("ui.saveBounds", () => ((App)WpfApplication.Current).SaveWindowBoundsAsync(Left, Top));
-    }
-
-    private static bool HasButtonAncestor(object? source, DependencyObject stopAt)
-    {
-        DependencyObject? current = source as DependencyObject;
-        while (current is not null && current != stopAt)
-        {
-            if (current is WpfButtonBase)
-                return true;
-
-            current = GetParent(current);
-        }
-
-        return false;
     }
 
     private static bool IsInteractiveSource(object? source)
