@@ -200,11 +200,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: `--uninstall` 실행 후 레지스트리 3곳에 값 없음.
 - 적용 메모(2026-09-23): UninstallService + --uninstall CLI 경로; 트레이 "완전 제거…" 항목과 설치/업그레이드/제거 문서 수동 확인 7건 대기
 
-#### T2.5 브라우저 매트릭스와 "열기" 버튼 — P2 (Q4)
+#### [부분] T2.5 브라우저 매트릭스와 "열기" 버튼 — P2 (Q4)
 - 근거: `NativeMessagingRegistrationService.cs:10`은 `Software\Google\Chrome\...`만. `App.OpenDaouOffice(:207-224)`는 `UseShellExecute`로 기본 브라우저를 열어 Chrome이 기본이 아니면 재로그인해도 확장이 쿠키를 얻지 못함.
 - 검증 상태: 코드 확인. Edge가 Chrome 키를 fallback으로 읽는지는 미확인.
 - 지시(기본안 Q4-a): `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay`에도 등록(설정 옵션 "Edge에도 등록", 기본 on). "열기"는 레지스트리 `App Paths\chrome.exe`로 Chrome을 직접 실행하고 실패 시 기본 브라우저. 문서에 지원 매트릭스(Windows 10/11 x64, Chrome 120+, Edge 시험 지원, Whale/Brave 미지원, 단일 프로필 가정, KST).
 - 완료 기준: Edge에서 같은 unpacked 확장 로드 시 동기화 동작(수동 확인 기록). 기본 브라우저를 Edge로 바꿔도 "열기"가 Chrome을 띄움.
+- 적용 메모(2026-09-23): Edge NativeMessagingHosts 등록과 RegisterEdge 설정 키; BrowserLauncher로 Chrome 직접 실행 + 기본 브라우저 fallback; 지원 환경 매트릭스와 Edge 옵션 문서화 수동 확인 8건 대기
 
 #### T2.6 빌드·배포 스크립트 정비 — P2
 - 근거: `publish.ps1:14-28`은 `$ErrorActionPreference="Stop"`이 네이티브 exe 종료 코드에 적용되지 않아 실패해도 "Publish completed" 출력. csproj:11-12 전역 `RuntimeIdentifier`/`SelfContained`로 개발 빌드도 self-contained(`bin\Release\...\win-x64`에 런타임 전체 존재, 실데이터 확인). `DebugType=None`(csproj:17-18)이라 크래시 라인 정보 없음. 코드 서명 없음(SmartScreen 경고 예상, 추정).

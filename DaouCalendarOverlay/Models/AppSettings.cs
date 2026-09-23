@@ -12,6 +12,7 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; } = true;
     public bool AlwaysOnTop { get; set; } = false;
     public bool PositionLocked { get; set; } = false;
+    public bool RegisterEdge { get; set; } = true;
     public double UiOpacity { get; set; } = 1.0;
     public double? Left { get; set; }
     public double? Top { get; set; }
@@ -30,6 +31,7 @@ public sealed class AppSettings
         StartWithWindows = StartWithWindows,
         AlwaysOnTop = AlwaysOnTop,
         PositionLocked = PositionLocked,
+        RegisterEdge = RegisterEdge,
         UiOpacity = UiOpacity,
         Left = Left,
         Top = Top

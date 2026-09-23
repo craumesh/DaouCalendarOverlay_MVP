@@ -111,9 +111,14 @@ Chrome이 Native Messaging host로 같은 EXE를 실행할 때는 `Program.Main`
 
 - Windows
 - .NET 8 SDK
-- Google Chrome
+- Google Chrome 120 이상 (권장)
+- Microsoft Edge (시험 지원, 선택)
 - 다우오피스 계정
 - 다우오피스 캘린더 사용 권한
+
+지원 환경 요약: OS는 Windows 10/11 x64만 지원합니다. 브라우저는 Chrome 120 이상이 정식 지원이고, Edge(Chromium)는 같은 확장을 별도로 로드하는 조건의 시험 지원입니다. Whale, Brave, Firefox는 지원하지 않습니다.
+브라우저 프로필은 하나만 쓰는 환경을 가정하며(다중 프로필·시크릿 창 동시 사용은 보장하지 않음), 일정의 날짜 판정은 KST(+09:00) 기준입니다.
+자세한 표는 기술 문서의 "지원 환경 매트릭스" 절을 참고하세요.
 
 개발/빌드 환경에서는 Visual Studio 또는 .NET CLI를 사용할 수 있습니다.
 
@@ -168,6 +173,7 @@ powershell -ExecutionPolicy Bypass -File .\publish.ps1
 4. Native Messaging Host가 정상적으로 등록되었는지 확인합니다.
 5. `DaouCalendarOverlay.exe`를 실행합니다.
 6. 애플리케이션에서 캘린더 동기화 상태를 확인합니다.
+7. (Edge를 쓰는 경우) 설정창의 **"Edge에도 Native Messaging 등록"** 이 켜져 있어야 하며(기본 켜짐), Edge에서도 `edge://extensions`를 열고 개발자 모드를 켠 뒤 같은 unpacked 확장(`%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension`)을 로드해야 합니다. Edge 지원은 시험 지원입니다.
 
 DaouOffice 주소는 `https://회사이름.daouoffice.com` 형식만 허용합니다. `http://`, 다른 도메인, `daouoffice.com`(회사 이름 없는 주소)은 설정창에서 거부되며, 기존 설정에 이런 주소가 들어 있으면 앱 시작 시 설정창이 열리고 거부 사유가 표시됩니다.
 
@@ -235,6 +241,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 
 - 자동 새로고침은 1~1440분만 허용합니다. 범위 밖 값은 설정창에서 거부되며, settings.json에 남아 있던 범위 밖 값은 앱 기동 시 자동으로 보정됩니다.
 - 캘린더 ID는 숫자 1~19자리만 허용됩니다.
+- `RegisterEdge`(설정창 "Edge에도 Native Messaging 등록")는 기본 켜짐이며, 끄고 저장하면 Edge의 NativeMessagingHosts 키(`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay`)를 제거합니다. 기존 settings.json에 이 키가 없으면 켜짐으로 간주합니다.
 
 `settings.json`과 `calendar-cache.json`은 같은 폴더에 GUID 이름의 임시 파일(`settings.json.<guid>.tmp`)을 만들어 기록한 뒤 원자적으로 교체합니다. 같은 파일에 대한 동시 저장은 경로별로 직렬화되므로, 투명도(450ms)와 창 위치(400ms) 저장 틱이 겹쳐도 파일이 손상되거나 앱이 종료되지 않습니다.
 
@@ -357,6 +364,11 @@ git push
 7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
 8. 상태 문구에 `· 캐시 MM-dd HH:mm`만 계속 보이면 아직 한 번도 동기화에 성공하지 못한 상태입니다. Chrome 확장과 Native Messaging 등록을 먼저 확인하세요.
 9. 상태에 `Chrome 확장 새로고침 필요 (…)`가 보이면 Chrome에 로드된 확장 버전이 EXE에 포함된 버전과 다른 것입니다. `chrome://extensions`에서 확장을 새로고침하세요. 새로고침하면 확장이 즉시 `getConfig`를 보내므로 늦어도 30초 안에 문구가 `Chrome 브리지 연결됨 · 동기화 대기`로 바뀝니다.
+
+### "열기"가 Chrome이 아닌 브라우저로 열리는 경우
+
+DaouOffice "열기" 버튼(트레이 "DaouOffice 열기" 포함)은 기본 브라우저가 무엇이든 Chrome을 직접 실행합니다. Chrome을 찾지 못하면(`App Paths` 레지스트리에 `chrome.exe`가 없음) 기본 브라우저로 엽니다.
+이 경우 기본 브라우저에 확장이 설치돼 있지 않으면 그 브라우저에서 로그인해도 동기화에 반영되지 않으므로, 확장이 설치된 Chrome을 직접 열어 다우오피스에 로그인하세요.
 
 ## 버전
 

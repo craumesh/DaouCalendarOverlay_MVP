@@ -63,7 +63,7 @@ public partial class App : WpfApplication
                 if (loadedRefreshMinutes != _settings.RefreshMinutes)
                     LogService.Warn("settings", $"RefreshMinutes {loadedRefreshMinutes} → {_settings.RefreshMinutes} 으로 보정");
                 _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered();
+                _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
 
                 if (!_settings.IsConfigured)
                 {
@@ -77,7 +77,7 @@ public partial class App : WpfApplication
                     _settings = setup.Result;
                     await SaveSettingsAsync();
                     _extensionInstaller.EnsureExtracted();
-                    _nativeMessagingRegistration.EnsureRegistered();
+                    _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
                 }
 
                 _startupService.Apply(_settings.StartWithWindows);
@@ -319,7 +319,7 @@ public partial class App : WpfApplication
         await SaveSettingsAsync();
         _startupService.Apply(_settings.StartWithWindows);
         _extensionInstaller.EnsureExtracted();
-        _nativeMessagingRegistration.EnsureRegistered();
+        _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
         _overlayWindow.ApplySettings(_settings);
         await RefreshAsync(true);
     }
@@ -329,6 +329,10 @@ public partial class App : WpfApplication
         if (string.IsNullOrWhiteSpace(_settings.BaseUrl))
             return;
 
+        if (BrowserLauncher.OpenInChrome(_settings.BaseUrl))
+            return;
+
+        LogService.Info("ui.openDaou", "Chrome 직접 실행에 실패해 기본 브라우저로 엽니다.");
         try
         {
             Process.Start(new ProcessStartInfo

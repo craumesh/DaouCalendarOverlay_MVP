@@ -140,4 +140,39 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(5, loaded.RefreshMinutes);
         Assert.Empty(loaded.CalendarIds);
     }
+
+    /// <summary>RegisterEdge 도입 전 settings.json에는 키가 없다. 이때 Edge 등록은 켜진 상태로 로드돼야 한다.</summary>
+    [Fact]
+    public async Task LoadAsync_FileWithoutRegisterEdge_DefaultsToTrue()
+    {
+        File.WriteAllText(
+            SettingsPath,
+            "{\"BaseUrl\":\"https://x.daouoffice.com\",\"CalendarIds\":[\"123\"]}");
+
+        var loaded = await new SettingsService(_dir).LoadAsync();
+
+        Assert.Equal("https://x.daouoffice.com", loaded.BaseUrl);
+        Assert.True(loaded.RegisterEdge);
+    }
+
+    [Fact]
+    public async Task SaveAsync_WritesRegisterEdgeKey()
+    {
+        var service = new SettingsService(_dir);
+
+        var saved = await service.SaveAsync(new AppSettings
+        {
+            BaseUrl = "https://x.daouoffice.com",
+            CalendarIds = new List<string> { "12345" },
+            RegisterEdge = false
+        });
+
+        Assert.True(saved);
+
+        var text = File.ReadAllText(SettingsPath);
+        Assert.Contains("\"RegisterEdge\"", text, StringComparison.Ordinal);
+
+        var loaded = await service.LoadAsync();
+        Assert.False(loaded.RegisterEdge);
+    }
 }

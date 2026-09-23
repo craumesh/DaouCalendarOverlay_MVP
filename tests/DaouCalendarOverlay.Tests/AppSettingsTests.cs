@@ -51,4 +51,18 @@ public sealed class AppSettingsTests
 
         Assert.False(settings.IsConfigured);
     }
+
+    [Fact]
+    public void RegisterEdge_DefaultsToTrue()
+    {
+        Assert.True(new AppSettings().RegisterEdge);
+    }
+
+    [Fact]
+    public void Clone_CopiesRegisterEdge()
+    {
+        var settings = new AppSettings { RegisterEdge = false };
+
+        Assert.False(settings.Clone().RegisterEdge);
+    }
 }

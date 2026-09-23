@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
+        RegisterEdgeCheckBox.IsChecked = _working.RegisterEdge;
         VersionText.Text = $"버전 {AppVersion.Display} · 프로토콜 v{NativeBridgeProtocol.ProtocolVersion}";
 
         if (!string.IsNullOrWhiteSpace(validationNotice))
@@ -93,6 +94,7 @@ public partial class SettingsWindow : Window
         _working.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         _working.AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true;
         _working.PositionLocked = PositionLockedCheckBox.IsChecked == true;
+        _working.RegisterEdge = RegisterEdgeCheckBox.IsChecked == true;
         _working.HiddenCalendarIds = SettingsValidation.FilterHiddenCalendarIds(_working.HiddenCalendarIds, _working.CalendarIds).ToList();
 
         DialogResult = true;
