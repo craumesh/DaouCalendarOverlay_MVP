@@ -55,28 +55,55 @@ public static class UninstallFlow
             result.HasFailures ? MessageBoxImage.Warning : MessageBoxImage.Information);
     }
 
+    /// <summary>CLI 제거를 오버레이 실행 중이라 중단할 때 보여 주는 안내. 아무것도 지우지 않았음을 함께 알린다.</summary>
+    public const string OverlayRunningMessage =
+        "Daou Calendar Overlay가 실행 중이라 제거를 중단했습니다. 아무것도 지우지 않았습니다.\n\n" +
+        "실행 중인 오버레이는 제거 뒤에도 설정 파일과 Native Messaging Host 등록을 다시 만듭니다.\n" +
+        "트레이 아이콘 우클릭 → 종료로 오버레이를 먼저 끈 뒤 다시 실행하거나, 트레이 메뉴의 \"완전 제거…\"를 사용하세요.";
+
     /// <summary>
-    /// CLI(--uninstall) 전용. Confirm → UninstallService.Run → ShowResult. 종료 코드 반환(취소 0, 실패 항목 있음 1).
+    /// CLI(--uninstall) 전용. 오버레이 실행 여부 확인 → Confirm → UninstallService.Run → ShowResult.
+    /// 종료 코드 반환(완료·취소 0, 실패 항목 있음 1, 오버레이 실행 중이라 중단 <see cref="UninstallService.OverlayRunningExitCode"/>).
     /// </summary>
     /// <remarks>
     /// Program.Main이 직접 호출하므로 인라인되면 안 된다. 인라인되면 Main JIT 시점에 이 본문의 WPF MessageBox 참조가
     /// 풀려 native host 모드에서도 WPF 어셈블리가 로드될 수 있다.
     /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static int RunInteractive()
+    public static int RunInteractive() =>
+        RunCli(SingleInstanceService.IsPrimaryRunning, ShowOverlayRunning, ConfirmAndUninstall);
+
+    /// <summary>
+    /// CLI 제거 흐름 본체. 부작용(뮤텍스 확인, 안내 창, 확인 창과 실제 제거)을 델리게이트로 받아 테스트할 수 있게 한다.
+    /// 오버레이가 실행 중이면(<see cref="UninstallService.ShouldBlockCliUninstall"/>) <paramref name="confirmAndUninstall"/>을
+    /// 부르지 않고 <paramref name="showOverlayRunning"/>만 부른 뒤 <see cref="UninstallService.OverlayRunningExitCode"/>를 돌려준다.
+    /// 트레이 "완전 제거…"는 이 흐름을 타지 않는다(App.UninstallFromTray가 Confirm/Run/ShowResult를 직접 부른다).
+    /// </summary>
+    public static int RunCli(Func<bool> isOverlayRunning, Action showOverlayRunning, Func<int> confirmAndUninstall)
     {
-        try
+        ArgumentNullException.ThrowIfNull(isOverlayRunning);
+        ArgumentNullException.ThrowIfNull(showOverlayRunning);
+        ArgumentNullException.ThrowIfNull(confirmAndUninstall);
+
+        // 확인 창보다 먼저 판정한다. 실행 중이면 확인 창도 띄우지 않고 아무것도 지우지 않는다.
+        if (UninstallService.ShouldBlockCliUninstall(isOverlayRunning))
         {
-            var removeUserData = Confirm();
-            if (removeUserData is null)
+            LogService.Warn("uninstall", "오버레이가 실행 중이거나 실행 여부를 확인할 수 없어 CLI 제거를 중단함");
+            try
             {
-                LogService.Info("uninstall", "사용자 취소");
-                return 0;
+                showOverlayRunning();
+            }
+            catch (Exception ex)
+            {
+                LogService.Error("uninstall", "오버레이 실행 중 안내 표시 실패", ex);
             }
 
-            var result = UninstallService.Run(removeUserData.Value);
-            ShowResult(result);
-            return UninstallService.ToExitCode(result);
+            return UninstallService.OverlayRunningExitCode;
+        }
+
+        try
+        {
+            return confirmAndUninstall();
         }
         catch (Exception ex)
         {
@@ -84,5 +111,22 @@ public static class UninstallFlow
             LogService.Error("uninstall", "제거 실패", ex);
             return 1;
         }
+    }
+
+    private static void ShowOverlayRunning() =>
+        MessageBox.Show(OverlayRunningMessage, Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+
+    private static int ConfirmAndUninstall()
+    {
+        var removeUserData = Confirm();
+        if (removeUserData is null)
+        {
+            LogService.Info("uninstall", "사용자 취소");
+            return 0;
+        }
+
+        var result = UninstallService.Run(removeUserData.Value);
+        ShowResult(result);
+        return UninstallService.ToExitCode(result);
     }
 }

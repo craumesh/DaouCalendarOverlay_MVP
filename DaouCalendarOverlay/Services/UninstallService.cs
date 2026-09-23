@@ -57,11 +57,19 @@ public sealed class UninstallTarget
 /// </summary>
 public static class UninstallService
 {
-    /// <summary>시작 프로그램 등록 키. <see cref="StartupService"/>의 키와 같아야 한다.</summary>
+    /// <summary>
+    /// 시작 프로그램 등록 키. 이 상수가 유일한 출처이며 <see cref="StartupService.RunKeyPath"/>가 이것을 참조한다
+    /// (Native Messaging Host 키가 <see cref="BuildNativeHostKeyPath"/>를 공유하는 것과 같은 구조).
+    /// </summary>
     public const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
-    /// <summary>시작 프로그램 등록 값 이름. <see cref="StartupService"/>의 값 이름과 같아야 한다.</summary>
+    /// <summary>시작 프로그램 등록 값 이름. 유일한 출처이며 <see cref="StartupService.RunValueName"/>이 이것을 참조한다.</summary>
     public const string RunValueName = "DaouCalendarOverlay";
+
+    /// <summary>
+    /// CLI 제거를 오버레이 실행 중이라 중단했을 때의 종료 코드. 완료·취소(0), 실패 항목 있음(1, <see cref="ToExitCode"/>)과 구분한다.
+    /// </summary>
+    public const int OverlayRunningExitCode = 2;
 
     public const string ChromeBrowserKeyRoot = @"Software\Google\Chrome";
 
@@ -238,6 +246,27 @@ public static class UninstallService
     {
         ArgumentNullException.ThrowIfNull(result);
         return result.HasFailures ? 1 : 0;
+    }
+
+    /// <summary>
+    /// CLI(<c>--uninstall</c>) 제거를 시작하기 전에 막아야 하는지 판정한다. 오버레이가 실행 중이면 true.
+    /// 실행 중인 오버레이는 사용자 데이터를 지운 뒤에도 동기화·창 위치·설정 저장 때 settings.json을 다시 만들고,
+    /// 설정 저장 때 Native Messaging Host 등록을 되살리므로 확인 창을 띄우기 전에 막는다.
+    /// <paramref name="isOverlayRunning"/>이 예외를 던지면 실행 여부를 알 수 없으므로 지우지 않는 쪽(true)으로 판정한다.
+    /// 트레이 "완전 제거…"는 오버레이 자신이 실행 중인 상태에서 돌기 때문에 이 판정을 쓰지 않는다.
+    /// </summary>
+    public static bool ShouldBlockCliUninstall(Func<bool> isOverlayRunning)
+    {
+        ArgumentNullException.ThrowIfNull(isOverlayRunning);
+
+        try
+        {
+            return isOverlayRunning();
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     /// <summary>값이 있으면 지우고 요약 항목을 돌려준다. 키나 값이 없으면 null(이미 없는 상태).</summary>

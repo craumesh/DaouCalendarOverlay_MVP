@@ -45,7 +45,8 @@ public sealed class UninstallServiceTests
 
         Assert.Equal(3, targets.Count);
 
-        // StartupService가 쓰는 키·값 이름과 같아야 한다(StartupService의 상수는 private이라 리터럴로 고정한다).
+        // 리터럴 단언은 값 자체(이미 등록된 사용자 환경과의 역호환)가 바뀌지 않았음을 고정한다.
+        // StartupService가 같은 출처(UninstallService 상수)를 쓰는지는 StartupServiceTests가 확인한다.
         Assert.Equal(@"Software\Microsoft\Windows\CurrentVersion\Run", UninstallService.RunKeyPath);
         Assert.Equal(UninstallService.RunKeyPath, targets[0].KeyPath);
         Assert.Equal("DaouCalendarOverlay", targets[0].ValueName);
@@ -173,6 +174,61 @@ public sealed class UninstallServiceTests
 
         Assert.True(result.HasFailures);
         Assert.Equal(1, UninstallService.ToExitCode(result));
+    }
+
+    [Fact]
+    public void OverlayRunningExitCode_IsDistinctFromSuccessAndFailure()
+    {
+        var success = UninstallService.ToExitCode(new UninstallResult(new[] { "A" }, Array.Empty<string>()));
+        var failure = UninstallService.ToExitCode(new UninstallResult(Array.Empty<string>(), new[] { "B: 오류" }));
+
+        Assert.Equal(2, UninstallService.OverlayRunningExitCode);
+        Assert.NotEqual(UninstallService.OverlayRunningExitCode, success);
+        Assert.NotEqual(UninstallService.OverlayRunningExitCode, failure);
+    }
+
+    // 아래 ShouldBlockCliUninstall 테스트는 실제 뮤텍스를 열지 않는다. 실행 여부 확인은 가짜 델리게이트로 주입한다.
+    [Fact]
+    public void ShouldBlockCliUninstall_OverlayRunning_ReturnsTrue()
+    {
+        var calls = 0;
+
+        var blocked = UninstallService.ShouldBlockCliUninstall(() =>
+        {
+            calls++;
+            return true;
+        });
+
+        Assert.True(blocked);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void ShouldBlockCliUninstall_OverlayNotRunning_ReturnsFalse()
+    {
+        var calls = 0;
+
+        var blocked = UninstallService.ShouldBlockCliUninstall(() =>
+        {
+            calls++;
+            return false;
+        });
+
+        Assert.False(blocked);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void ShouldBlockCliUninstall_ProbeThrows_BlocksConservatively()
+    {
+        Assert.True(UninstallService.ShouldBlockCliUninstall(() => throw new IOException("probe failed")));
+        Assert.True(UninstallService.ShouldBlockCliUninstall(() => throw new UnauthorizedAccessException()));
+    }
+
+    [Fact]
+    public void ShouldBlockCliUninstall_NullProbe_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => UninstallService.ShouldBlockCliUninstall(null!));
     }
 
     [Fact]

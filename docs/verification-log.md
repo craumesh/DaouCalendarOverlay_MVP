@@ -188,3 +188,6 @@
 - T2.10: 앱을 실행해 트레이 아이콘이 기본 아이콘이 아닌 EXE 아이콘으로 표시되는지 확인 — 미확인
 - T2.10: 앱 기동 후 `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay` (RegisterEdge=true면 `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay` 도) 가 가리키는 manifest json의 `path` 값이 현재 실행 중인 EXE 전체 경로와 일치하는지 확인(레지스트리는 수동 확인만, 테스트로 건드리지 않는다) — 미확인
 - T2.10: publish된 single-file EXE로 실행했을 때도 manifest `path`가 그 EXE 경로로 기록되고 Chrome 확장 동기화가 정상 동작하는지 확인 — 미확인
+- P2 최종 검토 반영 B: 오버레이를 실행한 채 `DaouCalendarOverlay.exe --uninstall`을 실행하면 안내 창이 뜨고 레지스트리와 사용자 데이터가 그대로이며 종료 코드가 2인지 확인 — 미확인
+- P2 최종 검토 반영 B: 오버레이를 끈 상태에서 `--uninstall`이 예전처럼 확인 창 2단계로 진행하는지 확인 — 미확인
+- P2 최종 검토 반영 B: 트레이 "완전 제거…"가 오버레이 실행 중에도 막히지 않고 예전처럼 동작하는지 확인 — 미확인
