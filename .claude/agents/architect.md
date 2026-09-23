@@ -2,7 +2,7 @@
 name: architect
 description: 새 기능·모듈·시스템의 최초 아키텍처 설계 전용. 구현 착수 전에 경계, 데이터 흐름, 인터페이스, 리스크를 정의할 때만 사용. 코드를 수정하지 않는다. 일상적 구현이나 버그 수정에는 절대 사용하지 말 것.
 tools: Read, Grep, Glob
-model: fable
+model: claude-opus-5-5
 effort: high
 color: purple
 ---

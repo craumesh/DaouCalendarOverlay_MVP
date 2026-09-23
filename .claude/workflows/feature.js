@@ -1,7 +1,8 @@
 // 사용법: /feature "구현할 기능 설명"
 //
-// Explore(Sonnet) → Design(Fable) → Plan(Opus, 1회) → Implement(Sonnet, 승격 조건일 때만 Opus) + Verify(Sonnet)
-//   → Mid-review(Opus, 주기적) → Final review(Fable)
+// Explore → Design → Plan(1회) → Implement(implementer, 승격 조건일 때만 senior-implementer) + Verify
+//   → Mid-review(주기적) → Final review
+// 모든 에이전트는 claude-opus-5-5로 고정돼 있다(CLAUDE.md 참고). tier 라벨은 모델이 아니라 라우팅을 뜻한다.
 //
 // 탐색은 Explore가 한 번만 하고, 그 결과를 architect·lead·구현자에게 넘겨 같은 파일을 다시 뒤지지 않게 한다.
 // lead·implementer·senior-implementer 프롬프트 첫 줄에는 CLAUDE.md와 같은 라우팅 태그를 붙인다
@@ -22,9 +23,9 @@
 //
 // 2) 작업 실패: 단계는 실행됐지만 결과가 기준에 못 미친 경우
 //    - verifier가 fail 판정, 또는 구현자가 blocked 보고
-//    → Sonnet이 MAX_SONNET_ATTEMPTS회 실패(또는 blocked)하면 Opus로 승격한다.
+//    → implementer가 MAX_SONNET_ATTEMPTS회 실패(또는 blocked)하면 senior-implementer로 승격한다.
 //    → 끝내 실패하면 그 태스크는 failed, 그 태스크에 의존하는 태스크는 skipped.
-//    → 하나라도 있으면 최종 status는 'incomplete'이고 Fable 최종 검토는 돌리지 않는다.
+//    → 하나라도 있으면 최종 status는 'incomplete'이고 최종 검토는 돌리지 않는다.
 //
 // ── halted 이후 재개 ───────────────────────────────────────────────────────
 // /feature를 새로 실행하지 말 것 (설계부터 다시 돈다).
@@ -36,7 +37,7 @@
 
 export const meta = {
   name: 'feature',
-  description: 'Sonnet 탐색 → Fable 설계 → Opus 태스크 분해(1회) → Sonnet 구현(승격 조건일 때만 Opus) → 검증 → Opus 중간 검토 → Fable 최종 검토',
+  description: '탐색 → 설계 → 태스크 분해(1회) → 구현(승격 조건일 때만 senior) → 검증 → 중간 검토 → 최종 검토 (전부 Opus 5.5)',
   phases: [
     { title: 'Design' },
     { title: 'Plan' },
@@ -46,9 +47,9 @@ export const meta = {
 }
 
 // ---- 튜닝 포인트 -----------------------------------------------------------
-const MAX_SONNET_ATTEMPTS = 2   // Sonnet 작업 실패가 이 횟수에 도달하면 Opus로 승격
+const MAX_SONNET_ATTEMPTS = 2   // implementer 작업 실패가 이 횟수에 도달하면 senior-implementer로 승격
 const MAX_TOTAL_ATTEMPTS = 4    // 승격 포함 작업 실패 총 상한 (도달 시 태스크 failed)
-const MID_REVIEW_EVERY = 3      // 완료 태스크 N개마다 Opus 중간 검토 (0이면 비활성)
+const MID_REVIEW_EVERY = 3      // 완료 태스크 N개마다 중간 검토 (0이면 비활성)
 const INFRA_RETRIES = 2         // 인프라 실패 시 같은 단계 재시도 횟수 (소진 시 run 중단)
 // ---------------------------------------------------------------------------
 
@@ -189,7 +190,7 @@ try {
 // ============================================================================
 
 async function run() {
-  // ---- 0. Explore (Sonnet) --------------------------------------------------
+  // ---- 0. Explore ------------------------------------------------------------
   phase('Design')
   state.stage = 'explore'
   state.recon = await step(
@@ -198,7 +199,7 @@ async function run() {
     r => (typeof r === 'string' && r.trim().length > 0) || '탐색 결과가 비어 있음',
   )
 
-  // ---- 1. Design (Fable) ----------------------------------------------------
+  // ---- 1. Design --------------------------------------------------------------
   state.stage = 'design'
   state.design = await step(
     `다음 목표에 대한 아키텍처 설계 문서를 작성하라. 아래 탐색 결과로 충분한 부분은 파일을 다시 읽지 말고, 설계 결정에 꼭 필요한 파일만 추가로 확인하라.\n\n목표:\n${goal}\n\n탐색 결과(Explore):\n${state.recon}`,
@@ -206,7 +207,7 @@ async function run() {
     d => (typeof d === 'string' && d.includes(DESIGN_END_MARKER)) || '설계 문서에 완결 마커가 없음 (출력이 잘렸을 가능성)',
   )
 
-  // ---- 2. Plan (Opus) -------------------------------------------------------
+  // ---- 2. Plan --------------------------------------------------------------
   phase('Plan')
   state.stage = 'plan'
   const plan = await step(
@@ -215,7 +216,7 @@ async function run() {
     p => (Array.isArray(p.tasks) && p.tasks.length > 0) || '태스크 목록이 비어 있음',
   )
   state.tasks = plan.tasks
-  log(`태스크 ${plan.tasks.length}개 (처음부터 Opus: ${plan.tasks.filter(startsOnOpus).length}개)`)
+  log(`태스크 ${plan.tasks.length}개 (처음부터 senior-implementer: ${plan.tasks.filter(startsOnOpus).length}개)`)
 
   // ---- 3. Implement + Verify ------------------------------------------------
   phase('Implement')
@@ -246,10 +247,10 @@ async function run() {
     }
   }
 
-  // ---- 4. Final review (Fable) ----------------------------------------------
+  // ---- 4. Final review ------------------------------------------------------
   const notDone = state.results.filter(r => r.status !== 'done')
   if (notDone.length > 0 || state.unresolved.length > 0) {
-    // 불완전한 결과에는 Fable 최종 검토를 쓰지 않는다. 사람이 먼저 판단할 일이다.
+    // 불완전한 결과에는 최종 검토를 쓰지 않는다. 사람이 먼저 판단할 일이다.
     return {
       status: 'incomplete',
       goal,
@@ -345,7 +346,7 @@ async function implementWithEscalation(task) {
     history.push({ attempt: n, tier, impl, failure })
 
     if (tier === 'opus' && impl.status === 'blocked') {
-      // Opus의 blocked는 대개 설계 계약을 깨야만 가능한 경우다. 같은 spec으로 다시 돌려도 소용없다.
+      // senior-implementer의 blocked는 대개 설계 계약을 깨야만 가능한 경우다. 같은 spec으로 다시 돌려도 소용없다.
       break
     }
     if (tier === 'sonnet') {
@@ -353,7 +354,7 @@ async function implementWithEscalation(task) {
       if (impl.status === 'blocked' || sonnetFailures >= MAX_SONNET_ATTEMPTS) {
         tier = 'opus'
         reason = impl.status === 'blocked' ? 'blocked' : 'failed-2x'
-        log(`${task.id}: Sonnet 작업 실패 ${sonnetFailures}회${impl.status === 'blocked' ? '(blocked)' : ''} → Opus로 승격`)
+        log(`${task.id}: implementer 작업 실패 ${sonnetFailures}회${impl.status === 'blocked' ? '(blocked)' : ''} → senior-implementer로 승격`)
       }
     }
   }
@@ -369,7 +370,7 @@ async function implementWithEscalation(task) {
   }
 }
 
-// ---- 중간 검토 (Opus) ---------------------------------------------------------
+// ---- 중간 검토 ---------------------------------------------------------------
 async function midReview(batch) {
   const at = batch[batch.length - 1].id
   state.stage = `mid-review@${at}`
@@ -382,7 +383,7 @@ async function midReview(batch) {
 
   const blocking = (mid.findings || []).filter(f => f.severity !== 'minor')
   if (blocking.length > 0) {
-    // 지적은 Opus가 바로 고치고, 고친 결과도 verifier로 확인한다
+    // 지적은 senior-implementer가 바로 고치고, 고친 결과도 verifier로 확인한다
     const fix = await step(
       `[ESCALATION: mid-review-fix ${at}]\n중간 검토에서 나온 지적을 수정하라. 설계 문서의 인터페이스 계약과 불변 조건을 유지할 것.\n\n지적:\n${JSON.stringify(blocking, null, 2)}\n\n설계 문서:\n${state.design}`,
       { agentType: 'senior-implementer', label: `fix@${at}`, phase: 'Implement', schema: IMPL_SCHEMA },

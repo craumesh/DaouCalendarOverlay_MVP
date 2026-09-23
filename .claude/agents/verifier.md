@@ -2,7 +2,7 @@
 name: verifier
 description: 구현 결과가 acceptance 기준을 만족하는지 독립적으로 검증한다. 테스트·타입체크·린트를 실행하고 pass/fail/inconclusive를 판정. 구현자가 스스로 "통과했다"고 보고한 뒤 반드시 이 에이전트로 재확인한다. 코드를 수정하지 않는다.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: claude-opus-5-5
 maxTurns: 30
 color: cyan
 ---

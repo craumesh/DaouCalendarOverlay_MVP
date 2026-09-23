@@ -2,7 +2,7 @@
 name: senior-implementer
 description: 승격된 구현 전용. 다음 네 조건 중 하나일 때만 쓴다. lead 계획에서 tier=opus 또는 blast_radius=high로 지정된 태스크, implementer가 verifier 검증에 2회 실패한 태스크, implementer가 BLOCKED를 보고한 태스크, mid-reviewer의 critical 또는 major 지적 수정. 어려워 보인다는 이유로 직접 부르지 말 것(첫 시도는 항상 implementer). 프롬프트 첫 줄에 ESCALATION 태그가 없으면 route-guard 훅이 호출을 막는다.
 tools: Read, Edit, Write, Bash, Grep, Glob
-model: opus
+model: claude-opus-5-5
 maxTurns: 80
 color: orange
 ---
