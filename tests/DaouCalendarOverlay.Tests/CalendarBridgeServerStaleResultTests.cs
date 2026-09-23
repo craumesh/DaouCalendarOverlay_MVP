@@ -54,7 +54,11 @@ public sealed class CalendarBridgeServerStaleResultTests
 
     private static async Task<BridgeConfigResponse> RequestConfigAsync(CalendarBridgeServer server)
     {
-        var response = await server.HandleRequestAsync(new NativeBridgeRequest { Type = "getConfig" });
+        var response = await server.HandleRequestAsync(new NativeBridgeRequest
+        {
+            Type = "getConfig",
+            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+        });
         Assert.NotNull(response.Config);
         return response.Config!;
     }
@@ -77,7 +81,11 @@ public sealed class CalendarBridgeServerStaleResultTests
         var deadline = DateTime.UtcNow + WaitLimit;
         while (DateTime.UtcNow < deadline)
         {
-            var config = (await server.HandleRequestAsync(new NativeBridgeRequest { Type = "getConfig" })).Config;
+            var config = (await server.HandleRequestAsync(new NativeBridgeRequest
+            {
+                Type = "getConfig",
+                ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+            })).Config;
             if (config is not null && config.ShouldFetch && !string.Equals(config.RequestId, previousRequestId, StringComparison.Ordinal))
                 return config;
 

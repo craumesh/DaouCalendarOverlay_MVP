@@ -3,8 +3,13 @@ const ALARM_NAME = "daou-calendar-overlay-sync";
 const ALARM_PERIOD_MINUTES = 0.5;
 const SESSION_COOKIE_KEY = "daouSessionCookieCache";
 const LAST_ERROR_KEY = "daouBridgeLastError";
+const BACKOFF_PERIOD_MINUTES = [1, 2, 5];
+const BACKOFF_FAILURE_THRESHOLD = 3;
+const COOKIE_DEBOUNCE_MS = 5000;
+const BACKOFF_KEY = "daouBridgeBackoff";
 
 let inFlight = false;
+let cookieDebounceTimer = null;
 
 function cookieKey(cookie) {
   return `${cookie.storeId || ""}|${cookie.domain}|${cookie.path}|${cookie.name}`;
@@ -162,6 +167,39 @@ async function clearLastError() {
   try { await chrome.storage.session.remove(LAST_ERROR_KEY); } catch { /* 무시 */ }
 }
 
+// host 연결 실패 횟수 → 알람 주기(분). 0~2회 0.5분, 3회 1분, 4회 2분, 5회 이상 5분.
+function alarmPeriodForFailures(failures) {
+  if (!Number.isFinite(failures) || failures < BACKOFF_FAILURE_THRESHOLD) return ALARM_PERIOD_MINUTES;
+  const index = Math.min(failures - BACKOFF_FAILURE_THRESHOLD, BACKOFF_PERIOD_MINUTES.length - 1);
+  return BACKOFF_PERIOD_MINUTES[index];
+}
+
+// MV3 worker는 수시로 종료되므로 실패 카운터는 chrome.storage.session에 보관한다.
+async function loadFailureCount() {
+  try {
+    const stored = await chrome.storage.session.get(BACKOFF_KEY);
+    const value = stored?.[BACKOFF_KEY];
+    return Number.isFinite(value?.failures) ? value.failures : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function saveFailureCount(failures) {
+  try { await chrome.storage.session.set({ [BACKOFF_KEY]: { failures, at: Date.now() } }); } catch { /* 무시 */ }
+}
+
+async function recordHostFailure() {
+  const failures = Math.min((await loadFailureCount()) + 1, 99);
+  await saveFailureCount(failures);
+  await ensureAlarm(alarmPeriodForFailures(failures));
+}
+
+async function recordHostSuccess() {
+  if ((await loadFailureCount()) !== 0) await saveFailureCount(0);
+  await ensureAlarm(ALARM_PERIOD_MINUTES);
+}
+
 async function syncOnce() {
   if (inFlight) return;
   inFlight = true;
@@ -177,8 +215,14 @@ async function syncOnce() {
       });
     } catch (error) {
       await recordLastError("getConfig", error);
+      await recordHostFailure();
       return;
     }
+
+    // 오버레이가 꺼져 있으면 native host 프로세스는 떠도 파이프에 닿지 못해 ok:false로 답한다.
+    // 실행 중인 오버레이는 getConfig에 항상 ok:true로 답하므로 ok:false도 연결 실패로 센다.
+    if (bridgeResponse?.ok) await recordHostSuccess();
+    else await recordHostFailure();
 
     if (lastError) await clearLastError();
 
@@ -206,29 +250,41 @@ async function syncOnce() {
   }
 }
 
-async function ensureAlarm() {
+// 주기를 지정하지 않으면 저장된 실패 횟수로 계산한다. 기존 알람의 주기가 다르면 재생성한다
+// (chrome.alarms.create는 같은 이름의 알람을 대체한다).
+async function ensureAlarm(periodMinutes) {
+  const period = periodMinutes ?? alarmPeriodForFailures(await loadFailureCount());
   const existing = await chrome.alarms.get(ALARM_NAME);
-  if (!existing) {
-    await chrome.alarms.create(ALARM_NAME, {
-      periodInMinutes: ALARM_PERIOD_MINUTES
-    });
-  }
+  if (existing && Math.abs((existing.periodInMinutes ?? 0) - period) < 1e-9) return;
+  await chrome.alarms.create(ALARM_NAME, { periodInMinutes: period });
+}
+
+// 5초 창 안의 추가 쿠키 변경은 한 번의 동기화로 합친다.
+function scheduleCookieSync() {
+  if (cookieDebounceTimer !== null) return;
+  cookieDebounceTimer = setTimeout(() => {
+    cookieDebounceTimer = null;
+    void syncOnce();
+  }, COOKIE_DEBOUNCE_MS);
+}
+
+async function bootstrap() {
+  await ensureAlarm();
+  await syncOnce();
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void ensureAlarm();
-  void syncOnce();
+  void bootstrap();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void ensureAlarm();
-  void syncOnce();
+  void bootstrap();
 });
 
 chrome.cookies.onChanged.addListener(changeInfo => {
   const domain = String(changeInfo?.cookie?.domain || "").replace(/^\./, "").toLowerCase();
   if (domain === "daouoffice.com" || domain.endsWith(".daouoffice.com")) {
-    void syncOnce();
+    scheduleCookieSync();
   }
 });
 
@@ -237,9 +293,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
     void syncOnce();
 });
 
+// 사용자 수동 트리거는 유지한다.
 chrome.action.onClicked.addListener(() => {
   void syncOnce();
 });
 
+// worker가 깨어날 때마다 host를 스폰하지 않도록 최상위에서는 알람만 보장한다.
 void ensureAlarm();
-void syncOnce();

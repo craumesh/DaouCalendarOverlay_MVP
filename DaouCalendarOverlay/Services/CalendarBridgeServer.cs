@@ -40,6 +40,9 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
     /// <summary>설정 문제로 fetch를 내보내지 못했을 때의 사유 코드. lock 밖에서만 발생한다.</summary>
     public event EventHandler<string>? ConfigurationInvalid;
 
+    /// <summary>getConfig의 extensionVersion이 기대 버전과 일치할 때마다 발생한다. 불일치 상태 해제용.</summary>
+    public event EventHandler? ExtensionVersionConfirmed;
+
     /// <summary>테스트가 HTTP 전송을 대체하기 위한 확장점. null이면 기본 HttpClientHandler를 만든다.</summary>
     public Func<HttpMessageHandler>? HttpMessageHandlerFactory { get; set; }
 
@@ -228,6 +231,18 @@ public sealed class CalendarBridgeServer : IAsyncDisposable
                         ? request.LastError!.Substring(0, 300)
                         : request.LastError!;
                     LogService.Warn("extension", $"확장 보고 오류 ver={request.ExtensionVersion ?? "?"}: {reported}");
+                }
+
+                var expectedExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion;
+                if (ExtensionVersionGuard.IsMismatch(request.ExtensionVersion, expectedExtensionVersion))
+                {
+                    LogService.Warn("extension",
+                        $"확장 버전 불일치 reported={request.ExtensionVersion ?? "(없음)"} expected={expectedExtensionVersion}");
+                    SyncCompleted?.Invoke(this, BridgeSyncEventArgs.ExtensionFailure(request.ExtensionVersion, expectedExtensionVersion));
+                }
+                else
+                {
+                    ExtensionVersionConfirmed?.Invoke(this, EventArgs.Empty);
                 }
 
                 var config = BuildConfig();
@@ -703,6 +718,12 @@ public sealed class BridgeSyncEventArgs : EventArgs
     /// <summary>이 결과가 요청된 표시 범위의 끝.</summary>
     public DateTimeOffset RangeTo { get; init; }
 
+    /// <summary>확장이 보고한 버전(보고하지 않았으면 null). FailureKind=Extension일 때만 의미가 있다.</summary>
+    public string? ExtensionVersion { get; init; }
+
+    /// <summary>EXE에 임베드된 기대 확장 버전.</summary>
+    public string? ExpectedExtensionVersion { get; init; }
+
     public static BridgeSyncEventArgs Ok(List<DaouCalendarEvent> events, DateTimeOffset rangeFrom, DateTimeOffset rangeTo) => new()
     {
         Success = true,
@@ -719,10 +740,12 @@ public sealed class BridgeSyncEventArgs : EventArgs
         RetryAt = retryAt
     };
 
-    public static BridgeSyncEventArgs ExtensionFailure(string error) => new()
+    /// <summary>확장 버전이 EXE의 기대 버전과 다를 때. 문구는 SyncStatusService가 만든다.</summary>
+    public static BridgeSyncEventArgs ExtensionFailure(string? reportedVersion, string expectedVersion) => new()
     {
-        Error = error,
-        FailureKind = BridgeFailureKind.Extension
+        FailureKind = BridgeFailureKind.Extension,
+        ExtensionVersion = reportedVersion,
+        ExpectedExtensionVersion = expectedVersion
     };
 
     public static BridgeSyncEventArgs Fail(string error, BridgeFailureKind kind = BridgeFailureKind.General, DateTimeOffset? retryAt = null) => new()

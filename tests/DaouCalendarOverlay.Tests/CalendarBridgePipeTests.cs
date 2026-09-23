@@ -54,7 +54,11 @@ public sealed class CalendarBridgePipeTests
             return gate.Task;
         });
 
-    private static NativeBridgeRequest GetConfigRequest() => new() { Type = "getConfig" };
+    private static NativeBridgeRequest GetConfigRequest() => new()
+    {
+        Type = "getConfig",
+        ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+    };
 
     private static NativeBridgeRequest PostResultRequest(string requestId) => new()
     {

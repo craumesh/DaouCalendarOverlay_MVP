@@ -35,6 +35,7 @@ public sealed class SyncStatusService
     private DateTimeOffset _cachedAt;
     private OverlaySyncState _state = OverlaySyncState.Starting;
     private string _configurationInvalidReason = "";
+    private string _extensionMismatchKey = "";
 
     public event EventHandler<SyncStatusChangedEventArgs>? StatusChanged;
 
@@ -104,6 +105,40 @@ public sealed class SyncStatusService
     }
 
     public void MarkExtensionError(string message) => Publish(OverlaySyncState.ExtensionError, message, true);
+
+    /// <summary>
+    /// 확장 버전이 EXE가 기대하는 버전과 다를 때의 상태 문구를 만든다.
+    /// 확장이 30초마다 같은 버전을 보고하므로 동일 조합의 재발행은 억제한다(MarkConfigurationInvalid와 같은 방식).
+    /// </summary>
+    public void MarkExtensionVersionMismatch(string? reportedVersion, string expectedVersion)
+    {
+        var reported = string.IsNullOrWhiteSpace(reportedVersion) ? "알 수 없음" : reportedVersion!.Trim();
+        var expected = (expectedVersion ?? "").Trim();
+        var key = reported + "→" + expected;
+        lock (_gate)
+        {
+            if (_state == OverlaySyncState.ExtensionError &&
+                string.Equals(_extensionMismatchKey, key, StringComparison.Ordinal))
+                return;
+            _extensionMismatchKey = key;
+        }
+
+        MarkExtensionError($"Chrome 확장 새로고침 필요 ({reported} → {expected})");
+    }
+
+    /// <summary>
+    /// 확장 버전이 다시 일치함을 확인했을 때 호출한다. 현재 상태가 ExtensionError일 때만
+    /// 연결됨 상태로 되돌리고, 그 외 상태에서는 아무것도 게시하지 않는다(30초마다 불리므로).
+    /// </summary>
+    public void MarkExtensionVersionConfirmed()
+    {
+        OverlaySyncState state;
+        lock (_gate)
+            state = _state;
+
+        if (state == OverlaySyncState.ExtensionError)
+            Publish(OverlaySyncState.Connected, Decorate("Chrome 브리지 연결됨 · 동기화 대기"), false);
+    }
 
     /// <summary>
     /// BaseUrl·캘린더 ID 등 설정 문제로 동기화가 불가능할 때의 상태.
@@ -184,6 +219,8 @@ public sealed class SyncStatusService
             _state = state;
             if (state != OverlaySyncState.ConfigurationInvalid)
                 _configurationInvalidReason = "";
+            if (state != OverlaySyncState.ExtensionError)
+                _extensionMismatchKey = "";
         }
 
         StatusChanged?.Invoke(this, new SyncStatusChangedEventArgs

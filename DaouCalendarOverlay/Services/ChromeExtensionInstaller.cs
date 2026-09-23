@@ -6,6 +6,9 @@ namespace DaouCalendarOverlay.Services;
 
 public sealed class ChromeExtensionInstaller
 {
+    /// <summary>EXE에 임베드된 확장의 버전. ChromeExtension/manifest.json의 "version"과 항상 같아야 한다.</summary>
+    public const string ExpectedExtensionVersion = "7.1.0";
+
     private static readonly (string ResourceName, string FileName)[] Files =
     {
         ("DaouCalendarOverlay.ChromeExtension.manifest.json", "manifest.json"),

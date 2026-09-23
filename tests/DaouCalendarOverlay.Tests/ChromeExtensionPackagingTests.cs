@@ -74,4 +74,55 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Null(legacy.LastError);
         Assert.Null(legacy.ExtensionVersion);
     }
+
+    /// <summary>worker 최상위의 즉시 동기화 호출이 없고 쿠키 변경은 5초 debounce로 예약되는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_RemovesTopLevelSyncAndDebouncesCookieChanges()
+    {
+        var worker = ReadResource(WorkerResource);
+        var lines = worker.Replace("\r\n", "\n").Split('\n');
+
+        Assert.DoesNotContain(lines, l => l.Trim() == "void syncOnce();" && l == l.TrimStart());
+        Assert.Contains(lines, l => l.Trim() == "void ensureAlarm();");
+
+        Assert.Contains("COOKIE_DEBOUNCE_MS = 5000", worker);
+        Assert.Contains("scheduleCookieSync", worker);
+        Assert.Contains("scheduleCookieSync();", worker);
+    }
+
+    /// <summary>host 연결 실패 백오프 주기(1→2→5분)와 기본 30초 주기 상수가 선언돼 있는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_DeclaresAlarmBackoffPeriods()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains("BACKOFF_PERIOD_MINUTES = [1, 2, 5]", worker);
+        Assert.Contains("BACKOFF_FAILURE_THRESHOLD = 3", worker);
+        Assert.Contains("alarmPeriodForFailures", worker);
+        Assert.Contains("recordHostFailure", worker);
+        Assert.Contains("recordHostSuccess", worker);
+        Assert.Contains("ALARM_PERIOD_MINUTES = 0.5", worker);
+    }
+
+    /// <summary>ensureAlarm이 기존 알람의 periodInMinutes를 비교해 다르면 재생성하는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_RecreatesAlarmWhenPeriodDiffers()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains("chrome.alarms.get(ALARM_NAME)", worker);
+        Assert.Contains("existing.periodInMinutes", worker);
+        Assert.Contains("chrome.alarms.create(ALARM_NAME", worker);
+    }
+
+    /// <summary>임베드된 manifest.json의 version이 ChromeExtensionInstaller.ExpectedExtensionVersion 상수와 같은지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedManifest_VersionMatchesExpectedExtensionVersionConstant()
+    {
+        using var manifest = JsonDocument.Parse(ReadResource(ManifestResource));
+
+        var version = manifest.RootElement.GetProperty("version").GetString();
+
+        Assert.Equal(ChromeExtensionInstaller.ExpectedExtensionVersion, version);
+    }
 }

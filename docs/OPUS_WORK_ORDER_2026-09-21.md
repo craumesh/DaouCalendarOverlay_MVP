@@ -179,11 +179,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: host 모드에서 `App` 생성이 일어나지 않음(로그로 확인). 측정치가 문서에 기록됨.
 - 적용 메모(2026-09-23): 커스텀 Program.Main + StartupModeParser로 host 모드에서 WPF App 생성 제거; host 스폰 비용 측정 스크립트와 성능·시작 모드 문서 갱신 수동 확인 6건 대기
 
-#### T2.2 확장 트리거·백오프·버전 협상 — P2
+#### [부분] T2.2 확장 트리거·백오프·버전 협상 — P2
 - 근거: `service-worker-v700.js:181-208`에서 onInstalled/onStartup/cookies.onChanged/onAlarm/action.onClicked/최상위 호출 6개가 모두 `syncOnce` → DaouOffice 페이지 로드 시 쿠키 변경마다 host 스폰. `inFlight`는 동시 실행만 막고 연속 실행은 못 막음. `getConfig` 실패 시 백오프 없음(`:144-148`). `ensureAlarm(:172-179)`은 기존 알람 주기 미갱신. 확장 버전을 앱에 전달하지 않아 EXE가 확장 파일을 덮어써도(`ChromeExtensionInstaller.cs:29-54`) 불일치를 감지 못함. `BridgeFailureKind.Extension`/`ExtensionFailure(:469-473)`/`MarkExtensionError`/`OverlaySyncState.ExtensionError`는 생성 경로가 없어 도달 불가.
 - 검증 상태: 코드 확인.
 - 지시: (1) `cookies.onChanged`는 5초 debounce, 최상위 `syncOnce()` 호출 제거(onStartup/onInstalled/onAlarm만). (2) host 연결 실패가 연속 3회면 알람 주기를 1→2→5분으로 늘리고 성공 시 0.5분 복귀(`chrome.alarms.create`로 재생성). (3) `ensureAlarm`은 `periodInMinutes` 불일치 시 재생성. (4) `getConfig` 요청에 `extensionVersion`(`chrome.runtime.getManifest().version`)과 `protocolVersion`을 포함, 앱은 불일치 시 `ExtensionFailure`로 "Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)"를 표시. `manifest.json` 버전을 7.1.0으로 올리고 worker 파일명 규칙(`service-worker-v710.js`)과 `ChromeExtensionInstaller` obsolete 목록 갱신.
 - 완료 기준: DaouOffice 페이지를 새로고침해도 5초 내 host 스폰 1회 이하(로그로 확인). 오버레이 종료 후 5분 뒤 알람 주기가 5분(chrome://extensions 서비스 워커 콘솔로 확인). 구버전 확장 로드 시 상태에 불일치 문구.
+- 적용 메모(2026-09-23): 확장 서비스 워커 트리거 정리·쿠키 debounce·알람 백오프; 확장 버전 비교 순수 로직과 불일치 상태 문구; getConfig 버전 불일치 배선과 문서 §10.1/§10.4/§18 갱신 수동 확인 3건 대기
 
 #### T2.3 버전 체계 — P2
 - 근거: `app.manifest:3` `1.0.0.0`, csproj에 `Version` 계열 속성 없음, `manifest.json:4` `7.0.0`, 문서 표지 `v7.0.0`. 앱 내 버전 표시 없음.

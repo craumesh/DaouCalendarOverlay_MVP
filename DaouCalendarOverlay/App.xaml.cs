@@ -101,6 +101,7 @@ public partial class App : WpfApplication
                 _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
                 _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
                 _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
+                _bridgeServer.ExtensionVersionConfirmed += BridgeServer_ExtensionVersionConfirmed;
                 _bridgeServer.Start();
 
                 ConfigureHealthTimer();
@@ -213,6 +214,9 @@ public partial class App : WpfApplication
     private void BridgeServer_ConfigurationInvalid(object? sender, string reason) =>
         _syncStatus.MarkConfigurationInvalid(NoFetchReasons.Describe(reason));
 
+    private void BridgeServer_ExtensionVersionConfirmed(object? sender, EventArgs e) =>
+        _syncStatus.MarkExtensionVersionConfirmed();
+
     private void BridgeServer_SyncCompleted(object? sender, BridgeSyncEventArgs e)
     {
         _ = Dispatcher.InvokeAsync(async () =>
@@ -268,8 +272,10 @@ public partial class App : WpfApplication
                         _syncStatus.MarkNetworkError(e.Error, e.RetryAt);
                         break;
                     case BridgeFailureKind.Extension:
-                        LogService.Warn("sync", $"확장 오류: {e.Error}");
-                        _syncStatus.MarkExtensionError(e.Error ?? "Chrome 확장 프로그램을 다시 로드해 주세요.");
+                        LogService.Warn("sync", $"확장 버전 불일치: reported={e.ExtensionVersion ?? "(없음)"} expected={e.ExpectedExtensionVersion}");
+                        _syncStatus.MarkExtensionVersionMismatch(
+                            e.ExtensionVersion,
+                            e.ExpectedExtensionVersion ?? ChromeExtensionInstaller.ExpectedExtensionVersion);
                         break;
                     default:
                         LogService.Warn("sync", $"동기화 실패: {e.Error}");
@@ -517,6 +523,7 @@ public partial class App : WpfApplication
         _bridgeServer.BridgeHeartbeat -= BridgeServer_BridgeHeartbeat;
         _bridgeServer.FetchIssued -= BridgeServer_FetchIssued;
         _bridgeServer.ConfigurationInvalid -= BridgeServer_ConfigurationInvalid;
+        _bridgeServer.ExtensionVersionConfirmed -= BridgeServer_ExtensionVersionConfirmed;
         await _bridgeServer.DisposeAsync();
 
         if (_singleInstance is not null)

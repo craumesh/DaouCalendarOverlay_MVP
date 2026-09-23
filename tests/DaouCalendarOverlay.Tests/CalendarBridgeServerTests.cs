@@ -71,7 +71,11 @@ public sealed class CalendarBridgeServerTests
 
     private static async Task<BridgeConfigResponse> GetConfigAsync(CalendarBridgeServer server)
     {
-        var response = await server.HandleRequestAsync(new NativeBridgeRequest { Type = "getConfig" }).WaitAsync(WaitLimit);
+        var response = await server.HandleRequestAsync(new NativeBridgeRequest
+        {
+            Type = "getConfig",
+            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+        }).WaitAsync(WaitLimit);
         Assert.NotNull(response.Config);
         return response.Config!;
     }
@@ -324,5 +328,84 @@ public sealed class CalendarBridgeServerTests
             if (!disposed)
                 await server.DisposeAsync();
         }
+    }
+
+    /// <summary>구버전 확장이 보낸 getConfig는 Extension 실패 이벤트를 올리고 버전 확인 이벤트는 올리지 않는다.</summary>
+    [Fact]
+    public async Task GetConfig_WithOlderExtensionVersion_RaisesExtensionFailure()
+    {
+        await using var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        BridgeSyncEventArgs? captured = null;
+        var confirmed = 0;
+        server.SyncCompleted += (_, e) => captured = e;
+        server.ExtensionVersionConfirmed += (_, _) => confirmed++;
+
+        await server.HandleRequestAsync(new NativeBridgeRequest { Type = "getConfig", ExtensionVersion = "7.0.0" }).WaitAsync(WaitLimit);
+
+        Assert.NotNull(captured);
+        Assert.Equal(BridgeFailureKind.Extension, captured!.FailureKind);
+        Assert.Equal("7.0.0", captured!.ExtensionVersion);
+        Assert.Equal(ChromeExtensionInstaller.ExpectedExtensionVersion, captured!.ExpectedExtensionVersion);
+        Assert.False(captured!.Success);
+        Assert.Equal(0, confirmed);
+    }
+
+    /// <summary>extensionVersion을 보내지 않는 구버전 확장도 불일치로 보고 ExtensionVersion은 null이다.</summary>
+    [Fact]
+    public async Task GetConfig_WithoutExtensionVersion_RaisesExtensionFailure()
+    {
+        await using var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        BridgeSyncEventArgs? captured = null;
+        server.SyncCompleted += (_, e) => captured = e;
+
+        await server.HandleRequestAsync(new NativeBridgeRequest { Type = "getConfig" }).WaitAsync(WaitLimit);
+
+        Assert.NotNull(captured);
+        Assert.Equal(BridgeFailureKind.Extension, captured!.FailureKind);
+        Assert.Null(captured!.ExtensionVersion);
+    }
+
+    /// <summary>기대 버전과 같은 확장은 몇 번 요청해도 Extension 실패 이벤트가 없고 설정 응답은 그대로 온다.</summary>
+    [Fact]
+    public async Task GetConfig_WithMatchingExtensionVersion_DoesNotRaiseExtensionFailure()
+    {
+        await using var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        var extensionFailures = 0;
+        server.SyncCompleted += (_, e) =>
+        {
+            if (e.FailureKind == BridgeFailureKind.Extension)
+                extensionFailures++;
+        };
+
+        var request = new NativeBridgeRequest
+        {
+            Type = "getConfig",
+            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+        };
+        var first = await server.HandleRequestAsync(request).WaitAsync(WaitLimit);
+        var second = await server.HandleRequestAsync(request).WaitAsync(WaitLimit);
+
+        Assert.Equal(0, extensionFailures);
+        Assert.NotNull(first.Config);
+        Assert.NotNull(second.Config);
+    }
+
+    /// <summary>기대 버전과 같은 getConfig마다 ExtensionVersionConfirmed가 한 번씩 발생한다.</summary>
+    [Fact]
+    public async Task GetConfig_WithMatchingExtensionVersion_RaisesExtensionVersionConfirmed()
+    {
+        await using var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        var confirmed = 0;
+        server.ExtensionVersionConfirmed += (_, _) => confirmed++;
+
+        var request = new NativeBridgeRequest
+        {
+            Type = "getConfig",
+            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+        };
+        await server.HandleRequestAsync(request).WaitAsync(WaitLimit);
+        await server.HandleRequestAsync(request).WaitAsync(WaitLimit);
+
+        Assert.Equal(2, confirmed);
     }
 }

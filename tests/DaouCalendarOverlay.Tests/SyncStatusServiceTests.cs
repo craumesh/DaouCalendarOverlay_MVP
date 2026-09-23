@@ -353,4 +353,105 @@ public sealed class SyncStatusServiceTests
         Assert.NotNull(last);
         Assert.Equal("Chrome 백그라운드 대기 · 캐시(범위 밖) · 캐시 09-21 08:30", last!.Text);
     }
+
+    /// <summary>확장 버전 불일치는 ExtensionError 상태와 "Chrome 확장 새로고침 필요 (보고 → 기대)" 문구로 게시된다.</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_PublishesExtensionErrorText()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.NotNull(captured);
+        Assert.Equal(OverlaySyncState.ExtensionError, captured!.State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", captured.Text);
+        Assert.True(captured.IsError);
+    }
+
+    /// <summary>확장이 버전을 보고하지 않으면 "알 수 없음"으로 표시한다.</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_UsesUnknownTextWhenReportedMissing()
+    {
+        var svc = new SyncStatusService();
+        SyncStatusChangedEventArgs? captured = null;
+        svc.StatusChanged += (_, e) => captured = e;
+
+        svc.MarkExtensionVersionMismatch(null, "7.1.0");
+
+        Assert.NotNull(captured);
+        Assert.Equal("Chrome 확장 새로고침 필요 (알 수 없음 → 7.1.0)", captured!.Text);
+    }
+
+    /// <summary>같은 버전 조합이 반복 보고되면 상태는 한 번만 게시된다.</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_SuppressesDuplicateReport()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.Single(events);
+    }
+
+    /// <summary>다른 상태를 거친 뒤에는 같은 버전 조합이라도 다시 게시된다.</summary>
+    [Fact]
+    public void MarkExtensionVersionMismatch_RepublishesAfterAnotherState()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 14, 5, 0, TimeSpan.FromHours(9)));
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.Equal(3, events.Count);
+        Assert.Equal(OverlaySyncState.ExtensionError, events[^1].State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", events[^1].Text);
+    }
+
+    /// <summary>버전 일치 확인은 ExtensionError를 연결됨 상태로 해제하고, 이후 불일치는 억제 없이 재게시된다.</summary>
+    [Fact]
+    public void MarkExtensionVersionConfirmed_ClearsExtensionErrorToConnected()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+        svc.MarkExtensionVersionConfirmed();
+
+        Assert.Equal(OverlaySyncState.Connected, events[^1].State);
+        Assert.Equal("Chrome 브리지 연결됨 · 동기화 대기", events[^1].Text);
+        Assert.False(events[^1].IsError);
+
+        svc.MarkExtensionVersionMismatch("7.0.0", "7.1.0");
+
+        Assert.Equal(3, events.Count);
+        Assert.Equal(OverlaySyncState.ExtensionError, events[^1].State);
+        Assert.Equal("Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)", events[^1].Text);
+    }
+
+    /// <summary>ExtensionError가 아닌 상태에서는 버전 일치 확인이 아무것도 게시하지 않는다.</summary>
+    [Fact]
+    public void MarkExtensionVersionConfirmed_DoesNothingWhenNotExtensionError()
+    {
+        var svc = new SyncStatusService();
+        var events = new List<SyncStatusChangedEventArgs>();
+        svc.StatusChanged += (_, e) => events.Add(e);
+
+        svc.MarkExtensionVersionConfirmed();
+        Assert.Empty(events);
+
+        svc.MarkSuccess(new DateTimeOffset(2026, 9, 22, 14, 5, 0, TimeSpan.FromHours(9)));
+        svc.MarkExtensionVersionConfirmed();
+
+        Assert.Single(events);
+        Assert.Equal(OverlaySyncState.Synced, events[0].State);
+    }
 }
