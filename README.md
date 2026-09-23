@@ -67,7 +67,7 @@ DaouCalendarOverlay_MVP/
 | `Assets/` | 아이콘 및 기타 리소스 |
 | `publish.ps1` | 릴리스 publish 스크립트(버전 산출물명, PDB 분리, 서명 파라미터) |
 | `DaouCalendarOverlay/Properties/PublishProfiles/win-x64.pubxml` | 릴리스 publish 전용 설정(win-x64 self-contained single-file, portable PDB) |
-| `tools/` | host 스폰 비용 측정 스크립트 |
+| `tools/` | host 스폰 비용 측정 스크립트, .NET 10 비교 측정 스크립트(`net10-trial.ps1`) |
 | `CHANGELOG.md` | 버전별 변경 이력 |
 
 ## 동작 구조
@@ -368,6 +368,13 @@ git push
 3. Native Messaging을 통해 Extension과 WPF 애플리케이션이 통신합니다.
 4. 다우오피스의 기존 브라우저 로그인 세션을 활용하여 별도의 애플리케이션 로그인 절차를 최소화합니다.
 5. 사용자별 로컬 설정은 애플리케이션 데이터 영역에 저장합니다.
+
+### .NET 10 이전 검토
+
+- .NET 8은 2026-11-10에 지원이 종료됩니다.
+- 현재 타깃은 `net8.0-windows`를 유지합니다.
+- `net10.0-windows` 시험 측정 결과(빌드·publish·EXE 크기·테스트·host 모드 왕복 비교)는 [docs/net10-migration.md](docs/net10-migration.md)를 참고하세요.
+- .NET 10 전환 시점은 별도 릴리스로 결정합니다.
 
 ## 문제 해결
 

@@ -214,11 +214,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: `publish.ps1` 실패 시 비정상 종료 코드. `dotnet build`가 5초 내(런타임 복사 없음). publish EXE 정상 실행.
 - 적용 메모(2026-09-23): 메인/테스트 csproj에서 self-contained 속성 제거하고 publish 프로파일(win-x64.pubxml)로 이동; publish.ps1 재작성: 종료 코드 검사, 버전 산출물명, 심볼 분리, 서명 자리, DryRun; README와 기술 문서에 빌드 전제조건·릴리스 절차(신규 절) 반영 수동 확인 6건 대기
 
-#### T2.7 .NET 10 이전 시험 — P2 (Q5)
+#### [부분] T2.7 .NET 10 이전 시험 — P2 (Q5)
 - 근거: TFM `net8.0-windows`(csproj:4), 지원 종료 2026-11-10(웹 확인), 머신에는 SDK 10만.
 - 검증 상태: 웹 확인.
 - 지시(기본안 Q5-b): 브랜치 `net10-trial`에서 TFM을 `net10.0-windows`로 바꿔 빌드·publish·기동 시간·EXE 크기·host 모드 동작을 비교하고 결과를 `docs/net10-migration.md`에 기록. 릴리스 전환은 사용자 결정.
 - 완료 기준: 비교표가 문서에 있음.
+- 적용 메모(2026-09-23): .NET 10 시험 측정 스크립트(tools/net10-trial.ps1)와 TFM 가드 테스트 추가; .NET 10 시험 실행 결과를 docs/net10-migration.md에 기록하고 README·기술 문서 반영 수동 확인 4건 대기
 
 #### T2.8 시작 실패 비치명화 — P2
 - 근거: `App.xaml.cs:59-108`에서 `EnsureExtracted`/`EnsureRegistered` 예외가 최상위 catch로 가 MessageBox 후 종료. GPO로 HKCU 쓰기가 막히면 캐시 표시조차 불가. 오류 문구가 원인과 무관하게 settings.json을 지목(`:103-104`).

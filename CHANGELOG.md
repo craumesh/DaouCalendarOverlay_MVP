@@ -17,6 +17,7 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - Edge Native Messaging 등록(시험 지원): `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay`에 같은 host manifest 등록, 설정 `RegisterEdge`(기본 켜짐)와 설정창 "Edge에도 Native Messaging 등록"(끄면 Edge 키만 제거)
 - README와 기술 문서에 지원 환경 매트릭스(Windows 10/11 x64, Chrome 120+, Edge 시험 지원, Whale/Brave/Firefox 미지원, 단일 프로필, KST)
 - README와 기술 문서에 빌드 전제조건·릴리스 절차(`publish.ps1` 파라미터, 산출물, `-Version` 일치 규칙, 코드 서명)
+- .NET 10 이전 시험: `tools/net10-trial.ps1`(TFM을 임시로 `net10.0-windows`로 바꿔 빌드·publish·EXE 크기·테스트·host 모드 왕복을 비교한 뒤 원복)과 측정 기록 `docs/net10-migration.md`. 현재 TFM은 `net8.0-windows` 유지(`TargetFrameworkGuardTests`로 고정), 전환은 별도 릴리스에서 결정
 
 ### Changed
 - Chrome 확장 7.0.0 → 7.1.0, 서비스 워커 파일명 `service-worker-v710.js`, 확장이 `extensionVersion`을 앱에 전달
