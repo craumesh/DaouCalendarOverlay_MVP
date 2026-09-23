@@ -1,4 +1,7 @@
+using System.Collections.Specialized;
+using System.Windows.Media;
 using DaouCalendarOverlay.Models;
+using DaouCalendarOverlay.Services;
 using DaouCalendarOverlay.ViewModels;
 
 namespace DaouCalendarOverlay.Tests;
@@ -295,5 +298,164 @@ public sealed class MainViewModelTests
         vm.SetLastUpdated(new DateTimeOffset(2026, 9, 21, 8, 30, 0, Kst));
 
         Assert.True(raised);
+    }
+
+    [Fact]
+    public void SetStatus_PutsStatusTextInToolTip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        vm.SetStatus("동기화 실패: 네트워크", true);
+
+        Assert.Equal("동기화 실패: 네트워크", vm.StatusToolTip);
+    }
+
+    [Fact]
+    public void SetLastUpdated_AppendsLastUpdatedLineToToolTip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetStatus("동기화 실패: 네트워크", true);
+
+        vm.SetLastUpdated(new DateTimeOffset(2026, 9, 22, 10, 30, 0, Kst));
+
+        Assert.Equal("동기화 실패: 네트워크" + Environment.NewLine + "마지막 갱신 2026-09-22 10:30", vm.StatusToolTip);
+    }
+
+    [Fact]
+    public void SetStatus_NonError_DoesNotPutStatusTextInToolTip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+
+        vm.SetStatus("동기화 14:00", false);
+        Assert.Null(vm.StatusToolTip);
+
+        vm.SetLastUpdated(new DateTimeOffset(2026, 9, 22, 10, 30, 0, Kst));
+        Assert.Equal("마지막 갱신 2026-09-22 10:30", vm.StatusToolTip);
+    }
+
+    [Fact]
+    public void GetEventChipsForDate_FillsTooltip()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        var calendarEvent = Ev(
+            "timed",
+            new DateTimeOffset(2026, 9, 22, 9, 0, 0, Kst),
+            new DateTimeOffset(2026, 9, 22, 10, 0, 0, Kst));
+        calendarEvent.Summary = "주간 회의";
+        vm.SetEvents(new[] { calendarEvent });
+
+        var chip = Assert.Single(vm.GetEventChipsForDate(new DateTime(2026, 9, 22)));
+
+        Assert.False(string.IsNullOrWhiteSpace(chip.Tooltip));
+        Assert.Contains("주간 회의", chip.Tooltip);
+    }
+
+    [Fact]
+    public void ClearFilter_WhenAlreadyDefault_DoesNotRebuildGrid()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        var changes = 0;
+        ((INotifyCollectionChanged)vm.Days).CollectionChanged += (_, _) => changes++;
+
+        vm.ClearFilter();
+
+        Assert.Equal(0, changes);
+    }
+
+    [Fact]
+    public void ClearFilter_AfterFilterApplied_RebuildsGridOnce()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        var resets = 0;
+        ((INotifyCollectionChanged)vm.Days).CollectionChanged += (_, e) =>
+        {
+            if (e.Action == NotifyCollectionChangedAction.Reset)
+                resets++;
+        };
+        vm.SetFilter("Title", "zzz");
+        resets = 0;
+
+        vm.ClearFilter();
+
+        Assert.Equal(1, resets);
+        Assert.Equal(42, vm.Days.Count);
+    }
+
+    [Fact]
+    public void GetEventChipsForDate_UsesEventColorPaletteAccent()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        var calendarEvent = Ev(
+            "timed",
+            new DateTimeOffset(2026, 9, 22, 9, 0, 0, Kst),
+            new DateTimeOffset(2026, 9, 22, 10, 0, 0, Kst));
+        calendarEvent.Color = "1";
+        vm.SetEvents(new[] { calendarEvent });
+
+        var chip = Assert.Single(vm.GetEventChipsForDate(new DateTime(2026, 9, 22)));
+
+        var brush = Assert.IsType<SolidColorBrush>(chip.AccentBrush);
+        Assert.Equal(EventColorPalette.Palette[1], brush.Color);
+    }
+
+    [Fact]
+    public void GetCalendarDescriptors_UsesKnownNameWhenNoEventsForCalendar()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetConfiguredCalendars(new[] { "123" });
+        vm.SetKnownCalendarNames(new Dictionary<string, string> { ["123"] = "팀 캘린더" });
+
+        var descriptor = Assert.Single(vm.GetCalendarDescriptors());
+
+        Assert.Equal("123", descriptor.Id);
+        Assert.Equal("팀 캘린더", descriptor.Name);
+    }
+
+    [Fact]
+    public void GetCalendarDescriptors_PrefersEventNameOverKnownName()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetConfiguredCalendars(new[] { "123" });
+        vm.SetKnownCalendarNames(new Dictionary<string, string> { ["123"] = "옛 이름" });
+        vm.SetEvents(new[]
+        {
+            Shared(
+                "e-1",
+                "123",
+                "새 이름",
+                new DateTimeOffset(2026, 9, 22, 9, 0, 0, Kst),
+                new DateTimeOffset(2026, 9, 22, 10, 0, 0, Kst))
+        });
+
+        var descriptor = Assert.Single(vm.GetCalendarDescriptors());
+
+        Assert.Equal("123", descriptor.Id);
+        Assert.Equal("새 이름", descriptor.Name);
+    }
+
+    [Fact]
+    public void GetCalendarDescriptors_FallsBackToIdWhenNameUnknown()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetConfiguredCalendars(new[] { "123" });
+        vm.SetKnownCalendarNames(new Dictionary<string, string> { ["456"] = "다른 캘린더" });
+
+        var descriptor = Assert.Single(vm.GetCalendarDescriptors());
+
+        Assert.Equal("123", descriptor.Id);
+        Assert.Equal("123", descriptor.Name);
+    }
+
+    [Fact]
+    public void SetKnownCalendarNames_CopiesInputSoLaterChangesAreIgnored()
+    {
+        var vm = new MainViewModel(() => new DateTime(2026, 9, 22));
+        vm.SetConfiguredCalendars(new[] { "123" });
+        var names = new Dictionary<string, string> { ["123"] = "팀 캘린더" };
+        vm.SetKnownCalendarNames(names);
+
+        names["123"] = "바뀐 이름";
+
+        Assert.Equal("팀 캘린더", Assert.Single(vm.GetCalendarDescriptors()).Name);
     }
 }

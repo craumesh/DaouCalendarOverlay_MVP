@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using DaouCalendarOverlay.Models;
 using DaouCalendarOverlay.Services;
@@ -54,7 +55,11 @@ public sealed class CalendarBridgePipeTests
             return gate.Task;
         });
 
-    private static NativeBridgeRequest GetConfigRequest() => new() { Type = "getConfig" };
+    private static NativeBridgeRequest GetConfigRequest() => new()
+    {
+        Type = "getConfig",
+        ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+    };
 
     private static NativeBridgeRequest PostResultRequest(string requestId) => new()
     {
@@ -70,10 +75,17 @@ public sealed class CalendarBridgePipeTests
     private static async Task<NativeBridgeResponse> CallAsync(string pipeName, NativeBridgeRequest request, CancellationToken ct)
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        return await CallRawAsync(pipeName, JsonSerializer.SerializeToUtf8Bytes(request, options), ct);
+    }
+
+    /// <summary>확장이 보내는 JSON 원문을 그대로 파이프로 보낸다(서버 쪽 역직렬화 경로를 거치게 하기 위함).</summary>
+    private static async Task<NativeBridgeResponse> CallRawAsync(string pipeName, byte[] utf8Json, CancellationToken ct)
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await client.ConnectAsync(2500, ct);
-        await NativeBridgeProtocol.WriteFrameAsync(client, JsonSerializer.SerializeToUtf8Bytes(request, options), ct);
+        await NativeBridgeProtocol.WriteFrameAsync(client, utf8Json, ct);
         var bytes = await NativeBridgeProtocol.ReadFrameAsync(client, 8 * 1024 * 1024, ct);
         Assert.NotNull(bytes);
         return JsonSerializer.Deserialize<NativeBridgeResponse>(bytes!, options)!;
@@ -106,6 +118,46 @@ public sealed class CalendarBridgePipeTests
             Assert.True(response.Config!.ShouldFetch);
             Assert.False(string.IsNullOrWhiteSpace(response.Config!.RequestId));
             Assert.Equal(TestBaseUrl, response.Config!.BaseUrl);
+        }
+        finally
+        {
+            gate.TrySetCanceled();
+            await server.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// 7.1.0 worker가 보내는 protocolVersion 포함 getConfig와, 이 필드가 없는 구버전 형식의 getConfig가
+    /// 파이프 서버의 역직렬화를 거쳐 모두 정상 응답(ok + config)을 받는다.
+    /// </summary>
+    [Fact]
+    public async Task Pipe_GetConfig_AcceptsRequestsWithAndWithoutProtocolVersion()
+    {
+        using var cts = new CancellationTokenSource(WaitLimit);
+        var gate = NewGate();
+        var started = NewSignal();
+        var pipeName = NewPipeName();
+        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var version = ChromeExtensionInstaller.ExpectedExtensionVersion;
+
+        try
+        {
+            var withProtocol = await CallRawAsync(
+                pipeName,
+                Encoding.UTF8.GetBytes($"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\",\"protocolVersion\":1}}"),
+                cts.Token).WaitAsync(WaitLimit);
+
+            Assert.True(withProtocol.Ok, withProtocol.Error);
+            Assert.NotNull(withProtocol.Config);
+            Assert.True(withProtocol.Config!.ShouldFetch);
+
+            var withoutProtocol = await CallRawAsync(
+                pipeName,
+                Encoding.UTF8.GetBytes($"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\"}}"),
+                cts.Token).WaitAsync(WaitLimit);
+
+            Assert.True(withoutProtocol.Ok, withoutProtocol.Error);
+            Assert.NotNull(withoutProtocol.Config);
         }
         finally
         {

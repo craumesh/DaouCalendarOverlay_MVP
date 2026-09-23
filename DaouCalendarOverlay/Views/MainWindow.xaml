@@ -13,7 +13,7 @@
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Grayscale"
-        KeyDown="Window_KeyDown"
+        PreviewKeyDown="Window_PreviewKeyDown"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
@@ -502,6 +502,7 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="{x:Type models:EventChipViewModel}">
                                             <Border Background="{Binding ChipBackground}"
+                                                    ToolTip="{Binding Tooltip}"
                                                     CornerRadius="3"
                                                     Margin="0,0,0,1"
                                                     Height="11.5">

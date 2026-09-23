@@ -2,7 +2,7 @@
 name: reviewer
 description: 최종 검토 전용. 전체 구현이 설계 문서와 일치하는지, 불변 조건이 지켜졌는지, 설계 이탈·누락·구조적 문제가 있는지 최종 판정한다. 중간 검토(mid-reviewer)나 단순 코드 리뷰, 스타일 지적에는 사용하지 말 것. 코드를 수정하지 않는다.
 tools: Read, Grep, Glob, Bash
-model: fable
+model: claude-opus-5-5
 effort: high
 color: purple
 ---

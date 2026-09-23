@@ -172,55 +172,63 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 ### P2. 아키텍처·성능·배포 개선
 
-#### T2.1 Native host 경량화 — P2 (Q3)
+#### [부분] T2.1 Native host 경량화 — P2 (Q3)
 - 근거: `sendNativeMessage`(`service-worker-v700.js:36-38, 145, 160`)는 호출마다 host를 새로 띄움(웹 확인). host 모드에서도 `App` 필드 초기화(`App.xaml.cs:14-20`: `SettingsService`/`CacheService` 생성자가 `Directory.CreateDirectory`)와 WPF `Application`/`App.xaml` 리소스 로드가 끝난 뒤에야 분기(`:38-43`). self-contained + `EnableCompressionInSingleFile`(csproj:12-15)이라 기동마다 압축 해제 비용. 30초마다 1회, fetch 시 2회, 오버레이가 꺼져 있어도 2.5초 대기 후 실패를 무한 반복(`NativeMessagingHost.cs:41`).
 - 검증 상태: 코드 확인 + 웹 확인. 실제 스폰당 CPU/시간은 미측정.
 - 지시(기본안 Q3-a): (1) `Program.cs`에 `[STAThread] Main` 추가, `<StartupObject>` 지정, `App.xaml`의 자동 Main 비활성화. Main에서 `IsNativeInvocation(args)`이면 WPF를 만들지 않고 `NativeMessagingHost.RunAsync()`만 실행. 서비스 필드 초기화는 GUI 경로로 이동. (2) 스폰당 시간(프로세스 시작~응답)과 CPU를 before/after로 측정해 문서 성능 절에 기록. (3) Q3-b(`connectNative` 장수명 포트)는 측정치가 기준(예: 스폰당 300ms 초과)을 넘으면 별도 작업으로.
 - 완료 기준: host 모드에서 `App` 생성이 일어나지 않음(로그로 확인). 측정치가 문서에 기록됨.
+- 적용 메모(2026-09-23): 커스텀 Program.Main + StartupModeParser로 host 모드에서 WPF App 생성 제거; host 스폰 비용 측정 스크립트와 성능·시작 모드 문서 갱신 수동 확인 6건 대기
 
-#### T2.2 확장 트리거·백오프·버전 협상 — P2
+#### [부분] T2.2 확장 트리거·백오프·버전 협상 — P2
 - 근거: `service-worker-v700.js:181-208`에서 onInstalled/onStartup/cookies.onChanged/onAlarm/action.onClicked/최상위 호출 6개가 모두 `syncOnce` → DaouOffice 페이지 로드 시 쿠키 변경마다 host 스폰. `inFlight`는 동시 실행만 막고 연속 실행은 못 막음. `getConfig` 실패 시 백오프 없음(`:144-148`). `ensureAlarm(:172-179)`은 기존 알람 주기 미갱신. 확장 버전을 앱에 전달하지 않아 EXE가 확장 파일을 덮어써도(`ChromeExtensionInstaller.cs:29-54`) 불일치를 감지 못함. `BridgeFailureKind.Extension`/`ExtensionFailure(:469-473)`/`MarkExtensionError`/`OverlaySyncState.ExtensionError`는 생성 경로가 없어 도달 불가.
 - 검증 상태: 코드 확인.
 - 지시: (1) `cookies.onChanged`는 5초 debounce, 최상위 `syncOnce()` 호출 제거(onStartup/onInstalled/onAlarm만). (2) host 연결 실패가 연속 3회면 알람 주기를 1→2→5분으로 늘리고 성공 시 0.5분 복귀(`chrome.alarms.create`로 재생성). (3) `ensureAlarm`은 `periodInMinutes` 불일치 시 재생성. (4) `getConfig` 요청에 `extensionVersion`(`chrome.runtime.getManifest().version`)과 `protocolVersion`을 포함, 앱은 불일치 시 `ExtensionFailure`로 "Chrome 확장 새로고침 필요 (7.0.0 → 7.1.0)"를 표시. `manifest.json` 버전을 7.1.0으로 올리고 worker 파일명 규칙(`service-worker-v710.js`)과 `ChromeExtensionInstaller` obsolete 목록 갱신.
 - 완료 기준: DaouOffice 페이지를 새로고침해도 5초 내 host 스폰 1회 이하(로그로 확인). 오버레이 종료 후 5분 뒤 알람 주기가 5분(chrome://extensions 서비스 워커 콘솔로 확인). 구버전 확장 로드 시 상태에 불일치 문구.
+- 적용 메모(2026-09-23): 확장 서비스 워커 트리거 정리·쿠키 debounce·알람 백오프; 확장 버전 비교 순수 로직과 불일치 상태 문구; getConfig 버전 불일치 배선과 문서 §10.1/§10.4/§18 갱신 수동 확인 3건 대기
 
-#### T2.3 버전 체계 — P2
+#### [부분] T2.3 버전 체계 — P2
 - 근거: `app.manifest:3` `1.0.0.0`, csproj에 `Version` 계열 속성 없음, `manifest.json:4` `7.0.0`, 문서 표지 `v7.0.0`. 앱 내 버전 표시 없음.
 - 검증 상태: 코드 확인.
 - 지시: csproj에 `<Version>7.1.0</Version>`, `<FileVersion>`, `<InformationalVersion>`(+git 해시), app.manifest 동기화. 트레이 툴팁·설정창 하단·로그 첫 줄에 버전 표시. `NativeBridgeProtocol`에 `ProtocolVersion = 1` 상수. `CHANGELOG.md` 시작(7.0.0 as-built, 7.1.0 이번 작업).
 - 완료 기준: EXE 속성 창과 트레이 툴팁이 같은 버전을 보임.
+- 적용 메모(2026-09-23): 버전 소스 확립: csproj/app.manifest 버전 속성 + Services/AppVersion.cs + ProtocolVersion 상수; 버전 노출: 트레이 툴팁·설정창 하단·로그 첫 줄; CHANGELOG.md 신설과 README·기술 문서 버전 반영 수동 확인 6건 대기
 
-#### T2.4 제거·업그레이드 경로 — P2
+#### [부분] T2.4 제거·업그레이드 경로 — P2
 - 근거: 등록 코드만 있고(`StartupService.cs:10-32`, `NativeMessagingRegistrationService.cs:24-46`) 해제 코드·CLI·문서 절차 없음. EXE를 지우면 Chrome이 30초마다 존재하지 않는 경로를 실행 시도. 실행 중 EXE 교체는 파일 잠금으로 실패.
 - 검증 상태: 코드 확인.
 - 지시: `--uninstall` 인자: Run 키·NativeMessagingHosts 키(Chrome/Edge) 삭제, `%LOCALAPPDATA%\DaouCalendarOverlay` 삭제 여부 확인 창(로그·설정·캐시). 트레이 "완전 제거…" 항목. README와 문서에 설치/업그레이드(EXE 종료 → 교체 → 실행 → chrome://extensions 새로고침)/제거 절차. `IsNativeInvocation` 이전에 인자 파싱.
 - 완료 기준: `--uninstall` 실행 후 레지스트리 3곳에 값 없음.
+- 적용 메모(2026-09-23): UninstallService + --uninstall CLI 경로; 트레이 "완전 제거…" 항목과 설치/업그레이드/제거 문서 수동 확인 7건 대기
 
-#### T2.5 브라우저 매트릭스와 "열기" 버튼 — P2 (Q4)
+#### [부분] T2.5 브라우저 매트릭스와 "열기" 버튼 — P2 (Q4)
 - 근거: `NativeMessagingRegistrationService.cs:10`은 `Software\Google\Chrome\...`만. `App.OpenDaouOffice(:207-224)`는 `UseShellExecute`로 기본 브라우저를 열어 Chrome이 기본이 아니면 재로그인해도 확장이 쿠키를 얻지 못함.
 - 검증 상태: 코드 확인. Edge가 Chrome 키를 fallback으로 읽는지는 미확인.
 - 지시(기본안 Q4-a): `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay`에도 등록(설정 옵션 "Edge에도 등록", 기본 on). "열기"는 레지스트리 `App Paths\chrome.exe`로 Chrome을 직접 실행하고 실패 시 기본 브라우저. 문서에 지원 매트릭스(Windows 10/11 x64, Chrome 120+, Edge 시험 지원, Whale/Brave 미지원, 단일 프로필 가정, KST).
 - 완료 기준: Edge에서 같은 unpacked 확장 로드 시 동기화 동작(수동 확인 기록). 기본 브라우저를 Edge로 바꿔도 "열기"가 Chrome을 띄움.
+- 적용 메모(2026-09-23): Edge NativeMessagingHosts 등록과 RegisterEdge 설정 키; BrowserLauncher로 Chrome 직접 실행 + 기본 브라우저 fallback; 지원 환경 매트릭스와 Edge 옵션 문서화 수동 확인 8건 대기
 
-#### T2.6 빌드·배포 스크립트 정비 — P2
+#### [부분] T2.6 빌드·배포 스크립트 정비 — P2
 - 근거: `publish.ps1:14-28`은 `$ErrorActionPreference="Stop"`이 네이티브 exe 종료 코드에 적용되지 않아 실패해도 "Publish completed" 출력. csproj:11-12 전역 `RuntimeIdentifier`/`SelfContained`로 개발 빌드도 self-contained(`bin\Release\...\win-x64`에 런타임 전체 존재, 실데이터 확인). `DebugType=None`(csproj:17-18)이라 크래시 라인 정보 없음. 코드 서명 없음(SmartScreen 경고 예상, 추정).
 - 검증 상태: 코드 확인 + 실데이터 확인.
 - 지시: `publish.ps1`에 `if ($LASTEXITCODE -ne 0) { throw }`, csproj 중복 속성 제거(publish 프로파일 `Properties/PublishProfiles/win-x64.pubxml`로 이동), 개발 빌드는 framework-dependent, `DebugType=portable` + PDB는 `publish/symbols/`로 분리, 산출물에 버전 포함(`DaouCalendarOverlay-7.1.0.exe`). 서명은 인증서 확보 후 자리만(스크립트 파라미터).
 - 완료 기준: `publish.ps1` 실패 시 비정상 종료 코드. `dotnet build`가 5초 내(런타임 복사 없음). publish EXE 정상 실행.
+- 적용 메모(2026-09-23): 메인/테스트 csproj에서 self-contained 속성 제거하고 publish 프로파일(win-x64.pubxml)로 이동; publish.ps1 재작성: 종료 코드 검사, 버전 산출물명, 심볼 분리, 서명 자리, DryRun; README와 기술 문서에 빌드 전제조건·릴리스 절차(신규 절) 반영 수동 확인 6건 대기
 
-#### T2.7 .NET 10 이전 시험 — P2 (Q5)
+#### [부분] T2.7 .NET 10 이전 시험 — P2 (Q5)
 - 근거: TFM `net8.0-windows`(csproj:4), 지원 종료 2026-11-10(웹 확인), 머신에는 SDK 10만.
 - 검증 상태: 웹 확인.
 - 지시(기본안 Q5-b): 브랜치 `net10-trial`에서 TFM을 `net10.0-windows`로 바꿔 빌드·publish·기동 시간·EXE 크기·host 모드 동작을 비교하고 결과를 `docs/net10-migration.md`에 기록. 릴리스 전환은 사용자 결정.
 - 완료 기준: 비교표가 문서에 있음.
+- 적용 메모(2026-09-23): .NET 10 시험 측정 스크립트(tools/net10-trial.ps1)와 TFM 가드 테스트 추가; .NET 10 시험 실행 결과를 docs/net10-migration.md에 기록하고 README·기술 문서 반영 수동 확인 4건 대기
 
-#### T2.8 시작 실패 비치명화 — P2
+#### [부분] T2.8 시작 실패 비치명화 — P2
 - 근거: `App.xaml.cs:59-108`에서 `EnsureExtracted`/`EnsureRegistered` 예외가 최상위 catch로 가 MessageBox 후 종료. GPO로 HKCU 쓰기가 막히면 캐시 표시조차 불가. 오류 문구가 원인과 무관하게 settings.json을 지목(`:103-104`).
 - 검증 상태: 코드 확인.
 - 지시: 두 호출을 개별 try/catch로 감싸 실패는 로그 + 상태 "Native host 등록 실패: …"로 표시하고 오버레이는 계속. 오류 문구는 실제 예외 종류별로.
 - 완료 기준: 레지스트리 키를 읽기 전용으로 만든 상태에서 앱이 캐시로 기동.
+- 적용 메모(2026-09-23): 기동 실패 사유 분류기(StartupFailureReasons)와 SyncStatusService 비치명 상태 API 추가; App.OnStartup의 확장 추출·native host 등록 실패를 비치명화하고 오류 문구·문서 갱신 수동 확인 4건 대기
 
-#### T2.9 UX 소소한 개선 묶음 — P2
+#### [부분] T2.9 UX 소소한 개선 묶음 — P2
 - 근거·지시(각각 한 커밋):
   1. 그리드 칩 ToolTip: `MainWindow.xaml:501-525` 칩 템플릿에 `ToolTip="{Binding Tooltip}"` 바인딩(`MainViewModel.BuildTooltip(:277-295)`은 계산되지만 미사용).
   2. 필터 포커스 키: `MainWindow.xaml.cs:344-377`의 `KeyDown`은 TextBox가 Home/PageUp/PageDown을 먼저 처리하면 안 옴. `PreviewKeyDown`에서 Ctrl 조합(예: Ctrl+Home)으로 처리하거나 필터 밖 포커스에서만 동작함을 문서화. Esc는 필터에 포커스가 있으면 필터만 비우고 창은 숨기지 않기.
@@ -232,11 +240,13 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
   8. 초기화 버튼 3회 재구성: `FilterReset_Click(:332-342)`에서 `SelectionChanged`→`ClearFilter`→디바운스 틱 순으로 `BuildCalendar` 최대 3회 → 플래그로 1회.
   9. 시크릿/다중 프로필: `readCookiesFromAllStores(:40-73)`가 여러 store 쿠키를 한 헤더에 합침 → 기본 store(`"0"`) 우선, 다른 store는 기본이 비었을 때만.
 - 완료 기준: 각 항목 수동 확인 기록.
+- 적용 메모(2026-09-23): 그리드 칩/상태 툴팁, 키 입력 정리, 첫 실행 창 위치, 초기화 1회 재구성; 이벤트 색상 매핑 분리와 int.MinValue 방어, 투명도 문서화, 확장 쿠키 스토어 우선순위; 캘린더 표시 이름 기억(settings.json CalendarNames) 수동 확인 12건 대기
 
-#### T2.10 죽은 코드 정리 — P2
+#### [부분] T2.10 죽은 코드 정리 — P2
 - 근거: `MainWindow.xaml.cs:649-661` `HasButtonAncestor` 미사용. `App.xaml:78-103` `MoreButtonStyle` 미사용. `EventChipViewModel.Tooltip`(T2.9-1에서 사용). `MainWindow.SetEvents`의 `updatedAt`(T1.10에서 사용). `BridgeSyncEventArgs.ExtensionFailure`(T2.2에서 사용). `App._refreshTimer`(T1.8에서 재정의). `NativeBridgeProtocol.Utf8(:43)` 미사용. 실행 파일 경로 획득이 두 방식(`Environment.ProcessPath` vs `Process.MainModule`, `App.xaml.cs:324-327`).
 - 지시: 사용처가 생기지 않는 항목은 삭제, 경로 획득은 `Environment.ProcessPath`로 통일.
 - 완료 기준: 빌드 경고 0 유지.
+- 적용 메모(2026-09-23): 미사용 멤버·스타일 삭제와 보존 대상 확정; 실행 파일 경로 획득을 Environment.ProcessPath로 통일 수동 확인 6건 대기
 
 ### P3. 문서 보완 (기술 문서 HTML + README)
 

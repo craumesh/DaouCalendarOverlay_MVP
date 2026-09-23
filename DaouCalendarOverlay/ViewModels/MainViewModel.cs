@@ -7,32 +7,23 @@ using MediaBrush = System.Windows.Media.Brush;
 using MediaColor = System.Windows.Media.Color;
 using MediaSolidColorBrush = System.Windows.Media.SolidColorBrush;
 using DaouCalendarOverlay.Models;
+using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {
-    private static readonly MediaColor[] EventPalette =
-    {
-        MediaColor.FromRgb(0x5B, 0x8D, 0xE8),
-        MediaColor.FromRgb(0x69, 0xB5, 0x88),
-        MediaColor.FromRgb(0xB2, 0x83, 0xE6),
-        MediaColor.FromRgb(0xE0, 0x8A, 0x68),
-        MediaColor.FromRgb(0x4E, 0xB5, 0xB8),
-        MediaColor.FromRgb(0xD0, 0x72, 0x9E),
-        MediaColor.FromRgb(0xB9, 0x9A, 0x55),
-        MediaColor.FromRgb(0x77, 0x9D, 0xCF)
-    };
-
     private List<DaouCalendarEvent> _allEvents = new();
     private List<DaouCalendarEvent> _events = new();
     private readonly HashSet<string> _hiddenCalendarIds = new(StringComparer.Ordinal);
     private List<string> _configuredCalendarIds = new();
+    private Dictionary<string, string> _knownCalendarNames = new(StringComparer.Ordinal);
     private string _filterField = "Title";
     private string _filterText = "";
     private DateTime _displayMonth;
     private string _statusText = "준비 중";
     private string? _statusToolTip;
+    private string? _lastUpdatedToolTip;
     private bool _statusIsError;
     private bool _loginRequired;
     private readonly Func<DateTime> _today;
@@ -67,6 +58,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>settings.json <c>CalendarNames</c> 저장본을 이름 fallback으로 보관한다(유효한 항목만 복사).</summary>
+    public void SetKnownCalendarNames(IReadOnlyDictionary<string, string>? names)
+    {
+        _knownCalendarNames = CalendarNameStore.Sanitize(names);
     }
 
     public void SetHiddenCalendars(IEnumerable<string> calendarIds)
@@ -110,11 +107,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+        // 이름 결정 순서: 현재 이벤트에서 얻은 이름 → settings에 기억된 이름 → Id.
         return allIds
             .Select(id => new CalendarDescriptor
             {
                 Id = id,
-                Name = names.TryGetValue(id, out var name) ? name : id
+                Name = names.TryGetValue(id, out var name)
+                    ? name
+                    : _knownCalendarNames.TryGetValue(id, out var knownName)
+                        ? knownName
+                        : id
             })
             .OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(c => c.Id, StringComparer.Ordinal)
@@ -161,6 +163,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void ClearFilter()
     {
+        // 이미 기본값이면 달력을 다시 만들지 않는다(초기화 버튼 재구성 1회 보장).
+        if (string.Equals(_filterField, "Title", StringComparison.Ordinal) && _filterText.Length == 0)
+            return;
+
         _filterField = "Title";
         _filterText = "";
         ApplyFilter();
@@ -208,12 +214,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         StatusText = text;
         StatusIsError = isError;
+        UpdateStatusToolTip();
     }
 
-    public void SetLastUpdated(DateTimeOffset? updatedAt) =>
-        StatusToolTip = updatedAt is DateTimeOffset value
+    public void SetLastUpdated(DateTimeOffset? updatedAt)
+    {
+        _lastUpdatedToolTip = updatedAt is DateTimeOffset value
             ? "마지막 갱신 " + value.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
             : null;
+        UpdateStatusToolTip();
+    }
+
+    // 오류 상태에서만 잘린 상태 문구 전문을 툴팁 첫 줄로 올린다. 문구 자체는 SyncStatusService가 만든다.
+    private void UpdateStatusToolTip()
+    {
+        string? toolTip;
+        if (StatusIsError && !string.IsNullOrWhiteSpace(StatusText))
+        {
+            toolTip = _lastUpdatedToolTip is null
+                ? StatusText
+                : StatusText + Environment.NewLine + _lastUpdatedToolTip;
+        }
+        else
+        {
+            toolTip = _lastUpdatedToolTip;
+        }
+
+        StatusToolTip = string.IsNullOrEmpty(toolTip) ? null : toolTip;
+    }
 
     public void SetLoginRequired(bool required) => LoginRequired = required;
 
@@ -304,7 +332,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private static EventChipViewModel CreateEventChip(DaouCalendarEvent calendarEvent)
     {
-        var accent = GetEventColor(calendarEvent);
+        var accent = EventColorPalette.Resolve(calendarEvent.Color, calendarEvent.CalendarId);
         return new EventChipViewModel
         {
             Event = calendarEvent,
@@ -338,15 +366,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
             parts.Add(e.Description);
 
         return string.Join(Environment.NewLine, parts);
-    }
-
-    private static MediaColor GetEventColor(DaouCalendarEvent e)
-    {
-        if (int.TryParse(e.Color, out var index))
-            return EventPalette[Math.Abs(index) % EventPalette.Length];
-
-        var hash = StringComparer.Ordinal.GetHashCode(e.CalendarId ?? string.Empty);
-        return EventPalette[(hash & 0x7fffffff) % EventPalette.Length];
     }
 
     private static MediaSolidColorBrush CreateBrush(MediaColor color)

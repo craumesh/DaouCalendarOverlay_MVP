@@ -25,6 +25,7 @@ public partial class App : WpfApplication
     private DispatcherTimer? _healthTimer;
     private Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
+    private bool _pendingUserDataRemoval;
 
     public AppSettings Settings => _settings;
 
@@ -36,18 +37,9 @@ public partial class App : WpfApplication
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
-            if (NativeMessagingHost.IsNativeInvocation(e.Args))
-            {
-                LogService.Initialize(LogService.DefaultLogDirectory, "host");
-                await NativeMessagingHost.RunAsync();
-                Shutdown();
-                return;
-            }
-
             LogService.Initialize(LogService.DefaultLogDirectory, "overlay");
+            LogService.Info("startup", AppVersion.FormatStartupLine("overlay", Environment.ProcessId));
             RegisterGlobalExceptionHandlers();
-            LogService.Info("startup", $"overlay 시작 pid={Environment.ProcessId}");
 
             _singleInstance = new SingleInstanceService();
             if (!_singleInstance.TryAcquirePrimary())
@@ -70,12 +62,16 @@ public partial class App : WpfApplication
                 _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(loadedRefreshMinutes);
                 if (loadedRefreshMinutes != _settings.RefreshMinutes)
                     LogService.Warn("settings", $"RefreshMinutes {loadedRefreshMinutes} → {_settings.RefreshMinutes} 으로 보정");
-                _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered();
+                TryEnsureExtensionExtracted();
+                TryEnsureNativeHostRegistered();
 
                 if (!_settings.IsConfigured)
                 {
-                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
+                    // 첫 실행 창은 Owner가 없어 XAML의 CenterOwner가 적용되지 않으므로 화면 중앙에 띄운다.
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl))
+                    {
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen
+                    };
                     if (setup.ShowDialog() != true)
                     {
                         await ExitApplicationAsync();
@@ -84,8 +80,8 @@ public partial class App : WpfApplication
 
                     _settings = setup.Result;
                     await SaveSettingsAsync();
-                    _extensionInstaller.EnsureExtracted();
-                    _nativeMessagingRegistration.EnsureRegistered();
+                    TryEnsureExtensionExtracted();
+                    TryEnsureNativeHostRegistered();
                 }
 
                 _startupService.Apply(_settings.StartWithWindows);
@@ -110,6 +106,7 @@ public partial class App : WpfApplication
                 _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
                 _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
                 _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
+                _bridgeServer.ExtensionVersionConfirmed += BridgeServer_ExtensionVersionConfirmed;
                 _bridgeServer.Start();
 
                 ConfigureHealthTimer();
@@ -120,7 +117,7 @@ public partial class App : WpfApplication
             {
                 LogService.Error("startup", "앱 초기화 실패", ex);
                 System.Windows.MessageBox.Show(
-                    $"앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json",
+                    $"앱 초기화 중 오류가 발생했습니다.\n\n{StartupFailureReasons.Describe(ex)}\n\n로그 폴더: {LogService.LogDirectory ?? LogService.DefaultLogDirectory}",
                     "Daou Calendar Overlay",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -130,7 +127,17 @@ public partial class App : WpfApplication
         catch (Exception ex)
         {
             LogService.Error("startup", "OnStartup 실패", ex);
-            _syncStatus.MarkGeneralError($"시작 실패: {ex.Message}");
+            _syncStatus.MarkGeneralError($"시작 실패: {StartupFailureReasons.Describe(ex)}");
+            if (_overlayWindow is null)
+            {
+                // 창도 트레이도 없어 상태 문구가 보이지 않는다. 사용자에게 알린 뒤 좀비 프로세스로 남지 않게 종료한다.
+                System.Windows.MessageBox.Show(
+                    $"앱을 시작하지 못했습니다.\n\n{StartupFailureReasons.Describe(ex)}\n\n로그 폴더: {LogService.LogDirectory ?? LogService.DefaultLogDirectory}",
+                    "Daou Calendar Overlay",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Shutdown();
+            }
         }
     }
 
@@ -164,6 +171,40 @@ public partial class App : WpfApplication
     {
         LogService.Error(category, message, ex);
         _syncStatus.MarkGeneralError(ex is null ? message : $"{message}: {ex.Message}");
+    }
+
+    /// <summary>확장 파일 추출 실패를 치명적 오류로 만들지 않는다. 실패해도 오버레이는 계속 동작한다.</summary>
+    private bool TryEnsureExtensionExtracted()
+    {
+        try
+        {
+            _extensionInstaller.EnsureExtracted();
+            _syncStatus.MarkStartupComponentResolved(StartupFailureReasons.ExtensionComponent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("startup.extension", "Chrome 확장 파일 추출 실패", ex);
+            _syncStatus.MarkStartupComponentError(StartupFailureReasons.ExtensionComponent, StartupFailureReasons.Describe(ex));
+            return false;
+        }
+    }
+
+    /// <summary>Native Messaging 등록 실패를 치명적 오류로 만들지 않는다. 등록이 없으면 동기화만 막히고 캐시는 계속 표시된다.</summary>
+    private bool TryEnsureNativeHostRegistered()
+    {
+        try
+        {
+            _nativeMessagingRegistration.EnsureRegistered(_settings.RegisterEdge);
+            _syncStatus.MarkStartupComponentResolved(StartupFailureReasons.NativeHostComponent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("startup.nativehost", "Native Messaging 등록 실패", ex);
+            _syncStatus.MarkStartupComponentError(StartupFailureReasons.NativeHostComponent, StartupFailureReasons.Describe(ex));
+            return false;
+        }
     }
 
     /// <summary>설정 저장 실패를 치명적 오류로 만들지 않는다. 실패는 상태 표시줄과 로그로만 알린다.</summary>
@@ -222,6 +263,9 @@ public partial class App : WpfApplication
     private void BridgeServer_ConfigurationInvalid(object? sender, string reason) =>
         _syncStatus.MarkConfigurationInvalid(NoFetchReasons.Describe(reason));
 
+    private void BridgeServer_ExtensionVersionConfirmed(object? sender, EventArgs e) =>
+        _syncStatus.MarkExtensionVersionConfirmed();
+
     private void BridgeServer_SyncCompleted(object? sender, BridgeSyncEventArgs e)
     {
         _ = Dispatcher.InvokeAsync(async () =>
@@ -238,6 +282,15 @@ public partial class App : WpfApplication
                     _overlayWindow.SetLoginRequired(false);
                     _syncStatus.MarkSuccess(now);
                     LogService.Info("sync", $"동기화 성공 events={e.Events.Count}");
+
+                    // 이번에 확인된 캘린더 이름을 settings.json CalendarNames에 기억한다(실제 변경이 있을 때만 저장).
+                    // ApplySettings를 다시 부르면 창 위치·투명도가 재적용되므로 이름 캐시만 최신화한다.
+                    // 종료(사용자 데이터 삭제 포함)가 시작된 뒤에는 settings.json을 새로 쓰지 않는다.
+                    if (!_isExiting && CalendarNameStore.Merge(_settings.CalendarNames, _overlayWindow.GetCalendarDescriptors()))
+                    {
+                        _overlayWindow.SetKnownCalendarNames(_settings.CalendarNames);
+                        await SaveSettingsAsync();
+                    }
 
                     try
                     {
@@ -269,18 +322,23 @@ public partial class App : WpfApplication
                     return;
                 }
 
-                _overlayWindow.SetLoginRequired(false);
                 switch (e.FailureKind)
                 {
                     case BridgeFailureKind.Network:
+                        _overlayWindow.SetLoginRequired(false);
                         LogService.Warn("sync", $"네트워크 실패: {e.Error}");
                         _syncStatus.MarkNetworkError(e.Error, e.RetryAt);
                         break;
                     case BridgeFailureKind.Extension:
-                        LogService.Warn("sync", $"확장 오류: {e.Error}");
-                        _syncStatus.MarkExtensionError(e.Error ?? "Chrome 확장 프로그램을 다시 로드해 주세요.");
+                        // 버전 불일치는 동기화 결과가 아니라 getConfig마다(30초) 올라오는 신호다.
+                        // 재로그인 배너는 동기화 결과만 바꾸므로 여기서는 건드리지 않는다.
+                        LogService.Warn("sync", $"확장 버전 불일치: reported={e.ExtensionVersion ?? "(없음)"} expected={e.ExpectedExtensionVersion}");
+                        _syncStatus.MarkExtensionVersionMismatch(
+                            e.ExtensionVersion,
+                            e.ExpectedExtensionVersion ?? ChromeExtensionInstaller.ExpectedExtensionVersion);
                         break;
                     default:
+                        _overlayWindow.SetLoginRequired(false);
                         LogService.Warn("sync", $"동기화 실패: {e.Error}");
                         _syncStatus.MarkGeneralError(e.Error ?? "동기화 실패", e.RetryAt);
                         break;
@@ -320,8 +378,8 @@ public partial class App : WpfApplication
 
         await SaveSettingsAsync();
         _startupService.Apply(_settings.StartWithWindows);
-        _extensionInstaller.EnsureExtracted();
-        _nativeMessagingRegistration.EnsureRegistered();
+        TryEnsureExtensionExtracted();
+        TryEnsureNativeHostRegistered();
         _overlayWindow.ApplySettings(_settings);
         await RefreshAsync(true);
     }
@@ -331,6 +389,10 @@ public partial class App : WpfApplication
         if (string.IsNullOrWhiteSpace(_settings.BaseUrl))
             return;
 
+        if (BrowserLauncher.OpenInChrome(_settings.BaseUrl))
+            return;
+
+        LogService.Info("ui.openDaou", "Chrome 직접 실행에 실패해 기본 브라우저로 엽니다.");
         try
         {
             Process.Start(new ProcessStartInfo
@@ -433,7 +495,7 @@ public partial class App : WpfApplication
         var trayIcon = System.Drawing.SystemIcons.Application;
         try
         {
-            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            var exePath = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exePath))
             {
                 var extracted = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
@@ -450,7 +512,7 @@ public partial class App : WpfApplication
         _trayIcon = new Forms.NotifyIcon
         {
             Visible = true,
-            Text = "Daou Calendar Overlay",
+            Text = AppVersion.ClampTrayText($"Daou Calendar Overlay {AppVersion.Display}"),
             Icon = trayIcon
         };
 
@@ -469,6 +531,7 @@ public partial class App : WpfApplication
             try { await OpenSettingsAsync(); }
             catch (Exception ex) { ReportError("tray.settings", "설정 열기 실패", ex); }
         }));
+        menu.Items.Add("완전 제거…", null, (_, _) => Dispatcher.Invoke(UninstallFromTray));
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) => Dispatcher.Invoke(ExitApplication));
         _trayIcon.ContextMenuStrip = menu;
@@ -490,6 +553,28 @@ public partial class App : WpfApplication
             _overlayWindow.WindowState = WindowState.Normal;
 
         _overlayWindow.Activate();
+    }
+
+    private void UninstallFromTray()
+    {
+        try
+        {
+            var removeUserData = UninstallFlow.Confirm();
+            if (removeUserData is null)
+                return;
+
+            // 실행 중인 프로세스가 파일을 다시 쓰지 않도록 사용자 데이터 삭제는 종료 마지막 단계로 미룬다.
+            var result = UninstallService.Run(removeUserData: false);
+            _pendingUserDataRemoval = removeUserData.Value;
+            UninstallFlow.ShowResult(result, removeUserData.Value
+                ? "설정·캐시·로그 폴더는 앱이 종료된 직후 삭제됩니다."
+                : null);
+            _ = ExitGuardedAsync();
+        }
+        catch (Exception ex)
+        {
+            ReportError("uninstall", "제거 처리 실패", ex);
+        }
     }
 
     private void ExitApplication() => _ = ExitGuardedAsync();
@@ -526,6 +611,7 @@ public partial class App : WpfApplication
         _bridgeServer.BridgeHeartbeat -= BridgeServer_BridgeHeartbeat;
         _bridgeServer.FetchIssued -= BridgeServer_FetchIssued;
         _bridgeServer.ConfigurationInvalid -= BridgeServer_ConfigurationInvalid;
+        _bridgeServer.ExtensionVersionConfirmed -= BridgeServer_ExtensionVersionConfirmed;
         await _bridgeServer.DisposeAsync();
 
         if (_singleInstance is not null)
@@ -536,6 +622,8 @@ public partial class App : WpfApplication
 
         _syncStatus.StatusChanged -= SyncStatus_StatusChanged;
         _overlayWindow?.AllowCloseAndClose();
+        if (_pendingUserDataRemoval && !UninstallService.TryRemoveUserData(UninstallService.GetUserDataDirectory(), out var dataError))
+            LogService.Warn("uninstall", $"사용자 데이터 삭제 실패: {dataError}");
         Shutdown();
     }
 }

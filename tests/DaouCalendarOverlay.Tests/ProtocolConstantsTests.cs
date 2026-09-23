@@ -12,4 +12,10 @@ public sealed class ProtocolConstantsTests
         Assert.Equal("gkchgbpcbljkgabjcgjelacfkphcmhmi", NativeBridgeProtocol.ExtensionId);
         Assert.Equal("chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/", NativeBridgeProtocol.ExtensionOrigin);
     }
+
+    [Fact]
+    public void ProtocolVersion_IsOne()
+    {
+        Assert.Equal(1, NativeBridgeProtocol.ProtocolVersion);
+    }
 }

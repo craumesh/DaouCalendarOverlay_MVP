@@ -9,13 +9,7 @@ public static class NativeMessagingHost
     private const int ChromeOutputLimit = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static bool IsNativeInvocation(IReadOnlyList<string> args)
-    {
-        if (args.Count == 0)
-            return false;
-
-        return args.Any(arg => arg.StartsWith($"chrome-extension://{NativeBridgeProtocol.ExtensionId}", StringComparison.OrdinalIgnoreCase));
-    }
+    public static bool IsNativeInvocation(IReadOnlyList<string> args) => StartupModeParser.IsNativeInvocation(args);
 
     public static async Task RunAsync(CancellationToken cancellationToken = default)
     {

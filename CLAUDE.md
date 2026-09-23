@@ -1,6 +1,6 @@
 # 모델 라우팅 정책
 
-메인 세션(Opus)은 조율자다. 직접 탐색하거나 구현하지 않고, 아래 규칙대로 위임한다.
+메인 세션(Opus 5.5)은 조율자다. 직접 탐색하거나 구현하지 않고, 아래 규칙대로 위임한다.
 
 `lead`, `implementer`, `senior-implementer` 호출은 `route-guard` 훅이 검사한다. 태그가 없거나 조건에 맞지 않으면 호출이 차단되고 이유가 돌아온다. 차단되면 태그만 바꿔 다시 시도하지 말고, 차단 이유가 가리키는 에이전트로 바꾼다. 사실과 다른 태그는 붙이지 않는다.
 
@@ -8,14 +8,20 @@
 
 | 에이전트 | 모델 | 언제 |
 |---|---|---|
-| `Explore` | Sonnet | **모든 탐색.** 파일·심볼 찾기, 구조 파악, 어디서 무엇을 처리하는지, 변경 영향 범위, 관련 테스트. |
-| `architect` | Fable | 새 기능의 최초 설계. 기능당 1회. |
-| `lead` | Opus | **기능당 1회** 태스크 분해. 예외는 아래 replan 1회뿐. |
-| `implementer` | Sonnet | **모든 구현의 첫 시도.** 난이도와 상관없이 여기부터 시작한다. |
-| `senior-implementer` | Opus | **승격 조건 네 가지 중 하나일 때만.** |
-| `verifier` | Sonnet | 구현 후 독립 검증. 구현자의 자가 보고를 믿지 말고 항상 거친다. |
-| `mid-reviewer` | Opus | 완료 태스크 3개마다 중간 검토. |
-| `reviewer` | Fable | 최종 검토 1회. |
+| `Explore` | Opus 5.5 ※ | **모든 탐색.** 파일·심볼 찾기, 구조 파악, 어디서 무엇을 처리하는지, 변경 영향 범위, 관련 테스트. |
+| `architect` | Opus 5.5 | 새 기능의 최초 설계. 기능당 1회. |
+| `lead` | Opus 5.5 | **기능당 1회** 태스크 분해. 예외는 아래 replan 1회뿐. |
+| `implementer` | Opus 5.5 ※ | **모든 구현의 첫 시도.** 난이도와 상관없이 여기부터 시작한다. |
+| `senior-implementer` | Opus 5.5 | **승격 조건 네 가지 중 하나일 때만.** |
+| `verifier` | Opus 5.5 ※ | 구현 후 독립 검증. 구현자의 자가 보고를 믿지 말고 항상 거친다. |
+| `mid-reviewer` | Opus 5.5 | 완료 태스크 3개마다 중간 검토. |
+| `reviewer` | Opus 5.5 | 최종 검토 1회. |
+
+모든 에이전트는 `.claude/agents/*.md`의 `model: claude-opus-5-5`로 고정돼 있다. 별칭(`opus`, `sonnet`)을 쓰지 않는다. Fable은 쓰지 않는다.
+
+※ `Explore`, `implementer`, `verifier`는 원래 Sonnet 담당이다. 지금은 **시험적으로** Opus 5.5를 쓴다(2026-09-23 결정). 시험을 끝내면 이 세 파일의 `model:`만 되돌린다.
+
+모델이 모두 같아도 역할 구분은 그대로 유지한다. `implementer`에서 `senior-implementer`로의 승격은 모델이 아니라 역할(근본 원인 진단, 엣지 케이스 열거, 더 긴 턴 상한)을 바꾸는 것이다. lead 계획의 `tier`(`sonnet`/`opus`)와 승격 조건 `tier-opus`는 모델명이 아니라 이 라우팅을 가리키는 라벨이며, `route-guard` 훅과 워크플로가 이 이름을 쓰므로 바꾸지 않는다.
 
 `general-purpose` 에이전트는 쓰지 않는다. 조사는 `Explore`, 구현은 `implementer`에게 맡긴다.
 
@@ -70,9 +76,9 @@
 - `status: halted` → 멈춘 단계(`halted_at`)와 원인을 보고한다. 원인이 서버 오류면 `/feature`를 새로 실행하지 말고(설계부터 다시 돈다), 같은 run을 같은 스크립트로 relaunch하자고 제안한다. relaunch하면 완료된 에이전트는 저장된 결과를 재사용한다.
 - `status: incomplete` 또는 `changes_requested` → 실패·건너뛴 태스크와 미해결 지적을 그대로 보고한다. 완료로 요약하지 않는다.
 
-## Fable 사용 상한
+## 설계·최종 검토 호출 상한
 
-- `architect`는 기능당 1회, `reviewer`는 최종 검토 1회. 즉 기능당 Fable 호출은 최대 2회다. 중간 검토는 `mid-reviewer`(Opus)가 한다. 구현, 디버깅, 탐색에 Fable을 쓰지 않는다.
+- `architect`는 기능당 1회, `reviewer`는 최종 검토 1회. 중간 검토는 `mid-reviewer`가 한다. 이 상한은 모델과 무관한 절차 규칙이다.
 
 ## 위임 프롬프트 작성 규칙
 

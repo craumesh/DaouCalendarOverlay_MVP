@@ -2,8 +2,8 @@
 name: mid-reviewer
 description: 구현 도중의 중간 검토 전용. 완료된 태스크 묶음이 설계 문서와 어긋나기 시작했는지 조기에 잡고, 이후 태스크에 적용할 제약을 뽑아낸다. 최종 검토에는 사용하지 말 것(reviewer 사용). 코드를 수정하지 않는다.
 tools: Read, Grep, Glob, Bash
-model: opus
-maxTurns: 30
+model: claude-opus-5-5
+maxTurns: 60
 color: blue
 ---
 

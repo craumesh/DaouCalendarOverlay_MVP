@@ -12,7 +12,6 @@ using DaouCalendarOverlay.ViewModels;
 using WpfApplication = System.Windows.Application;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 using WpfButton = System.Windows.Controls.Button;
-using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
 using WpfScrollBar = System.Windows.Controls.Primitives.ScrollBar;
@@ -35,6 +34,7 @@ public partial class MainWindow : Window
     private System.Windows.Threading.DispatcherTimer? _filterDebounceTimer;
     private System.Windows.Threading.DispatcherTimer? _clockTimer;
     private bool _applyingSettings;
+    private bool _suppressFilterApply;
     private bool _opacityUiReady;
     private bool _positionLocked;
     private HwndSource? _hwndSource;
@@ -76,6 +76,7 @@ public partial class MainWindow : Window
             Topmost = settings.AlwaysOnTop;
             _positionLocked = settings.PositionLocked;
             _vm.SetConfiguredCalendars(settings.CalendarIds);
+            _vm.SetKnownCalendarNames(settings.CalendarNames);
             _vm.SetHiddenCalendars(settings.HiddenCalendarIds);
 
             var opacity = Math.Clamp(settings.UiOpacity, 0.0, 1.0);
@@ -111,6 +112,8 @@ public partial class MainWindow : Window
     public void SetHiddenCalendars(IEnumerable<string> hiddenCalendarIds) => _vm.SetHiddenCalendars(hiddenCalendarIds);
 
     public IReadOnlyList<CalendarDescriptor> GetCalendarDescriptors() => _vm.GetCalendarDescriptors();
+
+    public void SetKnownCalendarNames(IReadOnlyDictionary<string, string>? names) => _vm.SetKnownCalendarNames(names);
 
     public bool IsCalendarVisible(string calendarId) => _vm.IsCalendarVisible(calendarId);
 
@@ -336,6 +339,10 @@ public partial class MainWindow : Window
 
     private void FilterCriteria_Changed(object sender, RoutedEventArgs e)
     {
+        // 초기화 버튼이 콤보/텍스트를 되돌리는 동안에는 적용하지 않는다(재구성은 ResetFilter에서 1회).
+        if (_suppressFilterApply)
+            return;
+
         if (FilterFieldCombo is null || FilterTextBox is null)
             return;
 
@@ -373,51 +380,77 @@ public partial class MainWindow : Window
         _vm.SetFilter(field, FilterTextBox.Text);
     }
 
-    private void FilterReset_Click(object sender, RoutedEventArgs e)
+    private void FilterReset_Click(object sender, RoutedEventArgs e) => ResetFilter();
+
+    // 콤보/텍스트 변경 이벤트를 억제한 채 되돌리고, 달력 재구성은 ClearFilter 한 번으로 끝낸다.
+    private void ResetFilter()
     {
         if (FilterFieldCombo is null || FilterTextBox is null)
             return;
 
         _filterDebounceTimer?.Stop();
-        FilterFieldCombo.SelectedIndex = 0;
-        FilterTextBox.Clear();
+        _suppressFilterApply = true;
+        try
+        {
+            FilterFieldCombo.SelectedIndex = 0;
+            FilterTextBox.Clear();
+        }
+        finally
+        {
+            _suppressFilterApply = false;
+        }
+
+        _filterDebounceTimer?.Stop();
         _vm.ClearFilter();
         FilterTextBox.Focus();
     }
 
-    private async void Window_KeyDown(object sender, WpfKeyEventArgs e)
+    // PreviewKeyDown은 검색창(TextBox)이 키를 먼저 소비하기 전에 받는다.
+    // 판정은 OverlayShortcutPolicy에 두고, None이면 텍스트 입력을 삼키지 않도록 Handled를 건드리지 않는다.
+    private async void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
         try
         {
-            switch (e.Key)
+            var action = OverlayShortcutPolicy.Resolve(
+                e.Key,
+                Keyboard.Modifiers,
+                FilterTextBox?.IsKeyboardFocusWithin == true,
+                !string.IsNullOrEmpty(FilterTextBox?.Text),
+                EventDetailsOverlay.Visibility == Visibility.Visible,
+                DayEventsOverlay.Visibility == Visibility.Visible);
+
+            if (action == OverlayShortcutAction.None)
+                return;
+
+            e.Handled = true;
+            switch (action)
             {
-                case Key.PageUp:
+                case OverlayShortcutAction.PreviousMonth:
                     _vm.MoveMonth(-1);
-                    e.Handled = true;
                     await ((App)WpfApplication.Current).RefreshAsync(false);
                     break;
-                case Key.PageDown:
+                case OverlayShortcutAction.NextMonth:
                     _vm.MoveMonth(1);
-                    e.Handled = true;
                     await ((App)WpfApplication.Current).RefreshAsync(false);
                     break;
-                case Key.Home:
+                case OverlayShortcutAction.GoToday:
                     _vm.GoToday();
-                    e.Handled = true;
                     await ((App)WpfApplication.Current).RefreshAsync(false);
                     break;
-                case Key.F5:
-                    e.Handled = true;
+                case OverlayShortcutAction.Refresh:
                     await ((App)WpfApplication.Current).RefreshAsync(true);
                     break;
-                case Key.Escape:
-                    e.Handled = true;
-                    if (EventDetailsOverlay.Visibility == Visibility.Visible)
-                        HideEventDetails();
-                    else if (DayEventsOverlay.Visibility == Visibility.Visible)
-                        HideDayEvents();
-                    else
-                        Hide();
+                case OverlayShortcutAction.ClearFilter:
+                    ResetFilter();
+                    break;
+                case OverlayShortcutAction.CloseEventDetails:
+                    HideEventDetails();
+                    break;
+                case OverlayShortcutAction.CloseDayList:
+                    HideDayEvents();
+                    break;
+                case OverlayShortcutAction.HideWindow:
+                    Hide();
                     break;
             }
         }
@@ -741,20 +774,6 @@ public partial class MainWindow : Window
     {
         _saveBoundsTimer?.Stop();
         await RunGuardedAsync("ui.saveBounds", () => ((App)WpfApplication.Current).SaveWindowBoundsAsync(Left, Top));
-    }
-
-    private static bool HasButtonAncestor(object? source, DependencyObject stopAt)
-    {
-        DependencyObject? current = source as DependencyObject;
-        while (current is not null && current != stopAt)
-        {
-            if (current is WpfButtonBase)
-                return true;
-
-            current = GetParent(current);
-        }
-
-        return false;
     }
 
     private static bool IsInteractiveSource(object? source)
