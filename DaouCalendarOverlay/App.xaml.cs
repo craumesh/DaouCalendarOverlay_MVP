@@ -37,8 +37,8 @@ public partial class App : WpfApplication
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             LogService.Initialize(LogService.DefaultLogDirectory, "overlay");
+            LogService.Info("startup", AppVersion.FormatStartupLine("overlay", Environment.ProcessId));
             RegisterGlobalExceptionHandlers();
-            LogService.Info("startup", $"overlay 시작 pid={Environment.ProcessId}");
 
             _singleInstance = new SingleInstanceService();
             if (!_singleInstance.TryAcquirePrimary())
@@ -447,7 +447,7 @@ public partial class App : WpfApplication
         _trayIcon = new Forms.NotifyIcon
         {
             Visible = true,
-            Text = "Daou Calendar Overlay",
+            Text = AppVersion.ClampTrayText($"Daou Calendar Overlay {AppVersion.Display}"),
             Icon = trayIcon
         };
 

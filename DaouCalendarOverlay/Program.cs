@@ -29,6 +29,7 @@ internal static class Program
     {
         // host 분기는 App.OnStartup을 타지 않으므로 여기서 반드시 로깅을 초기화한다.
         LogService.Initialize(LogService.DefaultLogDirectory, "host");
+        LogService.Info("startup", AppVersion.FormatStartupLine("host", Environment.ProcessId));
         LogService.Info("host", $"host 모드 시작 pid={Environment.ProcessId}");
         try
         {

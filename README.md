@@ -34,6 +34,7 @@ Chrome에서 로그인한 다우오피스 세션을 활용하고, Chrome Extensi
 DaouCalendarOverlay_MVP/
 ├─ DaouCalendarOverlay.sln
 ├─ README.md
+├─ CHANGELOG.md
 ├─ .gitignore
 ├─ publish.ps1
 ├─ tools/
@@ -65,6 +66,7 @@ DaouCalendarOverlay_MVP/
 | `Assets/` | 아이콘 및 기타 리소스 |
 | `publish.ps1` | 배포용 빌드/설치 작업 |
 | `tools/` | host 스폰 비용 측정 스크립트 |
+| `CHANGELOG.md` | 버전별 변경 이력 |
 
 ## 동작 구조
 
@@ -315,6 +317,27 @@ git push
 7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
 8. 상태 문구에 `· 캐시 MM-dd HH:mm`만 계속 보이면 아직 한 번도 동기화에 성공하지 못한 상태입니다. Chrome 확장과 Native Messaging 등록을 먼저 확인하세요.
 9. 상태에 `Chrome 확장 새로고침 필요 (…)`가 보이면 Chrome에 로드된 확장 버전이 EXE에 포함된 버전과 다른 것입니다. `chrome://extensions`에서 확장을 새로고침하세요. 새로고침하면 확장이 즉시 `getConfig`를 보내므로 늦어도 30초 안에 문구가 `Chrome 브리지 연결됨 · 동기화 대기`로 바뀝니다.
+
+## 버전
+
+| 구성 요소 | 버전 |
+|---|---|
+| EXE (`DaouCalendarOverlay.exe`) | 7.1.0 (파일 버전 7.1.0.0) |
+| Chrome 확장 | 7.1.0 |
+| 네이티브 브리지 프로토콜 | v1 (파이프 이름은 `DaouCalendarOverlay.NativeBridge.v7` 유지) |
+
+EXE와 Chrome 확장은 같은 버전 번호를 쓰고, 네이티브 브리지 프로토콜 버전은 `NativeBridgeProtocol.ProtocolVersion`으로 따로 관리합니다.
+
+실행 중인 버전은 다음 네 곳에서 확인할 수 있으며, 네 곳이 항상 같은 버전을 가리켜야 합니다.
+
+1. 트레이 아이콘 툴팁: `Daou Calendar Overlay 7.1.0`
+2. 설정 창 하단: `버전 7.1.0 · 프로토콜 v1`
+3. 로그 파일 첫 줄: `DaouCalendarOverlay 7.1.0 (7.1.0+<커밋 SHA>) mode=overlay pid=…` (Native Messaging Host 모드는 `host-yyyyMMdd.log`에 `mode=host`)
+4. EXE 속성 창 > 자세히: 파일 버전 7.1.0.0
+
+- 확장을 새 버전으로 교체했다면 `chrome://extensions`에서 해당 확장을 **새로고침**해야 새 Service Worker가 적용됩니다. 새로고침하지 않으면 상태 표시줄에 `Chrome 확장 새로고침 필요 (…)`가 표시됩니다.
+- 빌드 커밋 해시: git 저장소에서 빌드하면 .NET SDK(Source Link)가 `InformationalVersion`에 커밋 SHA를 자동으로 붙여 `7.1.0+<커밋 SHA>`가 됩니다. 이 값은 로그 첫 줄과 EXE 속성 창의 제품 버전에서 보입니다. 트레이 툴팁과 설정 창에 표시하는 버전은 `7.1.0`으로 유지됩니다. 별도의 빌드 옵션은 필요 없으며, git 저장소 밖(소스 압축본 등)에서 빌드하면 해시 없이 `7.1.0`입니다.
+- 버전별 변경 이력은 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요.
 
 ## 라이선스
 

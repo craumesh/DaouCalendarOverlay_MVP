@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
+        VersionText.Text = $"버전 {AppVersion.Display} · 프로토콜 v{NativeBridgeProtocol.ProtocolVersion}";
 
         if (!string.IsNullOrWhiteSpace(validationNotice))
         {

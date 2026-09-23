@@ -12,6 +12,8 @@ public static class NativeBridgeProtocol
     public const string HostName = "com.daou.calendar_overlay";
     public const string ExtensionId = "gkchgbpcbljkgabjcgjelacfkphcmhmi";
     public const string ExtensionOrigin = "chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/";
+    /// <summary>네이티브 브리지 메시지 프로토콜 버전. 호환 불가 변경 시에만 올린다(파이프 이름도 함께 올려야 한다).</summary>
+    public const int ProtocolVersion = 1;
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
     {

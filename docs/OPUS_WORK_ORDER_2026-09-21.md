@@ -186,11 +186,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: DaouOffice 페이지를 새로고침해도 5초 내 host 스폰 1회 이하(로그로 확인). 오버레이 종료 후 5분 뒤 알람 주기가 5분(chrome://extensions 서비스 워커 콘솔로 확인). 구버전 확장 로드 시 상태에 불일치 문구.
 - 적용 메모(2026-09-23): 확장 서비스 워커 트리거 정리·쿠키 debounce·알람 백오프; 확장 버전 비교 순수 로직과 불일치 상태 문구; getConfig 버전 불일치 배선과 문서 §10.1/§10.4/§18 갱신 수동 확인 3건 대기
 
-#### T2.3 버전 체계 — P2
+#### [부분] T2.3 버전 체계 — P2
 - 근거: `app.manifest:3` `1.0.0.0`, csproj에 `Version` 계열 속성 없음, `manifest.json:4` `7.0.0`, 문서 표지 `v7.0.0`. 앱 내 버전 표시 없음.
 - 검증 상태: 코드 확인.
 - 지시: csproj에 `<Version>7.1.0</Version>`, `<FileVersion>`, `<InformationalVersion>`(+git 해시), app.manifest 동기화. 트레이 툴팁·설정창 하단·로그 첫 줄에 버전 표시. `NativeBridgeProtocol`에 `ProtocolVersion = 1` 상수. `CHANGELOG.md` 시작(7.0.0 as-built, 7.1.0 이번 작업).
 - 완료 기준: EXE 속성 창과 트레이 툴팁이 같은 버전을 보임.
+- 적용 메모(2026-09-23): 버전 소스 확립: csproj/app.manifest 버전 속성 + Services/AppVersion.cs + ProtocolVersion 상수; 버전 노출: 트레이 툴팁·설정창 하단·로그 첫 줄; CHANGELOG.md 신설과 README·기술 문서 버전 반영 수동 확인 6건 대기
 
 #### T2.4 제거·업그레이드 경로 — P2
 - 근거: 등록 코드만 있고(`StartupService.cs:10-32`, `NativeMessagingRegistrationService.cs:24-46`) 해제 코드·CLI·문서 절차 없음. EXE를 지우면 Chrome이 30초마다 존재하지 않는 경로를 실행 시도. 실행 중 EXE 교체는 파일 잠금으로 실패.
