@@ -185,6 +185,46 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 - 상태 텍스트에 마우스를 올리면 `마지막 갱신 yyyy-MM-dd HH:mm` 툴팁으로 마지막으로 화면에 반영된 데이터 시각을 확인할 수 있습니다.
 - 95초 이상 확장 heartbeat가 없으면 `Chrome 확장 연결 대기`로 바뀝니다.
 
+## 설치 · 업그레이드 · 제거
+
+### 설치
+
+1. `DaouCalendarOverlay.exe`를 둘 폴더에 복사한 뒤 실행합니다.
+2. 처음 실행하면 설정창이 열립니다. DaouOffice 주소(`https://회사이름.daouoffice.com`)와 캘린더 ID를 입력하고 저장합니다.
+3. Chrome에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램을 로드합니다**로 `%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension` 폴더를 선택합니다. 트레이 메뉴의 **"Chrome 확장 폴더 열기"** 로 이 폴더를 바로 열 수 있습니다.
+
+앱은 기동할 때마다 확장 파일을 위 폴더에 추출하고, Native Messaging manifest(`%LOCALAPPDATA%\DaouCalendarOverlay\NativeMessaging\com.daou.calendar_overlay.json`)의 `path`를 **현재 실행 중인 EXE 경로로 다시 기록**합니다. EXE를 다른 폴더로 옮겼다면 새 위치에서 한 번 실행하면 등록이 갱신됩니다.
+
+### 업그레이드
+
+1. 트레이 아이콘 우클릭 → **종료**로 앱을 끕니다. 실행 중이면 EXE 파일이 잠겨 있어 교체가 실패합니다.
+2. EXE 파일을 새 버전으로 교체합니다.
+3. 새 EXE를 실행합니다. 이때 확장 파일이 새 버전으로 추출되고 Native Messaging manifest의 `path`가 새 EXE 경로로 갱신됩니다.
+4. `chrome://extensions`에서 확장을 **새로고침**합니다. 새로고침하지 않으면 이전 Service Worker가 계속 동작하며, 확장 버전이 바뀐 업그레이드라면 상태 표시줄에 `Chrome 확장 새로고침 필요 (이전 버전 → 새 버전)`이 표시됩니다.
+
+설정·캐시·로그는 `%LOCALAPPDATA%\DaouCalendarOverlay`에 있으므로 EXE를 교체해도 유지됩니다.
+
+### 제거
+
+제거 방법은 두 가지입니다. 어느 쪽이든 확인 창 2단계(등록 해제 확인 → 사용자 데이터 폴더 삭제 여부)를 거친 뒤 결과 창에 실제로 지운 항목과 실패한 항목을 보여 줍니다. 이미 없는 항목은 건너뜁니다.
+
+- 트레이 아이콘 우클릭 → **완전 제거…**: 결과 창을 닫으면 앱이 종료됩니다. 사용자 데이터 삭제를 선택했다면 폴더는 앱이 종료된 직후 삭제됩니다.
+- 명령줄: `DaouCalendarOverlay.exe --uninstall` (`/uninstall`, `-uninstall`도 인식). 실패한 항목이 있으면 종료 코드 1, 그 밖에는(취소 포함) 0으로 끝납니다. 오버레이가 실행 중이면 먼저 트레이에서 종료한 뒤 실행하세요.
+
+| 항목 | 위치 |
+|---|---|
+| 시작 프로그램 등록 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 의 `DaouCalendarOverlay` 값 |
+| Chrome Native Messaging Host | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay` |
+| Edge Native Messaging Host | `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay` |
+| (선택) 사용자 데이터 | `%LOCALAPPDATA%\DaouCalendarOverlay` (settings.json, calendar-cache.json, logs, ChromeExtension, NativeMessaging manifest 포함) |
+
+제거 후에도 남는 것:
+
+- Chrome 확장은 자동으로 제거되지 않습니다. `chrome://extensions`(Edge는 `edge://extensions`)에서 직접 제거하세요.
+- EXE 파일은 자동으로 삭제되지 않습니다. 제거가 끝난 뒤 수동으로 삭제하세요. 제거 후 EXE를 다시 실행하면 등록이 다시 만들어집니다.
+
+> **주의:** 등록을 먼저 해제하지 않고 EXE만 지우면 Native Messaging Host 등록이 남아 Chrome이 존재하지 않는 경로의 EXE를 계속 실행하려 하고, 시작 프로그램 등록도 남아 Windows 로그인 때마다 없는 파일을 실행하려 합니다. EXE를 지우기 전에 반드시 위 방법으로 제거하세요.
+
 ## 로컬 설정 및 인증 정보
 
 애플리케이션의 사용자별 설정은 로컬 사용자 환경에 저장됩니다.

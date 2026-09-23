@@ -193,11 +193,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: EXE 속성 창과 트레이 툴팁이 같은 버전을 보임.
 - 적용 메모(2026-09-23): 버전 소스 확립: csproj/app.manifest 버전 속성 + Services/AppVersion.cs + ProtocolVersion 상수; 버전 노출: 트레이 툴팁·설정창 하단·로그 첫 줄; CHANGELOG.md 신설과 README·기술 문서 버전 반영 수동 확인 6건 대기
 
-#### T2.4 제거·업그레이드 경로 — P2
+#### [부분] T2.4 제거·업그레이드 경로 — P2
 - 근거: 등록 코드만 있고(`StartupService.cs:10-32`, `NativeMessagingRegistrationService.cs:24-46`) 해제 코드·CLI·문서 절차 없음. EXE를 지우면 Chrome이 30초마다 존재하지 않는 경로를 실행 시도. 실행 중 EXE 교체는 파일 잠금으로 실패.
 - 검증 상태: 코드 확인.
 - 지시: `--uninstall` 인자: Run 키·NativeMessagingHosts 키(Chrome/Edge) 삭제, `%LOCALAPPDATA%\DaouCalendarOverlay` 삭제 여부 확인 창(로그·설정·캐시). 트레이 "완전 제거…" 항목. README와 문서에 설치/업그레이드(EXE 종료 → 교체 → 실행 → chrome://extensions 새로고침)/제거 절차. `IsNativeInvocation` 이전에 인자 파싱.
 - 완료 기준: `--uninstall` 실행 후 레지스트리 3곳에 값 없음.
+- 적용 메모(2026-09-23): UninstallService + --uninstall CLI 경로; 트레이 "완전 제거…" 항목과 설치/업그레이드/제거 문서 수동 확인 7건 대기
 
 #### T2.5 브라우저 매트릭스와 "열기" 버튼 — P2 (Q4)
 - 근거: `NativeMessagingRegistrationService.cs:10`은 `Software\Google\Chrome\...`만. `App.OpenDaouOffice(:207-224)`는 `UseShellExecute`로 기본 브라우저를 열어 Chrome이 기본이 아니면 재로그인해도 확장이 쿠키를 얻지 못함.

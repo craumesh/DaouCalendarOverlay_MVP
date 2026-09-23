@@ -25,6 +25,7 @@ public partial class App : WpfApplication
     private DispatcherTimer? _healthTimer;
     private Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
+    private bool _pendingUserDataRemoval;
 
     public AppSettings Settings => _settings;
 
@@ -466,6 +467,7 @@ public partial class App : WpfApplication
             try { await OpenSettingsAsync(); }
             catch (Exception ex) { ReportError("tray.settings", "설정 열기 실패", ex); }
         }));
+        menu.Items.Add("완전 제거…", null, (_, _) => Dispatcher.Invoke(UninstallFromTray));
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) => Dispatcher.Invoke(ExitApplication));
         _trayIcon.ContextMenuStrip = menu;
@@ -487,6 +489,28 @@ public partial class App : WpfApplication
             _overlayWindow.WindowState = WindowState.Normal;
 
         _overlayWindow.Activate();
+    }
+
+    private void UninstallFromTray()
+    {
+        try
+        {
+            var removeUserData = UninstallFlow.Confirm();
+            if (removeUserData is null)
+                return;
+
+            // 실행 중인 프로세스가 파일을 다시 쓰지 않도록 사용자 데이터 삭제는 종료 마지막 단계로 미룬다.
+            var result = UninstallService.Run(removeUserData: false);
+            _pendingUserDataRemoval = removeUserData.Value;
+            UninstallFlow.ShowResult(result, removeUserData.Value
+                ? "설정·캐시·로그 폴더는 앱이 종료된 직후 삭제됩니다."
+                : null);
+            _ = ExitGuardedAsync();
+        }
+        catch (Exception ex)
+        {
+            ReportError("uninstall", "제거 처리 실패", ex);
+        }
     }
 
     private void ExitApplication() => _ = ExitGuardedAsync();
@@ -534,6 +558,8 @@ public partial class App : WpfApplication
 
         _syncStatus.StatusChanged -= SyncStatus_StatusChanged;
         _overlayWindow?.AllowCloseAndClose();
+        if (_pendingUserDataRemoval && !UninstallService.TryRemoveUserData(UninstallService.GetUserDataDirectory(), out var dataError))
+            LogService.Warn("uninstall", $"사용자 데이터 삭제 실패: {dataError}");
         Shutdown();
     }
 }

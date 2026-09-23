@@ -9,6 +9,12 @@ internal static class Program
     internal static int Main(string[] args)
     {
         // T2.4: --uninstall 등 인자 처리는 여기(native 분기 이전)에 추가한다.
+        if (StartupModeParser.IsUninstallInvocation(args))
+        {
+            LogService.Initialize(LogService.DefaultLogDirectory, "overlay");
+            return UninstallFlow.RunInteractive();
+        }
+
         if (StartupModeParser.IsNativeInvocation(args))
             return RunNativeHost();
 

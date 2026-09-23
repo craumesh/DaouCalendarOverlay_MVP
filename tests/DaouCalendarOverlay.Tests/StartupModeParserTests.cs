@@ -57,4 +57,35 @@ public sealed class StartupModeParserTests
         Assert.Equal(StartupModeParser.IsNativeInvocation(origin), NativeMessagingHost.IsNativeInvocation(origin));
         Assert.Equal(StartupModeParser.IsNativeInvocation(uninstall), NativeMessagingHost.IsNativeInvocation(uninstall));
     }
+
+    [Fact]
+    public void IsUninstallInvocation_WithUninstallFlag_ReturnsTrue()
+    {
+        Assert.True(StartupModeParser.IsUninstallInvocation(new[] { "--uninstall" }));
+        Assert.True(StartupModeParser.IsUninstallInvocation(new[] { "  --uninstall  " }));
+        Assert.True(StartupModeParser.IsUninstallInvocation(new string[] { null!, "--uninstall" }));
+    }
+
+    [Fact]
+    public void IsUninstallInvocation_AcceptsSlashAndUpperCase_ReturnsTrue()
+    {
+        Assert.True(StartupModeParser.IsUninstallInvocation(new[] { "/UNINSTALL" }));
+        Assert.True(StartupModeParser.IsUninstallInvocation(new[] { "-Uninstall" }));
+    }
+
+    [Fact]
+    public void IsUninstallInvocation_EmptyArgs_ReturnsFalse()
+    {
+        Assert.False(StartupModeParser.IsUninstallInvocation(null));
+        Assert.False(StartupModeParser.IsUninstallInvocation(Array.Empty<string>()));
+        Assert.False(StartupModeParser.IsUninstallInvocation(new string[] { null!, "" }));
+        Assert.False(StartupModeParser.IsUninstallInvocation(new[] { "--uninstall-now", "uninstall" }));
+    }
+
+    [Fact]
+    public void IsUninstallInvocation_NativeInvocationArgs_ReturnsFalse()
+    {
+        Assert.False(StartupModeParser.IsUninstallInvocation(new[] { "chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/" }));
+        Assert.False(StartupModeParser.IsUninstallInvocation(new[] { "chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/", "--parent-window=0" }));
+    }
 }
