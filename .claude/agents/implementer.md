@@ -3,7 +3,7 @@ name: implementer
 description: 모든 구현 작업의 기본 담당이자 첫 시도 담당. 기능 구현, 테스트 작성, 버그 수정, 리팩터링을 난이도와 상관없이 먼저 여기에 맡긴다(lead 계획에서 tier=opus로 지정된 태스크만 예외). verifier 검증에 2회 실패하거나 BLOCKED를 보고했을 때만 senior-implementer로 승격한다. 프롬프트 첫 줄에 TASK 태그가 없으면 route-guard 훅이 호출을 막는다.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: claude-opus-5-5
-maxTurns: 60
+maxTurns: 90
 color: green
 ---
 
