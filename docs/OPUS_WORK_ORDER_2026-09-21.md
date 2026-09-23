@@ -207,11 +207,12 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: Edge에서 같은 unpacked 확장 로드 시 동기화 동작(수동 확인 기록). 기본 브라우저를 Edge로 바꿔도 "열기"가 Chrome을 띄움.
 - 적용 메모(2026-09-23): Edge NativeMessagingHosts 등록과 RegisterEdge 설정 키; BrowserLauncher로 Chrome 직접 실행 + 기본 브라우저 fallback; 지원 환경 매트릭스와 Edge 옵션 문서화 수동 확인 8건 대기
 
-#### T2.6 빌드·배포 스크립트 정비 — P2
+#### [부분] T2.6 빌드·배포 스크립트 정비 — P2
 - 근거: `publish.ps1:14-28`은 `$ErrorActionPreference="Stop"`이 네이티브 exe 종료 코드에 적용되지 않아 실패해도 "Publish completed" 출력. csproj:11-12 전역 `RuntimeIdentifier`/`SelfContained`로 개발 빌드도 self-contained(`bin\Release\...\win-x64`에 런타임 전체 존재, 실데이터 확인). `DebugType=None`(csproj:17-18)이라 크래시 라인 정보 없음. 코드 서명 없음(SmartScreen 경고 예상, 추정).
 - 검증 상태: 코드 확인 + 실데이터 확인.
 - 지시: `publish.ps1`에 `if ($LASTEXITCODE -ne 0) { throw }`, csproj 중복 속성 제거(publish 프로파일 `Properties/PublishProfiles/win-x64.pubxml`로 이동), 개발 빌드는 framework-dependent, `DebugType=portable` + PDB는 `publish/symbols/`로 분리, 산출물에 버전 포함(`DaouCalendarOverlay-7.1.0.exe`). 서명은 인증서 확보 후 자리만(스크립트 파라미터).
 - 완료 기준: `publish.ps1` 실패 시 비정상 종료 코드. `dotnet build`가 5초 내(런타임 복사 없음). publish EXE 정상 실행.
+- 적용 메모(2026-09-23): 메인/테스트 csproj에서 self-contained 속성 제거하고 publish 프로파일(win-x64.pubxml)로 이동; publish.ps1 재작성: 종료 코드 검사, 버전 산출물명, 심볼 분리, 서명 자리, DryRun; README와 기술 문서에 빌드 전제조건·릴리스 절차(신규 절) 반영 수동 확인 6건 대기
 
 #### T2.7 .NET 10 이전 시험 — P2 (Q5)
 - 근거: TFM `net8.0-windows`(csproj:4), 지원 종료 2026-11-10(웹 확인), 머신에는 SDK 10만.

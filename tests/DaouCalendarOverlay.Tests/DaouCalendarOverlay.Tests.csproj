@@ -8,9 +8,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>DaouCalendarOverlay.Tests</AssemblyName>
     <RootNamespace>DaouCalendarOverlay.Tests</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
-    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

@@ -45,6 +45,7 @@ DaouCalendarOverlay_MVP/
    ├─ App.xaml.cs
    ├─ app.manifest
    ├─ DaouCalendarOverlay.csproj
+   ├─ Properties/PublishProfiles/win-x64.pubxml
    │
    ├─ Models/
    ├─ ViewModels/
@@ -64,7 +65,8 @@ DaouCalendarOverlay_MVP/
 | `Services/` | 다우오피스 연동, 동기화, 설정 등 핵심 서비스 |
 | `ChromeExtension/` | Chrome Extension 및 Native Messaging 관련 파일 |
 | `Assets/` | 아이콘 및 기타 리소스 |
-| `publish.ps1` | 배포용 빌드/설치 작업 |
+| `publish.ps1` | 릴리스 publish 스크립트(버전 산출물명, PDB 분리, 서명 파라미터) |
+| `DaouCalendarOverlay/Properties/PublishProfiles/win-x64.pubxml` | 릴리스 publish 전용 설정(win-x64 self-contained single-file, portable PDB) |
 | `tools/` | host 스폰 비용 측정 스크립트 |
 | `CHANGELOG.md` | 버전별 변경 이력 |
 
@@ -145,9 +147,11 @@ Release 빌드:
 dotnet build -c Release
 ```
 
+개발 빌드(`dotnet build`)는 framework-dependent입니다. 출력 폴더(`DaouCalendarOverlay\bin\Release\net8.0-windows\`)에는 .NET 런타임이 복사되지 않으므로, 이 EXE를 실행하려면 PC에 .NET 8 데스크톱 런타임(또는 .NET 8 SDK)이 설치되어 있어야 합니다. 런타임을 포함한 자체 포함(self-contained) 단일 EXE는 아래 `publish.ps1`로만 만듭니다(publish 설정은 `DaouCalendarOverlay/Properties/PublishProfiles/win-x64.pubxml`에만 있습니다). 개발 빌드의 PDB는 `portable` 형식으로 EXE 옆에 생성됩니다.
+
 ## 배포
 
-저장소에 포함된 `publish.ps1`을 사용해 배포용 빌드를 생성할 수 있습니다.
+저장소에 포함된 `publish.ps1`을 사용해 배포용 빌드(win-x64 self-contained 단일 EXE)를 생성할 수 있습니다. self-contained/single-file 설정은 publish 프로파일(`win-x64.pubxml`)에서 가져오므로 개발 빌드에는 영향을 주지 않습니다.
 
 PowerShell에서:
 
@@ -161,7 +165,33 @@ PowerShell의 실행 정책 때문에 스크립트 실행이 차단되는 경우
 powershell -ExecutionPolicy Bypass -File .\publish.ps1
 ```
 
-실제 배포 방식과 출력 경로는 `publish.ps1`의 현재 내용을 기준으로 확인해야 합니다.
+파라미터:
+
+| 파라미터 | 설명 |
+|---|---|
+| `-Version` | 생략하면 csproj의 `<Version>`을 씁니다. 지정하면 csproj `<Version>`과 같아야 하며, 다르면 `Version mismatch` 오류로 스크립트가 중단됩니다. 버전을 바꾸는 옵션이 아니라 의도한 버전인지 확인하는 옵션입니다. 버전을 올리려면 먼저 `DaouCalendarOverlay.csproj`의 `Version`/`AssemblyVersion`/`FileVersion`과 `app.manifest`의 `assemblyIdentity version`을 수정하세요(EXE 속성 창의 파일 버전과 트레이·설정창·로그에 보이는 버전을 일치시키기 위함). |
+| `-OutputDir` | 출력 폴더(기본: 저장소 루트의 `publish`). 실행할 때마다 기존 폴더를 통째로 지우고 다시 만들므로 다른 파일이 있는 폴더를 지정하지 마세요. |
+| `-CertificateThumbprint` / `-TimestampUrl` | 코드 서명 인증서의 SHA1 지문과 타임스탬프 서버(기본 `http://timestamp.digicert.com`). 지문을 주면 `signtool`로 최종 EXE를 서명하고, 비워 두면 서명을 건너뜁니다. |
+| `-DryRun` | 빌드하지 않고 버전·출력 경로·산출물 이름 등 계획만 출력합니다(파일을 만들거나 지우지 않음). 버전 검사는 DryRun에서도 수행됩니다. |
+
+예:
+
+```powershell
+.\publish.ps1 -DryRun
+.\publish.ps1 -Version 7.1.0
+.\publish.ps1 -CertificateThumbprint <인증서 SHA1 지문>
+```
+
+산출물:
+
+```text
+publish\DaouCalendarOverlay-<버전>.exe   (배포할 단일 EXE, 예: DaouCalendarOverlay-7.1.0.exe)
+publish\symbols\*.pdb                    (크래시 분석용 PDB, 배포하지 않고 EXE 버전별로 보관)
+```
+
+- `dotnet restore`·`dotnet publish`·`signtool` 중 하나라도 실패하면 스크립트는 비정상 종료 코드로 끝나며 `Publish completed`가 출력되지 않습니다(이전 스크립트는 실패해도 `Publish completed`를 출력했습니다).
+- 코드 서명 인증서를 아직 확보하지 않아 기본 산출물은 미서명입니다. 인터넷이나 메신저로 받은 EXE를 처음 실행할 때 Windows SmartScreen 경고가 표시될 수 있습니다.
+- 빌드 전제조건과 릴리스 순서는 기술 문서의 "빌드 전제조건·릴리스 절차" 절을 참고하세요.
 
 ## 최초 실행
 
@@ -195,7 +225,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 
 ### 설치
 
-1. `DaouCalendarOverlay.exe`를 둘 폴더에 복사한 뒤 실행합니다.
+1. `publish.ps1`이 만든 `DaouCalendarOverlay-<버전>.exe`(현재 `DaouCalendarOverlay-7.1.0.exe`)를 둘 폴더에 복사한 뒤 실행합니다.
 2. 처음 실행하면 설정창이 열립니다. DaouOffice 주소(`https://회사이름.daouoffice.com`)와 캘린더 ID를 입력하고 저장합니다.
 3. Chrome에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램을 로드합니다**로 `%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension` 폴더를 선택합니다. 트레이 메뉴의 **"Chrome 확장 폴더 열기"** 로 이 폴더를 바로 열 수 있습니다.
 
@@ -215,7 +245,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 제거 방법은 두 가지입니다. 어느 쪽이든 확인 창 2단계(등록 해제 확인 → 사용자 데이터 폴더 삭제 여부)를 거친 뒤 결과 창에 실제로 지운 항목과 실패한 항목을 보여 줍니다. 이미 없는 항목은 건너뜁니다.
 
 - 트레이 아이콘 우클릭 → **완전 제거…**: 결과 창을 닫으면 앱이 종료됩니다. 사용자 데이터 삭제를 선택했다면 폴더는 앱이 종료된 직후 삭제됩니다.
-- 명령줄: `DaouCalendarOverlay.exe --uninstall` (`/uninstall`, `-uninstall`도 인식). 실패한 항목이 있으면 종료 코드 1, 그 밖에는(취소 포함) 0으로 끝납니다. 오버레이가 실행 중이면 먼저 트레이에서 종료한 뒤 실행하세요.
+- 명령줄: `DaouCalendarOverlay-<버전>.exe --uninstall` (예: `DaouCalendarOverlay-7.1.0.exe --uninstall`. `/uninstall`, `-uninstall`도 인식). 실패한 항목이 있으면 종료 코드 1, 그 밖에는(취소 포함) 0으로 끝납니다. 오버레이가 실행 중이면 먼저 트레이에서 종료한 뒤 실행하세요.
 
 | 항목 | 위치 |
 |---|---|
