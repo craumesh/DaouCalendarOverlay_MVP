@@ -10,12 +10,25 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/scripts/route-guard.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "./.claude/scripts/log-subagent.sh"
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/scripts/log-subagent.sh\"",
+            "timeout": 10
           }
         ]
       }

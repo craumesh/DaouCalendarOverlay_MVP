@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="ChromeExtension\manifest.json" LogicalName="DaouCalendarOverlay.ChromeExtension.manifest.json" />
-    <EmbeddedResource Include="ChromeExtension\service-worker-v700.js" LogicalName="DaouCalendarOverlay.ChromeExtension.service-worker-v700.js" />
+    <EmbeddedResource Include="ChromeExtension\service-worker-v710.js" LogicalName="DaouCalendarOverlay.ChromeExtension.service-worker-v710.js" />
     <EmbeddedResource Include="ChromeExtension\icon16.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon16.png" />
     <EmbeddedResource Include="ChromeExtension\icon32.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon32.png" />
     <EmbeddedResource Include="ChromeExtension\icon48.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon48.png" />

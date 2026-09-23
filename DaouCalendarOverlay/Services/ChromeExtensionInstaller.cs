@@ -9,7 +9,7 @@ public sealed class ChromeExtensionInstaller
     private static readonly (string ResourceName, string FileName)[] Files =
     {
         ("DaouCalendarOverlay.ChromeExtension.manifest.json", "manifest.json"),
-        ("DaouCalendarOverlay.ChromeExtension.service-worker-v700.js", "service-worker-v700.js"),
+        ("DaouCalendarOverlay.ChromeExtension.service-worker-v710.js", "service-worker-v710.js"),
         ("DaouCalendarOverlay.ChromeExtension.icon16.png", "icon16.png"),
         ("DaouCalendarOverlay.ChromeExtension.icon32.png", "icon32.png"),
         ("DaouCalendarOverlay.ChromeExtension.icon48.png", "icon48.png"),
@@ -44,7 +44,8 @@ public sealed class ChromeExtensionInstaller
         {
             "content.js", "main-world.js", "bridge-config.js", "bridge-config.json",
             "service-worker.js", "service-worker-v602.js", "service-worker-v610.js",
-            "service-worker-v620.js", "service-worker-v630.js", "setup.html", "setup.js"
+            "service-worker-v620.js", "service-worker-v630.js", "service-worker-v700.js",
+            "setup.html", "setup.js"
         })
         {
             var obsoletePath = Path.Combine(ExtensionDirectory, obsolete);

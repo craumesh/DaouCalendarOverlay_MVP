@@ -22,7 +22,6 @@ public partial class App : WpfApplication
     private SingleInstanceService? _singleInstance;
     private AppSettings _settings = new();
     private MainWindow? _overlayWindow;
-    private DispatcherTimer? _refreshTimer;
     private DispatcherTimer? _healthTimer;
     private Forms.NotifyIcon? _trayIcon;
     private bool _isExiting;
@@ -32,79 +31,172 @@ public partial class App : WpfApplication
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-        // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
-        if (NativeMessagingHost.IsNativeInvocation(e.Args))
-        {
-            await NativeMessagingHost.RunAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance = new SingleInstanceService();
-        if (!_singleInstance.TryAcquirePrimary())
-        {
-            await SingleInstanceService.NotifyPrimaryAsync();
-            await _singleInstance.DisposeAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
-        _singleInstance.StartListening();
-        _syncStatus.StatusChanged += SyncStatus_StatusChanged;
-        _syncStatus.MarkStarting();
 
         try
         {
-            _settings = await _settingsService.LoadAsync();
-            _extensionInstaller.EnsureExtracted();
-            _nativeMessagingRegistration.EnsureRegistered();
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            if (!_settings.IsConfigured)
+            // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
+            if (NativeMessagingHost.IsNativeInvocation(e.Args))
             {
-                var setup = new SettingsWindow(_settings, firstRun: true);
-                if (setup.ShowDialog() != true)
-                {
-                    await ExitApplicationAsync();
-                    return;
-                }
-
-                _settings = setup.Result;
-                await _settingsService.SaveAsync(_settings);
-                _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered();
+                LogService.Initialize(LogService.DefaultLogDirectory, "host");
+                await NativeMessagingHost.RunAsync();
+                Shutdown();
+                return;
             }
 
-            _startupService.Apply(_settings.StartWithWindows);
+            LogService.Initialize(LogService.DefaultLogDirectory, "overlay");
+            RegisterGlobalExceptionHandlers();
+            LogService.Info("startup", $"overlay 시작 pid={Environment.ProcessId}");
 
-            _overlayWindow = new MainWindow(_settings);
-            _overlayWindow.Show();
-            CreateTrayIcon();
+            _singleInstance = new SingleInstanceService();
+            if (!_singleInstance.TryAcquirePrimary())
+            {
+                await SingleInstanceService.NotifyPrimaryAsync();
+                await _singleInstance.DisposeAsync();
+                Shutdown();
+                return;
+            }
 
-            var cache = await _cacheService.LoadAsync();
-            if (cache.Events.Count > 0)
-                _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $"캐시 {cache.LastUpdated:HH:mm}");
+            _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
+            _singleInstance.StartListening();
+            _syncStatus.StatusChanged += SyncStatus_StatusChanged;
+            _syncStatus.MarkStarting();
 
-            _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
-            _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
-            _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
-            _bridgeServer.Start();
+            try
+            {
+                _settings = await _settingsService.LoadAsync();
+                var loadedRefreshMinutes = _settings.RefreshMinutes;
+                _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(loadedRefreshMinutes);
+                if (loadedRefreshMinutes != _settings.RefreshMinutes)
+                    LogService.Warn("settings", $"RefreshMinutes {loadedRefreshMinutes} → {_settings.RefreshMinutes} 으로 보정");
+                _extensionInstaller.EnsureExtracted();
+                _nativeMessagingRegistration.EnsureRegistered();
 
-            ConfigureRefreshTimer();
-            ConfigureHealthTimer();
-            _syncStatus.MarkWaiting();
-            await RefreshAsync(true);
+                if (!_settings.IsConfigured)
+                {
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
+                    if (setup.ShowDialog() != true)
+                    {
+                        await ExitApplicationAsync();
+                        return;
+                    }
+
+                    _settings = setup.Result;
+                    await SaveSettingsAsync();
+                    _extensionInstaller.EnsureExtracted();
+                    _nativeMessagingRegistration.EnsureRegistered();
+                }
+
+                _startupService.Apply(_settings.StartWithWindows);
+
+                _overlayWindow = new MainWindow(_settings);
+                _overlayWindow.Show();
+                CreateTrayIcon();
+
+                var cache = await _cacheService.LoadAsync();
+                if (cache.Events.Count > 0)
+                {
+                    _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $"캐시 {cache.LastUpdated:HH:mm}");
+                    _syncStatus.MarkCacheLoaded(cache.LastUpdated);
+                    if (!CacheRangePolicy.CoversToday(cache.RangeFrom, cache.RangeTo, DateTimeOffset.Now))
+                    {
+                        _syncStatus.MarkCacheOutOfRange();
+                        LogService.Info("cache", "캐시 범위가 오늘을 포함하지 않아 범위 밖으로 표기합니다.");
+                    }
+                }
+
+                _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
+                _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
+                _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
+                _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
+                _bridgeServer.Start();
+
+                ConfigureHealthTimer();
+                _syncStatus.MarkWaiting();
+                await RefreshAsync(true);
+            }
+            catch (Exception ex)
+            {
+                LogService.Error("startup", "앱 초기화 실패", ex);
+                System.Windows.MessageBox.Show(
+                    $"앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json",
+                    "Daou Calendar Overlay",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                await ExitApplicationAsync();
+            }
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show(
-                $"앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json",
-                "Daou Calendar Overlay",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            await ExitApplicationAsync();
+            LogService.Error("startup", "OnStartup 실패", ex);
+            _syncStatus.MarkGeneralError($"시작 실패: {ex.Message}");
+        }
+    }
+
+    private void RegisterGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += App_DispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
+    }
+
+    private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        LogService.Error("dispatcher", "처리되지 않은 UI 예외", e.Exception);
+        _syncStatus.MarkGeneralError($"오류: {e.Exception.Message}");
+        e.Handled = true;   // 로그 후 계속 실행
+    }
+
+    private void CurrentDomain_UnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        LogService.Error("appdomain", $"처리되지 않은 예외 terminating={e.IsTerminating}", e.ExceptionObject as Exception);
+    }
+
+    private void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        LogService.Warn("task", "관찰되지 않은 Task 예외", e.Exception);
+        e.SetObserved();
+    }
+
+    /// <summary>로그를 남기고 상태 텍스트로 사용자에게 알린다(앱은 계속 동작한다).</summary>
+    public void ReportError(string category, string message, Exception? ex = null)
+    {
+        LogService.Error(category, message, ex);
+        _syncStatus.MarkGeneralError(ex is null ? message : $"{message}: {ex.Message}");
+    }
+
+    /// <summary>설정 저장 실패를 치명적 오류로 만들지 않는다. 실패는 상태 표시줄과 로그로만 알린다.</summary>
+    private async Task<bool> SaveSettingsAsync()
+    {
+        try
+        {
+            var saved = await _settingsService.SaveAsync(_settings);
+            if (!saved)
+                _syncStatus.MarkPersistenceError("설정");
+            return saved;
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("settings", "설정 저장 실패", ex);
+            _syncStatus.MarkPersistenceError("설정");
+            return false;
+        }
+    }
+
+    /// <summary>트레이 메뉴에서 로그 디렉터리를 탐색기로 연다.</summary>
+    public void OpenLogFolder()
+    {
+        try
+        {
+            var dir = LogService.LogDirectory ?? LogService.DefaultLogDirectory;
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            LogService.Warn("tray", "로그 폴더 열기 실패", ex);
+            _syncStatus.MarkGeneralError($"로그 폴더 열기 실패: {ex.Message}");
         }
     }
 
@@ -126,47 +218,77 @@ public partial class App : WpfApplication
     private void BridgeServer_FetchIssued(object? sender, EventArgs e) =>
         _syncStatus.MarkSyncing();
 
+    // 상태 텍스트의 UI 마샬링은 SyncStatus_StatusChanged가 처리하므로 여기서 Dispatcher를 쓰지 않는다.
+    private void BridgeServer_ConfigurationInvalid(object? sender, string reason) =>
+        _syncStatus.MarkConfigurationInvalid(NoFetchReasons.Describe(reason));
+
     private void BridgeServer_SyncCompleted(object? sender, BridgeSyncEventArgs e)
     {
         _ = Dispatcher.InvokeAsync(async () =>
         {
-            if (_overlayWindow is null)
-                return;
-
-            if (e.Success)
+            try
             {
-                var now = DateTimeOffset.Now;
-                _overlayWindow.SetEvents(e.Events, now, $"동기화 {now:HH:mm}");
-                _overlayWindow.SetLoginRequired(false);
-                _syncStatus.MarkSuccess(now);
-                await _cacheService.SaveAsync(new CalendarCache
+                if (_overlayWindow is null)
+                    return;
+
+                if (e.Success)
                 {
-                    LastUpdated = now,
-                    Events = e.Events
-                });
-                return;
-            }
+                    var now = DateTimeOffset.Now;
+                    _overlayWindow.SetEvents(e.Events, now, $"동기화 {now:HH:mm}");
+                    _overlayWindow.SetLoginRequired(false);
+                    _syncStatus.MarkSuccess(now);
+                    LogService.Info("sync", $"동기화 성공 events={e.Events.Count}");
 
-            if (e.AuthenticationRequired)
-            {
-                _overlayWindow.SetLoginRequired(true);
-                _syncStatus.MarkAuthenticationRequired(
-                    string.IsNullOrWhiteSpace(e.Error) ? "DaouOffice 재로그인 필요" : e.Error);
-                return;
-            }
+                    try
+                    {
+                        var cacheSaved = await _cacheService.SaveAsync(new CalendarCache
+                        {
+                            LastUpdated = now,
+                            RangeFrom = e.RangeFrom,
+                            RangeTo = e.RangeTo,
+                            Events = e.Events
+                        });
+                        if (!cacheSaved)
+                            _syncStatus.MarkPersistenceError("캐시");
+                    }
+                    catch (Exception cacheEx)
+                    {
+                        // T1.2a 이후 SaveAsync 는 예외를 던지지 않지만 방어적으로 남겨 둔다.
+                        LogService.Warn("cache", "캐시 저장 실패", cacheEx);
+                    }
 
-            _overlayWindow.SetLoginRequired(false);
-            switch (e.FailureKind)
+                    return;
+                }
+
+                if (e.AuthenticationRequired)
+                {
+                    LogService.Warn("sync", $"인증 실패: {e.Error}");
+                    _overlayWindow.SetLoginRequired(true);
+                    _syncStatus.MarkAuthenticationRequired(
+                        string.IsNullOrWhiteSpace(e.Error) ? "DaouOffice 재로그인 필요" : e.Error);
+                    return;
+                }
+
+                _overlayWindow.SetLoginRequired(false);
+                switch (e.FailureKind)
+                {
+                    case BridgeFailureKind.Network:
+                        LogService.Warn("sync", $"네트워크 실패: {e.Error}");
+                        _syncStatus.MarkNetworkError(e.Error, e.RetryAt);
+                        break;
+                    case BridgeFailureKind.Extension:
+                        LogService.Warn("sync", $"확장 오류: {e.Error}");
+                        _syncStatus.MarkExtensionError(e.Error ?? "Chrome 확장 프로그램을 다시 로드해 주세요.");
+                        break;
+                    default:
+                        LogService.Warn("sync", $"동기화 실패: {e.Error}");
+                        _syncStatus.MarkGeneralError(e.Error ?? "동기화 실패", e.RetryAt);
+                        break;
+                }
+            }
+            catch (Exception ex)
             {
-                case BridgeFailureKind.Network:
-                    _syncStatus.MarkNetworkError(e.Error, e.RetryAt);
-                    break;
-                case BridgeFailureKind.Extension:
-                    _syncStatus.MarkExtensionError(e.Error ?? "Chrome 확장 프로그램을 다시 로드해 주세요.");
-                    break;
-                default:
-                    _syncStatus.MarkGeneralError(e.Error ?? "동기화 실패", e.RetryAt);
-                    break;
+                ReportError("sync", "동기화 결과 처리 실패", ex);
             }
         });
     }
@@ -190,17 +312,17 @@ public partial class App : WpfApplication
             return;
 
         _settings = dialog.Result;
+        _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(_settings.RefreshMinutes);
         _settings.HiddenCalendarIds = _settings.HiddenCalendarIds
             .Where(id => _settings.CalendarIds.Contains(id, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
         _startupService.Apply(_settings.StartWithWindows);
         _extensionInstaller.EnsureExtracted();
         _nativeMessagingRegistration.EnsureRegistered();
         _overlayWindow.ApplySettings(_settings);
-        ConfigureRefreshTimer();
         await RefreshAsync(true);
     }
 
@@ -217,8 +339,9 @@ public partial class App : WpfApplication
                 UseShellExecute = true
             });
         }
-        catch
+        catch (Exception ex)
         {
+            LogService.Warn("ui.openDaou", "DaouOffice 열기 실패", ex);
             _syncStatus.MarkGeneralError("DaouOffice 페이지를 열지 못했습니다.");
         }
     }
@@ -250,27 +373,27 @@ public partial class App : WpfApplication
     {
         _settings.Left = left;
         _settings.Top = top;
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
     }
 
     public async Task SetAlwaysOnTopAsync(bool enabled)
     {
         _settings.AlwaysOnTop = enabled;
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
         _overlayWindow?.ApplySettings(_settings);
     }
 
     public async Task SetPositionLockedAsync(bool locked)
     {
         _settings.PositionLocked = locked;
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
         _overlayWindow?.SetPositionLocked(locked);
     }
 
     public async Task SetUiOpacityAsync(double opacity)
     {
         _settings.UiOpacity = Math.Clamp(opacity, 0.0, 1.0);
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
     }
 
     public async Task SetCalendarVisibilityAsync(string calendarId, bool visible)
@@ -283,26 +406,15 @@ public partial class App : WpfApplication
         else if (!_settings.HiddenCalendarIds.Contains(calendarId, StringComparer.Ordinal))
             _settings.HiddenCalendarIds.Add(calendarId);
 
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
         _overlayWindow?.SetHiddenCalendars(_settings.HiddenCalendarIds);
     }
 
     public async Task ShowAllCalendarsAsync()
     {
         _settings.HiddenCalendarIds.Clear();
-        await _settingsService.SaveAsync(_settings);
+        await SaveSettingsAsync();
         _overlayWindow?.SetHiddenCalendars(_settings.HiddenCalendarIds);
-    }
-
-    private void ConfigureRefreshTimer()
-    {
-        _refreshTimer?.Stop();
-        _refreshTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMinutes(Math.Max(1, _settings.RefreshMinutes))
-        };
-        _refreshTimer.Tick += async (_, _) => await RefreshAsync(false);
-        _refreshTimer.Start();
     }
 
     private void ConfigureHealthTimer()
@@ -329,9 +441,10 @@ public partial class App : WpfApplication
                     trayIcon = extracted;
             }
         }
-        catch
+        catch (Exception ex)
         {
             // 단일 EXE 환경에서 아이콘 추출에 실패하면 기본 아이콘을 사용한다.
+            LogService.Warn("tray", "트레이 아이콘 추출 실패", ex);
         }
 
         _trayIcon = new Forms.NotifyIcon
@@ -343,10 +456,19 @@ public partial class App : WpfApplication
 
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("달력 보이기/숨기기", null, (_, _) => Dispatcher.Invoke(ToggleOverlay));
-        menu.Items.Add("새로고침", null, (_, _) => Dispatcher.Invoke(async () => await RefreshAsync(true)));
+        menu.Items.Add("새로고침", null, (_, _) => Dispatcher.Invoke(async () =>
+        {
+            try { await RefreshAsync(true); }
+            catch (Exception ex) { ReportError("tray.refresh", "새로고침 실패", ex); }
+        }));
         menu.Items.Add("DaouOffice 열기", null, (_, _) => Dispatcher.Invoke(OpenDaouOffice));
         menu.Items.Add("Chrome 확장 폴더 열기", null, (_, _) => Dispatcher.Invoke(OpenChromeExtensionFolder));
-        menu.Items.Add("설정", null, (_, _) => Dispatcher.Invoke(async () => await OpenSettingsAsync()));
+        menu.Items.Add("로그 폴더 열기", null, (_, _) => Dispatcher.Invoke(OpenLogFolder));
+        menu.Items.Add("설정", null, (_, _) => Dispatcher.Invoke(async () =>
+        {
+            try { await OpenSettingsAsync(); }
+            catch (Exception ex) { ReportError("tray.settings", "설정 열기 실패", ex); }
+        }));
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("종료", null, (_, _) => Dispatcher.Invoke(ExitApplication));
         _trayIcon.ContextMenuStrip = menu;
@@ -370,7 +492,20 @@ public partial class App : WpfApplication
         _overlayWindow.Activate();
     }
 
-    private void ExitApplication() => _ = ExitApplicationAsync();
+    private void ExitApplication() => _ = ExitGuardedAsync();
+
+    private async Task ExitGuardedAsync()
+    {
+        try
+        {
+            await ExitApplicationAsync();
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("shutdown", "종료 처리 실패", ex);
+            Shutdown();
+        }
+    }
 
     private async Task ExitApplicationAsync()
     {
@@ -378,7 +513,7 @@ public partial class App : WpfApplication
             return;
 
         _isExiting = true;
-        _refreshTimer?.Stop();
+        LogService.Info("shutdown", "overlay 종료");
         _healthTimer?.Stop();
 
         if (_trayIcon is not null)
@@ -390,6 +525,7 @@ public partial class App : WpfApplication
         _bridgeServer.SyncCompleted -= BridgeServer_SyncCompleted;
         _bridgeServer.BridgeHeartbeat -= BridgeServer_BridgeHeartbeat;
         _bridgeServer.FetchIssued -= BridgeServer_FetchIssued;
+        _bridgeServer.ConfigurationInvalid -= BridgeServer_ConfigurationInvalid;
         await _bridgeServer.DisposeAsync();
 
         if (_singleInstance is not null)

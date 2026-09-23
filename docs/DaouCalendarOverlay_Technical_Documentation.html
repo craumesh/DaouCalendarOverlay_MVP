@@ -10,79 +10,111 @@
 <section><h2>1. 한 문장으로 보는 시스템</h2><div class="callout good"><strong>Chrome의 기존 DaouOffice 로그인 세션만 빌려오고, 실제 일정 API 조회·파싱·표시는 Windows 오버레이 앱이 담당한다.</strong> 따라서 오버레이가 별도 로그인 세션을 만들지 않아 브라우저 로그인과 충돌하지 않는다.</div><div class="grid3"><div class="card"><div class="kpi">0</div><strong>오버레이가 저장하는 비밀번호</strong><p>현재 구조는 ID/PW 자동 로그인 방식을 제거했다.</p></div><div class="card"><div class="kpi">30초</div><strong>Chrome Worker wake-up</strong><p><code class="inline">chrome.alarms</code>가 MV3 worker를 주기적으로 깨운다.</p></div><div class="card"><div class="kpi">1 EXE</div><strong>GUI + Native Host</strong><p>동일 EXE가 일반 UI 모드와 Chrome Native Messaging host 모드를 모두 담당한다.</p></div></div></section>
 <section id="evolution"><h2>2. 아키텍처가 이렇게 된 이유</h2><p>현재 구조는 처음부터 설계된 것이 아니라 실제 DaouOffice 제약을 하나씩 만나면서 수렴한 결과다.</p><div class="table-wrap"><table><thead><tr><th>단계</th><th>접근</th><th>문제</th><th>결론</th></tr></thead><tbody><tr><td>1</td><td>CalDAV</td><td>내 캘린더/전사 캘린더는 가능했지만 관심·공유 캘린더 노출이 제한됨.</td><td>공유 일정까지 필요하므로 웹 Calendar API를 사용.</td></tr><tr><td>2</td><td>WPF + WebView2 로그인</td><td>DaouOffice가 새 로그인 시 이전 세션을 끊어 Chrome과 오버레이가 서로 로그아웃시킴.</td><td>오버레이가 두 번째 세션을 만들지 않아야 함.</td></tr><tr><td>3</td><td>Chrome Extension + localhost HTTP</td><td>Chrome의 Local Network Access/loopback 정책, CORS, 권한 프롬프트가 백그라운드 worker에 장애 요인이 됨.</td><td>브라우저↔앱 통신을 네트워크에서 제거.</td></tr><tr><td>4 / 최종</td><td>Chrome Native Messaging + Named Pipe</td><td>Chrome 공식 확장↔네이티브 통신 경로 사용. localhost/LNA 불필요.</td><td><strong>현재 v7 구조.</strong></td></tr></tbody></table></div><div class="callout warn">DaouOffice의 <code class="inline">/gw/api/calendar/event</code>는 공개 OpenAPI가 아니라 웹 프론트엔드가 사용하는 내부 endpoint로 취급한다. 따라서 유지보수 시 응답 구조나 인증 정책 변경 가능성을 전제로 해야 한다.</div></section>
 <section id="architecture"><h2>3. 최종 아키텍처</h2><div class="diagram"><div class="flow"><div class="node"><div class="t">Chrome Profile</div><div class="s">DaouOffice 세션 쿠키</div></div><div class="arrow">→</div><div class="node"><div class="t">MV3 Extension</div><div class="s">cookies / storage.session / alarms</div></div><div class="arrow">→</div><div class="node"><div class="t">Native Messaging Host</div><div class="s">동일 DaouCalendarOverlay.exe</div></div><div class="arrow">→</div><div class="node"><div class="t">Named Pipe</div><div class="s">CurrentUserOnly IPC</div></div><div class="arrow">→</div><div class="node"><div class="t">Overlay GUI</div><div class="s">HttpClient → Daou API → WPF</div></div></div></div><p>핵심은 <strong>Chrome Extension이 API 전체를 처리하지 않는다는 점</strong>이다. 확장은 Chrome이 가진 세션 쿠키와 User-Agent를 수집하는 역할에 집중한다. 실제 DaouOffice API 요청, 응답 검증, 오류 분류, JSON 역직렬화, 캐시 저장은 C# 프로세스가 담당한다.</p><div class="grid2"><div class="card"><h3>브라우저 책임</h3><ul><li>현재 Chrome 프로필의 DaouOffice 쿠키 확보</li><li>백그라운드 유지/알람</li><li>Native Messaging 요청</li><li>세션 쿠키의 메모리 캐시</li></ul></div><div class="card"><h3>Windows 앱 책임</h3><ul><li>조회 기간·캘린더 ID 결정</li><li>Daou API HTTP 호출</li><li>응답 파싱/필터/월간 그리드</li><li>상태 머신, backoff, 캐시, 트레이, 설정</li></ul></div></div></section>
-<section id="stack"><h2>4. 기술 스택: 어디서 / 어떻게 / 왜</h2><div class="table-wrap"><table><thead><tr><th>기술</th><th>사용 위치</th><th>사용 방법</th><th>선택 이유</th></tr></thead><tbody><tr><td><strong>C# / .NET 8</strong></td><td>애플리케이션 전체</td><td>WPF UI, 설정/캐시, HttpClient, Named Pipe, 레지스트리, 단일 EXE</td><td>Windows 네이티브 통합이 많고 배포가 단순하며 Win32/.NET API 접근이 직접적이기 때문</td></tr><tr><td><strong>WPF</strong></td><td>MainWindow / SettingsWindow</td><td>프레임 없는 325×440 오버레이, 커스텀 XAML 스타일, 인앱 상세/목록 카드</td><td>작은 Windows 위젯에서 정밀한 레이아웃·DPI·입력 제어가 필요했기 때문</td></tr><tr><td><strong>WinForms NotifyIcon</strong></td><td>App.CreateTrayIcon</td><td>트레이 아이콘과 컨텍스트 메뉴</td><td>WPF 자체에 간단한 내장 NotifyIcon이 없어 검증된 WinForms 컴포넌트를 재사용</td></tr><tr><td><strong>Chrome Extension MV3</strong></td><td>ChromeExtension</td><td>Chrome 세션 쿠키 접근, background worker, 주기 wake-up</td><td>두 번째 DaouOffice 로그인을 만들지 않고 기존 Chrome 로그인 세션을 재사용하기 위해</td></tr><tr><td><strong>chrome.cookies</strong></td><td>service-worker-v700.js</td><td>모든 Cookie Store에서 DaouOffice 쿠키 수집</td><td>HttpOnly 포함 브라우저 세션을 페이지 DOM 스크립트 없이 읽기 위해</td></tr><tr><td><strong>chrome.storage.session</strong></td><td>service-worker-v700.js</td><td>마지막 정상 cookie header를 브라우저 세션 메모리에 캐시</td><td>모든 Chrome 창을 닫았을 때도 background process가 살아 있으면 세션을 이어가기 위해</td></tr><tr><td><strong>chrome.alarms + background</strong></td><td>service-worker-v700.js / manifest</td><td>30초 주기 Service Worker wake-up, Chrome background mode 활용</td><td>MV3 worker는 상시 실행되지 않으므로 setInterval 대신 공식 스케줄러가 필요</td></tr><tr><td><strong>Chrome Native Messaging</strong></td><td>NativeMessagingHost + manifest</td><td>Extension ↔ Windows EXE stdio 통신</td><td>localhost HTTP가 Chrome LNA/CORS/loopback 정책에 걸려 Native Messaging으로 교체</td></tr><tr><td><strong>Windows Named Pipe</strong></td><td>CalendarBridgeServer / NativeMessagingHost</td><td>Native host 임시 프로세스 ↔ 실행 중 GUI 프로세스 통신</td><td>네트워크 포트를 열지 않고 현재 Windows 사용자에게만 IPC를 제한하기 위해</td></tr><tr><td><strong>HttpClient</strong></td><td>CalendarBridgeServer</td><td>DaouOffice /gw/api/calendar/event 직접 호출</td><td>네트워크·리디렉션·인증 만료를 C#에서 일관되게 판정하기 위해</td></tr><tr><td><strong>System.Text.Json</strong></td><td>전반</td><td>Daou API, 브리지, 설정, 캐시 직렬화</td><td>외부 의존성 없이 .NET 기본 스택으로 유지하기 위해</td></tr><tr><td><strong>Mutex + Named Pipe</strong></td><td>SingleInstanceService</td><td>중복 실행 방지 및 기존 창 활성화</td><td>중복 트레이/브리지/파일 접근 문제를 제거하기 위해</td></tr><tr><td><strong>HKCU Registry</strong></td><td>StartupService / NativeMessagingRegistrationService</td><td>Windows 시작프로그램 및 Native Messaging host 등록</td><td>관리자 권한 없이 현재 사용자 범위로 설치/등록하기 위해</td></tr><tr><td><strong>PerMonitorV2 DPI</strong></td><td>app.manifest + MainWindow</td><td>모니터별 DPI 변화/화면 구성 변경 대응</td><td>작은 위젯에서 125%/150% 배율 시 위치·선명도 문제를 줄이기 위해</td></tr><tr><td><strong>Self-contained Single File</strong></td><td>.csproj / publish.ps1</td><td>.NET Runtime 포함 단일 EXE</td><td>실사용 시 파일 하나만 교체하는 배포 경험을 만들기 위해</td></tr></tbody></table></div></section>
+<section id="stack"><h2>4. 기술 스택: 어디서 / 어떻게 / 왜</h2><div class="table-wrap"><table><thead><tr><th>기술</th><th>사용 위치</th><th>사용 방법</th><th>선택 이유</th></tr></thead><tbody><tr><td><strong>C# / .NET 8</strong></td><td>애플리케이션 전체</td><td>WPF UI, 설정/캐시, HttpClient, Named Pipe, 레지스트리, 단일 EXE</td><td>Windows 네이티브 통합이 많고 배포가 단순하며 Win32/.NET API 접근이 직접적이기 때문</td></tr><tr><td><strong>WPF</strong></td><td>MainWindow / SettingsWindow</td><td>프레임 없는 325×440 오버레이, 커스텀 XAML 스타일, 인앱 상세/목록 카드</td><td>작은 Windows 위젯에서 정밀한 레이아웃·DPI·입력 제어가 필요했기 때문</td></tr><tr><td><strong>WinForms NotifyIcon</strong></td><td>App.CreateTrayIcon</td><td>트레이 아이콘과 컨텍스트 메뉴</td><td>WPF 자체에 간단한 내장 NotifyIcon이 없어 검증된 WinForms 컴포넌트를 재사용</td></tr><tr><td><strong>Chrome Extension MV3</strong></td><td>ChromeExtension</td><td>Chrome 세션 쿠키 접근, background worker, 주기 wake-up</td><td>두 번째 DaouOffice 로그인을 만들지 않고 기존 Chrome 로그인 세션을 재사용하기 위해</td></tr><tr><td><strong>chrome.cookies</strong></td><td>service-worker-v710.js</td><td>모든 Cookie Store에서 DaouOffice 쿠키 수집</td><td>HttpOnly 포함 브라우저 세션을 페이지 DOM 스크립트 없이 읽기 위해</td></tr><tr><td><strong>chrome.storage.session</strong></td><td>service-worker-v710.js</td><td>마지막 정상 cookie header를 브라우저 세션 메모리에 캐시</td><td>모든 Chrome 창을 닫았을 때도 background process가 살아 있으면 세션을 이어가기 위해</td></tr><tr><td><strong>chrome.alarms + background</strong></td><td>service-worker-v710.js / manifest</td><td>30초 주기 Service Worker wake-up, Chrome background mode 활용</td><td>MV3 worker는 상시 실행되지 않으므로 setInterval 대신 공식 스케줄러가 필요</td></tr><tr><td><strong>Chrome Native Messaging</strong></td><td>NativeMessagingHost + manifest</td><td>Extension ↔ Windows EXE stdio 통신</td><td>localhost HTTP가 Chrome LNA/CORS/loopback 정책에 걸려 Native Messaging으로 교체</td></tr><tr><td><strong>Windows Named Pipe</strong></td><td>CalendarBridgeServer / NativeMessagingHost</td><td>Native host 임시 프로세스 ↔ 실행 중 GUI 프로세스 통신</td><td>네트워크 포트를 열지 않고 현재 Windows 사용자에게만 IPC를 제한하기 위해</td></tr><tr><td><strong>HttpClient</strong></td><td>CalendarBridgeServer</td><td>DaouOffice /gw/api/calendar/event 직접 호출</td><td>네트워크·리디렉션·인증 만료를 C#에서 일관되게 판정하기 위해</td></tr><tr><td><strong>System.Text.Json</strong></td><td>전반</td><td>Daou API, 브리지, 설정, 캐시 직렬화</td><td>외부 의존성 없이 .NET 기본 스택으로 유지하기 위해</td></tr><tr><td><strong>Mutex + Named Pipe</strong></td><td>SingleInstanceService</td><td>중복 실행 방지 및 기존 창 활성화</td><td>중복 트레이/브리지/파일 접근 문제를 제거하기 위해</td></tr><tr><td><strong>HKCU Registry</strong></td><td>StartupService / NativeMessagingRegistrationService</td><td>Windows 시작프로그램 및 Native Messaging host 등록</td><td>관리자 권한 없이 현재 사용자 범위로 설치/등록하기 위해</td></tr><tr><td><strong>PerMonitorV2 DPI</strong></td><td>app.manifest + MainWindow</td><td>모니터별 DPI 변화/화면 구성 변경 대응</td><td>작은 위젯에서 125%/150% 배율 시 위치·선명도 문제를 줄이기 위해</td></tr><tr><td><strong>Self-contained Single File</strong></td><td>.csproj / publish.ps1</td><td>.NET Runtime 포함 단일 EXE</td><td>실사용 시 파일 하나만 교체하는 배포 경험을 만들기 위해</td></tr></tbody></table></div></section>
 <section id="process"><h2>5. 동일 EXE의 두 실행 모드</h2><p>이 프로젝트의 중요한 설계 포인트는 <strong>별도의 native-host EXE를 만들지 않고 같은 EXE를 재사용</strong>한다는 점이다.</p><div class="grid2"><div class="card"><h3>A. 일반 GUI 모드</h3><ol><li>WPF App 시작</li><li>싱글 인스턴스 Mutex 획득</li><li>설정/캐시 로드</li><li>Chrome extension 추출</li><li>Native Messaging host 등록</li><li>Named Pipe bridge 서버 시작</li><li>오버레이/트레이 표시</li></ol></div><div class="card"><h3>B. Native Host 모드</h3><ol><li>Chrome이 같은 EXE를 Native Messaging host로 실행</li><li>인자에 고정 extension origin이 있는지 판정</li><li>GUI 초기화를 건너뜀</li><li>stdin에서 Chrome 메시지 읽기</li><li>실행 중 GUI의 Named Pipe에 전달</li><li>응답을 stdout으로 반환하고 종료</li></ol></div></div><pre><code>    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
-
-        // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
-        if (NativeMessagingHost.IsNativeInvocation(e.Args))
-        {
-            await NativeMessagingHost.RunAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance = new SingleInstanceService();
-        if (!_singleInstance.TryAcquirePrimary())
-        {
-            await SingleInstanceService.NotifyPrimaryAsync();
-            await _singleInstance.DisposeAsync();
-            Shutdown();
-            return;
-        }
-
-        _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
-        _singleInstance.StartListening();
-        _syncStatus.StatusChanged += SyncStatus_StatusChanged;
-        _syncStatus.MarkStarting();
 
         try
         {
-            _settings = await _settingsService.LoadAsync();
-            _extensionInstaller.EnsureExtracted();
-            _nativeMessagingRegistration.EnsureRegistered();
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            if (!_settings.IsConfigured)
+            // Chrome Native Messaging Host로 실행된 경우 GUI/싱글 인스턴스 로직을 타지 않는다.
+            if (NativeMessagingHost.IsNativeInvocation(e.Args))
             {
-                var setup = new SettingsWindow(_settings, firstRun: true);
-                if (setup.ShowDialog() != true)
-                {
-                    await ExitApplicationAsync();
-                    return;
-                }
-
-                _settings = setup.Result;
-                await _settingsService.SaveAsync(_settings);
-                _extensionInstaller.EnsureExtracted();
-                _nativeMessagingRegistration.EnsureRegistered();
+                LogService.Initialize(LogService.DefaultLogDirectory, &quot;host&quot;);
+                await NativeMessagingHost.RunAsync();
+                Shutdown();
+                return;
             }
 
-            _startupService.Apply(_settings.StartWithWindows);
+            LogService.Initialize(LogService.DefaultLogDirectory, &quot;overlay&quot;);
+            RegisterGlobalExceptionHandlers();
+            LogService.Info(&quot;startup&quot;, $&quot;overlay 시작 pid={Environment.ProcessId}&quot;);
 
-            _overlayWindow = new MainWindow(_settings);
-            _overlayWindow.Show();
-            CreateTrayIcon();
+            _singleInstance = new SingleInstanceService();
+            if (!_singleInstance.TryAcquirePrimary())
+            {
+                await SingleInstanceService.NotifyPrimaryAsync();
+                await _singleInstance.DisposeAsync();
+                Shutdown();
+                return;
+            }
 
-            var cache = await _cacheService.LoadAsync();
-            if (cache.Events.Count &gt; 0)
-                _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $&quot;캐시 {cache.LastUpdated:HH:mm}&quot;);
+            _singleInstance.ActivateRequested += SingleInstance_ActivateRequested;
+            _singleInstance.StartListening();
+            _syncStatus.StatusChanged += SyncStatus_StatusChanged;
+            _syncStatus.MarkStarting();
 
-            _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
-            _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
-            _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
-            _bridgeServer.Start();
+            try
+            {
+                _settings = await _settingsService.LoadAsync();
+                _extensionInstaller.EnsureExtracted();
+                _nativeMessagingRegistration.EnsureRegistered();
 
-            ConfigureRefreshTimer();
-            ConfigureHealthTimer();
-            _syncStatus.MarkWaiting();
-            await RefreshAsync(true);
-        }</code></pre><p class="caption">App.OnStartup에서 Native Messaging invocation을 GUI보다 먼저 분기한다.</p></section>
+                if (!_settings.IsConfigured)
+                {
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
+                    if (setup.ShowDialog() != true)
+                    {
+                        await ExitApplicationAsync();
+                        return;
+                    }
+
+                    _settings = setup.Result;
+                    await SaveSettingsAsync();
+                    _extensionInstaller.EnsureExtracted();
+                    _nativeMessagingRegistration.EnsureRegistered();
+                }
+
+                _startupService.Apply(_settings.StartWithWindows);
+
+                _overlayWindow = new MainWindow(_settings);
+                _overlayWindow.Show();
+                CreateTrayIcon();
+
+                var cache = await _cacheService.LoadAsync();
+                if (cache.Events.Count &gt; 0)
+                {
+                    _overlayWindow.SetEvents(cache.Events, cache.LastUpdated, $&quot;캐시 {cache.LastUpdated:HH:mm}&quot;);
+                    if (!CacheRangePolicy.CoversToday(cache.RangeFrom, cache.RangeTo, DateTimeOffset.Now))
+                    {
+                        _syncStatus.MarkCacheOutOfRange();
+                        LogService.Info(&quot;cache&quot;, &quot;캐시 범위가 오늘을 포함하지 않아 범위 밖으로 표기합니다.&quot;);
+                    }
+                }
+
+                _bridgeServer.SyncCompleted += BridgeServer_SyncCompleted;
+                _bridgeServer.BridgeHeartbeat += BridgeServer_BridgeHeartbeat;
+                _bridgeServer.FetchIssued += BridgeServer_FetchIssued;
+                _bridgeServer.ConfigurationInvalid += BridgeServer_ConfigurationInvalid;
+                _bridgeServer.Start();
+
+                ConfigureHealthTimer();
+                _syncStatus.MarkWaiting();
+                await RefreshAsync(true);
+            }
+            catch (Exception ex)
+            {
+                LogService.Error(&quot;startup&quot;, &quot;앱 초기화 실패&quot;, ex);
+                System.Windows.MessageBox.Show(
+                    $&quot;앱 초기화 중 오류가 발생했습니다.\n\n{ex.Message}\n\n설정 파일: %LOCALAPPDATA%\\DaouCalendarOverlay\\settings.json&quot;,
+                    &quot;Daou Calendar Overlay&quot;,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                await ExitApplicationAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Error(&quot;startup&quot;, &quot;OnStartup 실패&quot;, ex);
+            _syncStatus.MarkGeneralError($&quot;시작 실패: {ex.Message}&quot;);
+        }
+    }</code></pre><p class="caption">App.OnStartup에서 Native Messaging invocation을 GUI보다 먼저 분기한다.</p></section>
 <section id="chrome"><h2>6. Chrome Extension (Manifest V3)</h2><h3>6.1 권한 구성</h3><div class="table-wrap"><table><thead><tr><th>권한</th><th>역할</th></tr></thead><tbody><tr><td><code>cookies</code></td><td>DaouOffice의 로그인 쿠키를 Chrome cookie store에서 읽는다.</td></tr><tr><td><code>storage</code></td><td><code>chrome.storage.session</code>에 마지막 정상 cookie header를 브라우저 세션 동안 메모리 캐시한다.</td></tr><tr><td><code>alarms</code></td><td>MV3 service worker를 30초 단위로 깨운다.</td></tr><tr><td><code>background</code></td><td>사용자 Chrome 설정이 허용할 때 마지막 창을 닫은 뒤에도 background mode를 유지하는 데 사용된다.</td></tr><tr><td><code>nativeMessaging</code></td><td>등록된 Windows native host에 JSON 메시지를 보낸다.</td></tr><tr><td><code>host_permissions</code></td><td><code>https://*.daouoffice.com/*</code> 범위로 권한을 제한한다.</td></tr></tbody></table></div><pre><code>{
   &quot;manifest_version&quot;: 3,
   &quot;name&quot;: &quot;Daou Calendar Overlay Bridge&quot;,
-  &quot;version&quot;: &quot;7.0.0&quot;,
+  &quot;version&quot;: &quot;7.1.0&quot;,
   &quot;minimum_chrome_version&quot;: &quot;120&quot;,
   &quot;description&quot;: &quot;Native Messaging bridge for Daou Calendar Overlay. Reuses the existing Chrome DaouOffice session without localhost networking.&quot;,
   &quot;key&quot;: &quot;MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVtcLz/s89ZU6TY1uhc94rteHKd75K8P9oAQotTFx0fD4Kx2JPPJj4FNXTT3Wgh7F0+VDRteFuV1CknE5664nAL4kgeDMsUbS6BB2xlfteSxPYt/kS/VpfMVmKFEST0KWFCboE61SoOuki84gdpcKyECz+2LM1xtwAU0L1nnsSb/lyXsB7TwcIh0zy5X0xyIFnE1SRTLnIzy3liQNUQsGowZndFr15TyRAAoYdClr7THeRX2U+PNGCE5XumxWKHMwqiL5hG339Zgt0QEuuRDYzr51x0isp5V0K9n/qgYpEX90s2icOxOu8uhFa82GVD7SqJTc0jdHGZu7ZbJNuW5fQIDAQAB&quot;,
@@ -97,7 +129,7 @@
     &quot;https://*.daouoffice.com/*&quot;
   ],
   &quot;background&quot;: {
-    &quot;service_worker&quot;: &quot;service-worker-v700.js&quot;
+    &quot;service_worker&quot;: &quot;service-worker-v710.js&quot;
   },
   &quot;icons&quot;: {
     &quot;16&quot;: &quot;icon16.png&quot;,
@@ -166,75 +198,111 @@ public static class NativeBridgeProtocol
 
         return true;
     }
-}</code></pre><h3>7.2 Native Host는 얇은 relay</h3><p>Chrome이 실행하는 native host는 독립 프로세스다. 실제 UI 상태·설정·동기화 requestId는 이미 실행 중인 GUI 프로세스에 있으므로 host는 stdin 메시지를 Named Pipe로 넘기고 응답을 stdout으로 돌려주는 역할만 한다.</p><pre><code>using System.IO.Pipes;
-using System.Text.Json;
+}</code></pre><h3>7.2 Native Host는 얇은 relay</h3><p>Chrome이 실행하는 native host는 독립 프로세스다. 실제 UI 상태·설정·동기화 requestId는 이미 실행 중인 GUI 프로세스에 있으므로 host는 stdin 메시지를 Named Pipe로 넘기고 응답을 stdout으로 돌려주는 역할만 한다.</p><pre><code>// Services/NativeMessagingHost.cs — Chrome stdio↔Named Pipe 중계
+private const int ChromeInputLimit = 64 * 1024 * 1024;
+private const int ChromeOutputLimit = 1024 * 1024;
 
-namespace DaouCalendarOverlay.Services;
-
-public static class NativeMessagingHost
+public static async Task RunAsync(CancellationToken cancellationToken = default)
 {
-    private const int ChromeInputLimit = 64 * 1024 * 1024;
-    private const int ChromeOutputLimit = 1024 * 1024;
-    private const int PipeMessageLimit = 8 * 1024 * 1024;
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    using var input = Console.OpenStandardInput();
+    using var output = Console.OpenStandardOutput();
+    var sw = Stopwatch.StartNew();
 
-    public static bool IsNativeInvocation(IReadOnlyList&lt;string&gt; args)
+    try
     {
-        if (args.Count == 0)
-            return false;
+        var request = await NativeBridgeProtocol.ReadFrameAsync(input, ChromeInputLimit, cancellationToken);
+        if (request is null)
+            return;
 
-        return args.Any(arg =&gt; arg.StartsWith($&quot;chrome-extension://{NativeBridgeProtocol.ExtensionId}&quot;, StringComparison.OrdinalIgnoreCase));
-    }
+        LogService.Info(&quot;host&quot;, $&quot;요청 수신 {BridgeLogSummary.DescribeRequest(request)}&quot;);
 
-    public static async Task RunAsync(CancellationToken cancellationToken = default)
-    {
-        using var input = Console.OpenStandardInput();
-        using var output = Console.OpenStandardOutput();
+        var response = await NativeHostRelay.ConnectAndExchangeAsync(
+            NativeBridgeProtocol.PipeName,
+            request,
+            Environment.ProcessPath,
+            NativeHostRelay.DefaultConnectTimeoutMs,
+            cancellationToken);
 
-        try
+        if (response.Length &gt; ChromeOutputLimit)
         {
-            var request = await NativeBridgeProtocol.ReadFrameAsync(input, ChromeInputLimit, cancellationToken);
-            if (request is null)
-                return;
-
-            byte[] response;
-            try
-            {
-                using var pipe = new NamedPipeClientStream(
-                    &quot;.&quot;,
-                    NativeBridgeProtocol.PipeName,
-                    PipeDirection.InOut,
-                    PipeOptions.Asynchronous);
-
-                await pipe.ConnectAsync(2500, cancellationToken);
-                await NativeBridgeProtocol.WriteFrameAsync(pipe, request, cancellationToken);
-                response = await NativeBridgeProtocol.ReadFrameAsync(pipe, PipeMessageLimit, cancellationToken)
-                    ?? SerializeError(&quot;Overlay bridge closed without a response.&quot;);
-            }
-            catch (Exception ex)
-            {
-                response = SerializeError($&quot;Daou Calendar Overlay가 실행 중이지 않거나 Native Bridge에 연결할 수 없습니다: {ex.Message}&quot;);
-            }
-
-            if (response.Length &gt; ChromeOutputLimit)
-                response = SerializeError(&quot;Native host response exceeded Chrome&#x27;s 1 MB limit.&quot;);
-
-            await NativeBridgeProtocol.WriteFrameAsync(output, response, cancellationToken);
+            LogService.Warn(&quot;host&quot;, &quot;응답이 Chrome 1MB 한도를 초과&quot;);
+            response = SerializeError(&quot;Native host response exceeded Chrome&#x27;s 1 MB limit.&quot;);
         }
-        catch (Exception ex)
+
+        await NativeBridgeProtocol.WriteFrameAsync(output, response, cancellationToken);
+        LogService.Info(&quot;host&quot;, $&quot;요청 완료 elapsed={sw.ElapsedMilliseconds}ms&quot;);
+    }
+    catch (Exception ex)
+    {
+        LogService.Error(&quot;host&quot;, &quot;native host 오류&quot;, ex);
+        var response = SerializeError($&quot;Native Messaging Host 오류: {ex.Message}&quot;);
+        if (response.Length &lt;= ChromeOutputLimit)
         {
-            var response = SerializeError($&quot;Native Messaging Host 오류: {ex.Message}&quot;);
-            if (response.Length &lt;= ChromeOutputLimit)
-            {
-                try { await NativeBridgeProtocol.WriteFrameAsync(output, response, cancellationToken); }
-                catch { }
-            }
+            try { await NativeBridgeProtocol.WriteFrameAsync(output, response, cancellationToken); }
+            catch (Exception writeEx) { LogService.Warn(&quot;host&quot;, &quot;오류 응답 전송 실패&quot;, writeEx); }
         }
     }
+}
 
-    private static byte[] SerializeError(string error) =&gt;
-        JsonSerializer.SerializeToUtf8Bytes(NativeBridgeResponse.Fail(error), JsonOptions);
-}</code></pre><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다.</p><pre><code>using System.Diagnostics;
+// Services/NativeHostRelay.cs — 서버 신원을 확인한 뒤에만 프레임을 중계한다
+public const int DefaultConnectTimeoutMs = 2500;
+public const int PipeMessageLimit = 8 * 1024 * 1024;
+private const string LogCategory = &quot;host.pipe&quot;;
+
+public static async Task&lt;byte[]&gt; ConnectAndExchangeAsync(
+    string pipeName,
+    byte[] request,
+    string? selfExecutablePath,
+    int connectTimeoutMs,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        using var pipe = new NamedPipeClientStream(
+            &quot;.&quot;,
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+        await pipe.ConnectAsync(connectTimeoutMs, cancellationToken);
+
+        var serverProcessId = PipePeerVerifier.TryGetServerProcessId(pipe.SafePipeHandle);
+        if (serverProcessId is null)
+        {
+            LogService.Warn(LogCategory, &quot;파이프 서버 PID를 확인할 수 없어 요청을 전송하지 않았습니다.&quot;);
+            return SerializeError(PipePeerVerifier.BuildUnverifiablePeerError());
+        }
+
+        var serverPath = PipePeerVerifier.TryGetProcessPath((int)serverProcessId.Value);
+        if (!PipePeerVerifier.IsSameExecutable(selfExecutablePath, serverPath))
+        {
+            LogService.Warn(
+                LogCategory,
+                $&quot;신뢰할 수 없는 파이프 서버: pid={serverProcessId.Value}, server={serverPath ?? &quot;(unknown)&quot;}, self={selfExecutablePath ?? &quot;(unknown)&quot;}&quot;);
+            return SerializeError(PipePeerVerifier.BuildUntrustedPeerError(serverProcessId.Value));
+        }
+
+        await NativeBridgeProtocol.WriteFrameAsync(pipe, request, cancellationToken);
+        return await NativeBridgeProtocol.ReadFrameAsync(pipe, PipeMessageLimit, cancellationToken)
+            ?? SerializeError(&quot;Overlay bridge closed without a response.&quot;);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        // 취소는 상위(NativeMessagingHost.RunAsync)가 기존대로 처리한다.
+        throw;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        // CurrentUserOnly: 파이프 소유자가 현재 사용자가 아니다(예: 관리자 권한으로 실행된 오버레이).
+        LogService.Warn(LogCategory, &quot;파이프 서버가 현재 사용자 소유가 아닙니다: &quot; + ex.Message);
+        return SerializeError(&quot;Native Bridge 서버가 현재 사용자 소유가 아니어서 연결하지 않았습니다(오버레이를 관리자 권한으로 실행했는지 확인하세요).&quot;);
+    }
+    catch (Exception ex)
+    {
+        LogService.Warn(LogCategory, &quot;파이프 연결 실패&quot;, ex);
+        return SerializeError($&quot;Daou Calendar Overlay가 실행 중이지 않거나 Native Bridge에 연결할 수 없습니다: {ex.Message}&quot;);
+    }
+}</code></pre><p>클라이언트 쪽 파이프도 <code class="inline">PipeOptions.CurrentUserOnly</code>를 지정하므로 다른 Windows 계정이 만든 파이프에는 애초에 연결되지 않는다. 같은 계정이 파이프 이름을 선점한 경우를 대비해, 연결 직후 <code class="inline">GetNamedPipeServerProcessId</code>로 서버 PID를 얻고 그 프로세스의 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조한다. 경로가 다르거나 확인할 수 없으면 <strong>요청 프레임을 한 바이트도 쓰지 않고</strong> 오류 응답만 stdout으로 돌려주므로, 세션 쿠키가 담긴 <code class="inline">postResult</code> 페이로드가 선점 프로세스로 넘어가지 않는다.</p><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다.</p><pre><code>using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -291,54 +359,52 @@ public sealed class NativeMessagingRegistrationService
         StartWithWindowsCheckBox.IsChecked = _working.StartWithWindows;
         AlwaysOnTopCheckBox.IsChecked = _working.AlwaysOnTop;
         PositionLockedCheckBox.IsChecked = _working.PositionLocked;
+
+        if (!string.IsNullOrWhiteSpace(validationNotice))
+        {
+            ValidationNoticeText.Text = validationNotice;
+            ValidationNoticeText.Visibility = Visibility.Visible;
+        }
     }
 
     private void Extract_Click(object sender, RoutedEventArgs e)
     {
-        var raw = ApiUrlTextBox.Text.Trim();
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        var parsed = CalendarUrlParser.Parse(ApiUrlTextBox.Text);
+
+        if (parsed.Status == CalendarUrlParseStatus.InvalidUrl)
         {
             WpfMessageBox.Show(this, &quot;유효한 전체 URL을 붙여넣어 주세요.&quot;, &quot;URL 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
             return;
         }
 
-        var ids = new List&lt;string&gt;();
-        var query = uri.Query.TrimStart(&#x27;?&#x27;);
-        foreach (var pair in query.Split(&#x27;&amp;&#x27;, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = pair.Split(&#x27;=&#x27;, 2);
-            var key = Uri.UnescapeDataString(parts[0].Replace(&#x27;+&#x27;, &#x27; &#x27;));
-            var value = parts.Length &gt; 1 ? Uri.UnescapeDataString(parts[1].Replace(&#x27;+&#x27;, &#x27; &#x27;)) : &quot;&quot;;
-            if (string.Equals(key, &quot;calendarIds[]&quot;, StringComparison.OrdinalIgnoreCase) &amp;&amp; !string.IsNullOrWhiteSpace(value))
-                ids.Add(value.Trim());
-        }
-
-        if (ids.Count == 0)
+        if (parsed.Status == CalendarUrlParseStatus.NoCalendarIds)
         {
             WpfMessageBox.Show(this, &quot;URL에서 calendarIds[]를 찾지 못했습니다.&quot;, &quot;추출 결과&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Information);
             return;
         }
 
-        BaseUrlTextBox.Text = $&quot;{uri.Scheme}://{uri.Authority}&quot;;
-        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, ids.Distinct());
+        BaseUrlTextBox.Text = parsed.BaseUrl;
+        CalendarIdsTextBox.Text = string.Join(Environment.NewLine, parsed.CalendarIds);
+
+        var extractedValidation = BaseUrlPolicy.Validate(parsed.BaseUrl);
+        if (!extractedValidation.IsValid)
+            WpfMessageBox.Show(this, extractedValidation.Reason, &quot;주소 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        var baseUrl = BaseUrlTextBox.Text.Trim().TrimEnd(&#x27;/&#x27;);
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps &amp;&amp; uri.Scheme != Uri.UriSchemeHttp))
+        var validation = BaseUrlPolicy.Validate(BaseUrlTextBox.Text);
+        if (!validation.IsValid)
         {
-            WpfMessageBox.Show(this, &quot;DaouOffice 주소를 https://... 형식으로 입력해 주세요.&quot;, &quot;설정 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 실제 HTTP는 C#에서</h3><p>Extension은 인증 정보만 제공하고 실제 API 요청은 C#에서 수행한다. 이를 통해 timeout, redirect 차단, HTML 로그인 페이지 감지, JSON code 검사, retry/backoff를 한 곳에서 처리한다.</p><pre><code>        try
+            WpfMessageBox.Show(this, validation.Reason, &quot;설정 확인&quot;, WpfMessageBoxButton.OK, WpfMessageBoxImage.Warning);
+            BaseUrlTextBox.Focus();
+            BaseUrlTextBox.SelectAll();
+            return;
+        }</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 실제 HTTP는 C#에서</h3><p>Extension은 인증 정보만 제공하고 실제 API 요청은 C#에서 수행한다. 이를 통해 timeout, redirect 차단, HTML 로그인 페이지 감지, JSON code 검사, retry/backoff를 한 곳에서 처리한다.</p><pre><code>        try
         {
             var requestUri = BuildCalendarUri(settingsSnapshot, fromSnapshot, toSnapshot);
-            using var handler = new HttpClientHandler
-            {
-                UseCookies = false,
-                AllowAutoRedirect = false,
-                AutomaticDecompression = DecompressionMethods.All
-            };
-            using var client = new HttpClient(handler)
+            using var handler = HttpMessageHandlerFactory?.Invoke() ?? CreateDefaultHandler();
+            using var client = new HttpClient(handler, disposeHandler: false)
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
@@ -352,8 +418,8 @@ public sealed class NativeMessagingRegistrationService
             if (Uri.TryCreate(settingsSnapshot.BaseUrl, UriKind.Absolute, out var baseUri))
                 request.Headers.Referrer = new Uri(baseUri, &quot;/gw/app/calendar&quot;);
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-            var body = await response.Content.ReadAsStringAsync();
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var contentType = response.Content.Headers.ContentType?.MediaType ?? &quot;&quot;;
             var location = response.Headers.Location?.ToString() ?? &quot;&quot;;
 
@@ -401,60 +467,65 @@ public sealed class NativeMessagingRegistrationService
                 return;
             }
 
+            if (DiscardIfRangeChanged(fromSnapshot, toSnapshot))
+            {
+                LogService.Warn(&quot;bridge&quot;, &quot;표시 범위가 변경되어 이전 범위의 동기화 결과를 버리고 즉시 재발행합니다.&quot;);
+                return;
+            }
+
             RecordSuccess(settingsSnapshot.RefreshMinutes);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data));
+            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data, fromSnapshot, toSnapshot));
         }
         catch (HttpRequestException ex)
         {
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 네트워크 오류&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;네트워크 오류: {ex.Message}&quot;, BridgeFailureKind.Network, retryAt));
         }
         catch (TaskCanceledException ex)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                LogService.Info(&quot;bridge&quot;, &quot;종료 중 HTTP 요청 취소&quot;);
+                return;
+            }
+
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 취소/시간 초과&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             var message = ex.InnerException is TimeoutException ? &quot;DaouOffice 응답 시간 초과&quot; : &quot;네트워크 요청이 취소되었습니다.&quot;;
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.Network, retryAt));
         }
         catch (Exception ex)
         {
+            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 세션 브리지 실패&quot;, ex);
             var retryAt = RecordFailure(authenticationFailure: false);
             SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;DaouOffice 세션 브리지 실패: {ex.Message}&quot;, BridgeFailureKind.General, retryAt));
-        }</code></pre><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않는다. 조회 범위 내 occurrence가 API 결과의 개별 event로 내려오는 동작을 전제로 <code class="inline">startTime/endTime</code>을 그대로 표시한다. 음력 휴일도 서버 계산 결과를 신뢰한다.</p></section>
-<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다.</p></div><div class="card"><h3>앱 쪽</h3><p>사용자 설정의 <strong>N분(기본 5분)</strong>. 실제 fetch가 필요한 시점을 bridge가 결정한다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. GUI의 <code class="inline">ShouldFetch</code>가 false면 worker는 종료한다.</p><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease를 만든다. 같은 lease 동안 새 fetch를 발행하지 않고 결과도 현재 requestId와 일치할 때만 수용한다.</p><pre><code>                return NativeBridgeResponse.Success(config);
-            }
-
-            case &quot;postResult&quot;:
-                if (request.Result is null)
-                    return NativeBridgeResponse.Fail(&quot;Missing bridge result payload.&quot;);
-                await ProcessResultAsync(request.Result);
-                return NativeBridgeResponse.Success();
-
-            default:
-                return NativeBridgeResponse.Fail($&quot;Unknown native bridge request: {request.Type}&quot;);
-        }
-    }
-
-    private BridgeConfigResponse BuildConfig()
+        }</code></pre><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않는다. 조회 범위 내 occurrence가 API 결과의 개별 event로 내려오는 동작을 전제로 <code class="inline">startTime/endTime</code>을 그대로 표시한다. 음력 휴일도 서버 계산 결과를 신뢰한다.</p><p>같은 일정이 여러 캘린더에 공유되면 API는 동일한 <code class="inline">id</code>를 캘린더 수만큼 내려보낸다(실데이터 37건 중 5건). UI는 <code class="inline">Models/EventDeduplicator.cs</code>에서 <code class="inline">id</code> 기준으로 이를 1건으로 합치고, 소속 캘린더 ID/이름을 모두 <code class="inline">CalendarIds</code>/<code class="inline">CalendarNames</code>에 보존한다. 캐시 파일에는 병합 전 원본 이벤트를 그대로 저장하며(역호환), 병합은 캐시 로드 직후 화면에 표시하기 직전에 수행한다. 숨김 판정은 소속 캘린더가 모두 숨겨진 경우에만 적용되고, 하나라도 표시 중이면 일정은 계속 보인다.</p></section>
+<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다. 알람이 계속 반복되므로 worker는 사실상 상시 활성이다.</p></div><div class="card"><h3>앱 쪽</h3><p>다음 fetch 시점을 정하는 것은 <code class="inline">CalendarBridgeServer._nextAttemptAt</code>이다(성공 시 설정의 <code class="inline">RefreshMinutes</code>, 실패 시 backoff). 앱에는 fetch를 유발하는 주기 타이머가 없다. 앱의 1초 시계 타이머는 시각 표시와 자정 전환 시 달력 재구성에만 쓴다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. worker는 <code class="inline">getConfig</code> 응답의 <code class="inline">shouldFetch</code>가 false면 그 회차를 fetch 없이 끝내고, 다음 알람에 다시 깨어난다.</p><p>확장이 <code class="inline">syncOnce()</code>를 호출하는 트리거는 6종이다.</p><ul><li><code class="inline">chrome.runtime.onInstalled</code></li><li><code class="inline">chrome.runtime.onStartup</code></li><li><code class="inline">chrome.cookies.onChanged</code> — 쿠키 도메인이 daouoffice.com 또는 그 서브도메인일 때</li><li><code class="inline">chrome.alarms.onAlarm</code> — 30초 주기 알람</li><li><code class="inline">chrome.action.onClicked</code> — 툴바 아이콘 클릭</li><li>service worker 최초 로드 시 top-level 호출</li></ul><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease를 만든다. <code class="inline">postResult</code>는 받은 <code class="inline">requestId</code>가 현재 활성 요청과 같은지만 확인하고 <strong>즉시 ok로 응답</strong>하며, 실제 DaouOffice HTTP 조회는 백그라운드 Task에서 수행한다. 결과를 받아들인 시점에 lease를 60초로 갱신하고 <code class="inline">_activeRequestId</code>는 그대로 두므로, 조회가 끝나기 전에는 새 fetch가 발행되지 않는다. lease와 <code class="inline">_activeRequestId</code>는 HTTP가 끝난 시점(성공·실패·취소 모두)에 그 사이 다른 요청으로 교체되지 않았을 때만 해제된다. 같은 <code class="inline">requestId</code>로 <code class="inline">postResult</code>가 두 번 들어와도 HTTP 조회는 한 번만 나간다. 파이프 서버 인스턴스는 4개이고 accept 루프가 요청 처리와 분리돼 있어, 조회가 오래 걸려도 <code class="inline">getConfig</code>/<code class="inline">ping</code>은 native host의 2.5초 connect timeout 안에 응답한다. <code class="inline">shouldFetch</code>가 false인 모든 응답에는 사유(<code class="inline">noFetchReason</code>: <code class="inline">not_configured</code>, <code class="inline">invalid_base_url</code>, <code class="inline">range_not_ready</code>, <code class="inline">lease_active</code>, <code class="inline">backoff</code>, <code class="inline">not_due</code>)가 함께 내려가고, 설정 문제(<code class="inline">not_configured</code>/<code class="inline">invalid_base_url</code>)는 상태 표시에 <code class="inline">설정 오류: …</code>로 노출된다. BaseUrl 정책은 <code class="inline">Services/BaseUrlPolicy</code>(https + <code class="inline">*.daouoffice.com</code>, apex 제외) 한 곳에서만 판정하며 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 일치한다.</p><pre><code>    private BridgeConfigResponse BuildConfig()
     {
         lock (_gate)
         {
-            if (!_settings.IsConfigured || _from == default || _to == default)
-                return BridgeConfigResponse.NoFetch();
+            if (!_settings.IsConfigured)
+                return BridgeConfigResponse.NoFetch(
+                    BaseUrlPolicy.Validate(_settings.BaseUrl).IsValid
+                        ? NoFetchReasons.NotConfigured
+                        : NoFetchReasons.InvalidBaseUrl);
 
-            if (!Uri.TryCreate(_settings.BaseUrl, UriKind.Absolute, out var baseUri) ||
-                !string.Equals(baseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-                !(string.Equals(baseUri.Host, &quot;daouoffice.com&quot;, StringComparison.OrdinalIgnoreCase) ||
-                  baseUri.Host.EndsWith(&quot;.daouoffice.com&quot;, StringComparison.OrdinalIgnoreCase)))
-            {
-                return BridgeConfigResponse.NoFetch();
-            }
+            if (_from == default || _to == default)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.RangeNotReady);
+
+            var validation = BaseUrlPolicy.Validate(_settings.BaseUrl);
+            if (!validation.IsValid)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.InvalidBaseUrl);
 
             var now = DateTimeOffset.Now;
             var leaseActive = !string.IsNullOrEmpty(_activeRequestId) &amp;&amp; now &lt; _leaseUntil;
-            var due = _forceRefresh || _nextAttemptAt == default || now &gt;= _nextAttemptAt;
+            if (leaseActive)
+                return BridgeConfigResponse.NoFetch(NoFetchReasons.LeaseActive);
 
-            if (!due || leaseActive)
-                return BridgeConfigResponse.NoFetch();
+            var due = _forceRefresh || _nextAttemptAt == default || now &gt;= _nextAttemptAt;
+            if (!due)
+                return BridgeConfigResponse.NoFetch(_consecutiveFailures &gt; 0 ? NoFetchReasons.Backoff : NoFetchReasons.NotDue);
 
             _activeRequestId = Guid.NewGuid().ToString(&quot;N&quot;);
             _leaseUntil = now.AddSeconds(45);
@@ -465,13 +536,68 @@ public sealed class NativeMessagingRegistrationService
                 Ok = true,
                 ShouldFetch = true,
                 RequestId = _activeRequestId,
-                BaseUrl = baseUri.GetLeftPart(UriPartial.Authority),
+                BaseUrl = validation.NormalizedBaseUrl!,
                 TimeMin = FormatDate(_from),
                 TimeMax = FormatDate(_to),
                 IncludingAttendees = true,
                 CalendarIds = new List&lt;string&gt;(_settings.CalendarIds)
             };
-        }</code></pre><h3>10.3 backoff</h3><p>인증 실패는 1분 뒤 재시도한다. 일반 네트워크/API 실패는 30초 → 60초 → 120초 → 240초 → 480초 수준으로 증가한다. 성공하면 실패 카운터를 초기화하고 refresh interval 기준으로 다음 due를 잡는다.</p><pre><code>    private void RecordSuccess(int refreshMinutes)
+        }
+    }
+
+    private NativeBridgeResponse AcceptResult(BridgeResultPayload result)
+    {
+        string requestId;
+        AppSettings settingsSnapshot;
+        DateTimeOffset fromSnapshot;
+        DateTimeOffset toSnapshot;
+
+        lock (_gate)
+        {
+            if (string.IsNullOrWhiteSpace(result.RequestId) ||
+                !string.Equals(result.RequestId, _activeRequestId, StringComparison.Ordinal))
+            {
+                LogService.Warn(&quot;bridge&quot;, $&quot;postResult 무시: requestId 불일치 (cookies={result.CookieCount}, source={result.CookieSource ?? &quot;none&quot;})&quot;);
+                return NativeBridgeResponse.Success();
+            }
+
+            if (string.Equals(_processingRequestId, result.RequestId, StringComparison.Ordinal))
+            {
+                LogService.Warn(&quot;bridge&quot;, &quot;postResult 무시: 같은 requestId가 이미 처리 중&quot;);
+                return NativeBridgeResponse.Success();
+            }
+
+            requestId = _activeRequestId;
+            _processingRequestId = requestId;
+            settingsSnapshot = _settings.Clone();
+            fromSnapshot = _from;
+            toSnapshot = _to;
+            _leaseUntil = DateTimeOffset.Now.AddSeconds(ResultLeaseSeconds);
+        }
+
+        var token = _cts.Token;
+        var task = Task.Run(
+            () =&gt; RunResultFetchAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
+            CancellationToken.None);
+        Track(task);
+
+        return NativeBridgeResponse.Success();
+    }
+
+    private void ReleaseActiveRequest(string requestId)
+    {
+        lock (_gate)
+        {
+            if (string.Equals(_processingRequestId, requestId, StringComparison.Ordinal))
+                _processingRequestId = &quot;&quot;;
+
+            if (!string.Equals(_activeRequestId, requestId, StringComparison.Ordinal))
+                return;
+
+            _activeRequestId = &quot;&quot;;
+            _leaseUntil = DateTimeOffset.MinValue;
+        }
+    }</code></pre><h3>10.3 backoff</h3><p>인증 실패는 1분 뒤 재시도한다. 일반 네트워크/API 실패는 30초 → 60초 → 120초 → 240초 → 480초 수준으로 증가한다. 성공하면 실패 카운터를 초기화하고 refresh interval 기준으로 다음 due를 잡는다. 인증 실패도 <code class="inline">_consecutiveFailures</code>를 함께 증가시키며, 일반 실패 지연의 실제 상한은 480초다(코드에 적힌 600초 상한은 지수 계산상 도달하지 않는다).</p><pre><code>    private void RecordSuccess(int refreshMinutes)
     {
         lock (_gate)
         {
@@ -525,7 +651,7 @@ public sealed class NativeMessagingRegistrationService
     }
 
     private static string FormatDate(DateTimeOffset value) =&gt;
-        value.ToString(&quot;yyyy-MM-dd&#x27;T&#x27;HH:mm:ss.fffzzz&quot;, CultureInfo.InvariantCulture);</code></pre><h3>10.4 상태 표시</h3><p>health timer는 20초마다 평가하고 heartbeat가 95초 이상 없으면 “Chrome 확장 연결 대기”로 바꾼다.</p><pre><code>namespace DaouCalendarOverlay.Services;
+        value.ToString(&quot;yyyy-MM-dd&#x27;T&#x27;HH:mm:ss.fffzzz&quot;, CultureInfo.InvariantCulture);</code></pre><h3>10.4 상태 표시</h3><p>health timer는 20초마다 평가하고 heartbeat가 95초 이상 없으면 “Chrome 확장 연결 대기”로 바꾼다.</p><div class="table-wrap"><table><thead><tr><th>상태</th><th>표시 문구</th><th>isError</th></tr></thead><tbody><tr><td><code>Starting</code></td><td>시작 중…</td><td>false</td></tr><tr><td><code>WaitingForChrome</code></td><td>Chrome 백그라운드 대기, Chrome 확장 연결 대기[ · 마지막 HH:mm][ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm]</td><td>false</td></tr><tr><td><code>Connected</code></td><td>Chrome 브리지 연결됨 · 동기화 대기[ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm]</td><td>false</td></tr><tr><td><code>SyncRequested</code></td><td>동기화 요청 중…</td><td>false</td></tr><tr><td><code>Syncing</code></td><td>동기화 중…</td><td>false</td></tr><tr><td><code>Synced</code></td><td>정상 · 동기화 HH:mm</td><td>false</td></tr><tr><td><code>AuthenticationRequired</code></td><td>DaouOffice 재로그인 필요(또는 브리지가 준 사유)</td><td>true</td></tr><tr><td><code>NetworkError</code></td><td>네트워크 오류: … · 재시도 HH:mm</td><td>true</td></tr><tr><td><code>ExtensionError</code></td><td>(T2.2 전까지 생성 경로가 없어 도달 불가)</td><td>true</td></tr><tr><td><code>ConfigurationInvalid</code></td><td>설정 오류: {사유} (T1.3)</td><td>true</td></tr><tr><td><code>GeneralError</code></td><td>실패 메시지 · 재시도 HH:mm</td><td>true</td></tr></tbody></table></div><p>health timer는 <code class="inline">AuthenticationRequired</code>/<code class="inline">ExtensionError</code>/<code class="inline">ConfigurationInvalid</code> 상태를 덮어쓰지 않는다. 기동 시 불러온 캐시의 조회 범위가 오늘(KST)을 포함하지 않으면 <code class="inline">MarkCacheOutOfRange()</code>가 호출되어 위 <code>WaitingForChrome</code>/<code>Connected</code> 문구 뒤에 <strong>· 캐시(범위 밖)</strong> 접미가 붙는다(T1.6). 접미 합성은 <code class="inline">Decorate</code> 한 곳에서만 하며, 정상 동기화가 한 번 성공하면 접미는 사라진다. 상태 문구는 <code class="inline">SyncStatusService</code> 한 곳에서만 만든다. 캐시를 읽고 기동한 경우 <code class="inline">MarkCacheLoaded(DateTimeOffset)</code>가 호출되어 “Chrome 백그라운드 대기”, “Chrome 브리지 연결됨 · 동기화 대기”, “Chrome 확장 연결 대기” 문구에 “ · 캐시 MM-dd HH:mm” 접미가 붙고(범위 밖 접미가 함께 있으면 “ · 캐시(범위 밖) · 캐시 MM-dd HH:mm” 순서), 동기화가 한 번 성공하면(<code class="inline">MarkSuccess</code>) 접미가 사라진다. 마지막 갱신 시각은 상태 텍스트의 ToolTip(“마지막 갱신 yyyy-MM-dd HH:mm”)에도 표시된다.</p><pre><code>namespace DaouCalendarOverlay.Services;
 
 public enum OverlaySyncState
 {
@@ -538,7 +664,8 @@ public enum OverlaySyncState
     AuthenticationRequired,
     NetworkError,
     ExtensionError,
-    GeneralError
+    GeneralError,
+    ConfigurationInvalid
 }
 
 public sealed class SyncStatusChangedEventArgs : EventArgs
@@ -550,16 +677,47 @@ public sealed class SyncStatusChangedEventArgs : EventArgs
 
 public sealed class SyncStatusService
 {
+    private const string CacheOutOfRangeSuffix = &quot; · 캐시(범위 밖)&quot;;
+
     private readonly object _gate = new();
     private DateTimeOffset _lastHeartbeat;
     private DateTimeOffset _lastSuccess;
+    private bool _cacheOutOfRange;
+    private DateTimeOffset _cachedAt;
     private OverlaySyncState _state = OverlaySyncState.Starting;
+    private string _configurationInvalidReason = &quot;&quot;;
 
     public event EventHandler&lt;SyncStatusChangedEventArgs&gt;? StatusChanged;
 
     public void MarkStarting() =&gt; Publish(OverlaySyncState.Starting, &quot;시작 중…&quot;, false);
 
-    public void MarkWaiting() =&gt; Publish(OverlaySyncState.WaitingForChrome, &quot;Chrome 백그라운드 대기&quot;, false);
+    public void MarkWaiting() =&gt; Publish(OverlaySyncState.WaitingForChrome, Decorate(&quot;Chrome 백그라운드 대기&quot;), false);
+
+    /// &lt;summary&gt;캐시가 오늘을 포함하지 않는 범위일 때 호출. 이후 대기/연결 대기 문구에 접미가 붙는다.&lt;/summary&gt;
+    public void MarkCacheOutOfRange()
+    {
+        lock (_gate)
+            _cacheOutOfRange = true;
+    }
+
+    /// &lt;summary&gt;캐시를 읽어 화면에 표시했을 때 호출. 이후 대기/연결 대기 문구에 &quot; · 캐시 MM-dd HH:mm&quot;이 붙는다.&lt;/summary&gt;
+    public void MarkCacheLoaded(DateTimeOffset cachedAt)
+    {
+        if (cachedAt == default)
+            return;
+
+        OverlaySyncState state;
+        lock (_gate)
+        {
+            _cachedAt = cachedAt;
+            state = _state;
+        }
+
+        if (state == OverlaySyncState.WaitingForChrome)
+            Publish(OverlaySyncState.WaitingForChrome, Decorate(&quot;Chrome 백그라운드 대기&quot;), false);
+        else if (state == OverlaySyncState.Connected)
+            Publish(OverlaySyncState.Connected, Decorate(&quot;Chrome 브리지 연결됨 · 동기화 대기&quot;), false);
+    }
 
     public void MarkHeartbeat()
     {
@@ -567,7 +725,7 @@ public sealed class SyncStatusService
             _lastHeartbeat = DateTimeOffset.Now;
 
         if (_state is OverlaySyncState.Starting or OverlaySyncState.WaitingForChrome)
-            Publish(OverlaySyncState.Connected, &quot;Chrome 브리지 연결됨 · 동기화 대기&quot;, false);
+            Publish(OverlaySyncState.Connected, Decorate(&quot;Chrome 브리지 연결됨 · 동기화 대기&quot;), false);
     }
 
     public void MarkRequested() =&gt; Publish(OverlaySyncState.SyncRequested, &quot;동기화 요청 중…&quot;, false);
@@ -577,7 +735,11 @@ public sealed class SyncStatusService
     public void MarkSuccess(DateTimeOffset when)
     {
         lock (_gate)
+        {
             _lastSuccess = when;
+            _cacheOutOfRange = false;
+            _cachedAt = default;
+        }
         Publish(OverlaySyncState.Synced, $&quot;정상 · 동기화 {when:HH:mm}&quot;, false);
     }
 
@@ -594,11 +756,32 @@ public sealed class SyncStatusService
 
     public void MarkExtensionError(string message) =&gt; Publish(OverlaySyncState.ExtensionError, message, true);
 
+    /// &lt;summary&gt;
+    /// BaseUrl·캘린더 ID 등 설정 문제로 동기화가 불가능할 때의 상태.
+    /// 확장이 30초마다 같은 사유를 다시 알려오므로 동일 사유의 재발행은 억제한다.
+    /// &lt;/summary&gt;
+    public void MarkConfigurationInvalid(string reason)
+    {
+        lock (_gate)
+        {
+            if (_state == OverlaySyncState.ConfigurationInvalid &amp;&amp;
+                string.Equals(_configurationInvalidReason, reason, StringComparison.Ordinal))
+                return;
+            _configurationInvalidReason = reason;
+        }
+
+        Publish(OverlaySyncState.ConfigurationInvalid, $&quot;설정 오류: {reason}&quot;, true);
+    }
+
     public void MarkGeneralError(string message, DateTimeOffset? retryAt = null)
     {
         var suffix = retryAt is DateTimeOffset retry ? $&quot; · 재시도 {retry:HH:mm}&quot; : &quot;&quot;;
         Publish(OverlaySyncState.GeneralError, message + suffix, true);
     }
+
+    /// &lt;summary&gt;설정·캐시 등 로컬 파일 저장이 실패했을 때의 상태 문구를 만든다.&lt;/summary&gt;
+    public void MarkPersistenceError(string target) =&gt;
+        Publish(OverlaySyncState.GeneralError, $&quot;{target} 저장 실패 · 로그 확인&quot;, true);
 
     public void EvaluateHealth()
     {
@@ -613,20 +796,42 @@ public sealed class SyncStatusService
             state = _state;
         }
 
-        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ExtensionError)
+        if (state is OverlaySyncState.AuthenticationRequired or OverlaySyncState.ExtensionError or OverlaySyncState.ConfigurationInvalid)
             return;
 
         var now = DateTimeOffset.Now;
         if (heartbeat == default || now - heartbeat &gt; TimeSpan.FromSeconds(95))
         {
             var suffix = lastSuccess == default ? &quot;&quot; : $&quot; · 마지막 {lastSuccess:HH:mm}&quot;;
-            Publish(OverlaySyncState.WaitingForChrome, &quot;Chrome 확장 연결 대기&quot; + suffix, false);
+            Publish(OverlaySyncState.WaitingForChrome, Decorate(&quot;Chrome 확장 연결 대기&quot; + suffix), false);
         }
+    }
+
+    /// &lt;summary&gt;
+    /// 대기/연결 대기 문구에 붙는 접미를 한 곳에서 합성한다.
+    /// 붙일 것이 없으면 입력 문자열을 그대로 돌려준다.
+    /// &lt;/summary&gt;
+    private string Decorate(string text)
+    {
+        bool outOfRange;
+        DateTimeOffset cachedAt;
+        lock (_gate)
+        {
+            outOfRange = _cacheOutOfRange;
+            cachedAt = _cachedAt;
+        }
+
+        if (outOfRange)
+            text += CacheOutOfRangeSuffix;
+        if (cachedAt != default)
+            text += &quot; · 캐시 &quot; + cachedAt.ToString(&quot;MM-dd HH:mm&quot;, CultureInfo.InvariantCulture);
+        return text;
     }
 
     private void Publish(OverlaySyncState state, string text, bool isError)
     {
         lock (_gate)
+        {
             _state = state;
 </code></pre></section>
 <section id="ui"><h2>11. UI/UX 구현</h2><div class="grid2"><div class="card"><h3>창 형태</h3><ul><li>325×440 고정형 frameless WPF Window</li><li>작업 표시줄 숨김</li><li>투명 배경 + dark surface</li><li>빈 영역 drag 이동, 위치 잠금 지원</li><li>항상 위 옵션</li></ul></div><div class="card"><h3>월간 그리드</h3><ul><li>7열 × 6주 = 42셀</li><li>오늘 badge</li><li>일요일/법정공휴일 빨강, 토요일 파랑</li><li>3개 이상 일정: 첫 일정 + <code>...</code></li><li>셀 클릭 → 전체 일정 목록</li></ul></div><div class="card"><h3>일정 drill-down</h3><ul><li>날짜 셀 → 목록 카드 → 상세 카드</li><li>시간, 캘린더, 소유/작성, 공유/참석, 공개범위, 장소, 설명 표시</li><li>backdrop MouseUp에서 닫아 클릭 관통 방지</li></ul></div><div class="card"><h3>부가 UI</h3><ul><li>현재 날짜/요일/초 단위 시계</li><li>투명도 Slider</li><li>커스텀 ScrollBar</li><li>트레이 메뉴</li><li>PageUp/PageDown/Home/F5/Esc</li></ul></div></div><h3>11.1 선명도</h3><p>Viewbox 비정수 축소를 제거하고 실제 크기 레이아웃 + <code class="inline">UseLayoutRounding</code> + pixel snap + Display text rendering을 사용한다.</p><h3>11.2 투명도</h3><p>Window 전체 Opacity가 아니라 surface와 필터 입력 배경 alpha만 조절해 텍스트/아이콘 선명도를 유지한다.</p><pre><code>    private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs&lt;double&gt; e)
@@ -694,11 +899,11 @@ public sealed class SyncStatusService
     private async void SaveOpacityTimer_Tick(object? sender, EventArgs e)
     {
         _saveOpacityTimer?.Stop();
-        await ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value);
+        await RunGuardedAsync(&quot;ui.saveOpacity&quot;, () =&gt; ((App)WpfApplication.Current).SetUiOpacityAsync(OpacitySlider.Value));
     }</code></pre></section>
 <section id="filter"><h2>12. 필터와 캘린더별 표시 On/Off</h2><p>서버 원본은 <code class="inline">_allEvents</code>에 보존하고 숨김 캘린더 + 텍스트 필터 결과만 <code class="inline">_events</code>로 만든다. UI 필터는 API 재조회 없이 즉시 반영된다.</p><div class="grid2"><div class="card"><h3>검색 필드</h3><ul><li>제목</li><li>소유/작성</li><li>공유/참석</li></ul><p>대소문자 무시 substring 검색.</p></div><div class="card"><h3>성능</h3><p>검색 문자열 입력은 180ms debounce를 둔다. 매 key stroke마다 42개 셀을 재생성하지 않기 위한 처리다.</p></div></div><pre><code>    public void SetEvents(IEnumerable&lt;DaouCalendarEvent&gt; events)
     {
-        _allEvents = events.OrderBy(e =&gt; e.StartTime).ToList();
+        _allEvents = EventDeduplicator.Deduplicate(events).OrderBy(e =&gt; e.StartTime).ToList();
         ApplyFilter();
     }
 
@@ -733,10 +938,32 @@ public sealed class SyncStatusService
 
     public void GoToday()
     {
-        _displayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var today = _today().Date;
+        _displayMonth = new DateTime(today.Year, today.Month, 1);
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(DisplayMonth));
         BuildCalendar();
+    }
+
+    /// &lt;summary&gt;시계가 가리키는 날짜가 바뀌었으면 달력을 다시 만들고 true를 반환한다.&lt;/summary&gt;
+    public bool RefreshTodayIfChanged()
+    {
+        var today = _today().Date;
+        if (today == _lastKnownToday)
+            return false;
+
+        var previous = _lastKnownToday;
+        _lastKnownToday = today;
+
+        var monthChanged = today.Year != previous.Year || today.Month != previous.Month;
+        var viewingPreviousTodayMonth = _displayMonth.Year == previous.Year &amp;&amp; _displayMonth.Month == previous.Month;
+
+        if (monthChanged &amp;&amp; viewingPreviousTodayMonth)
+            GoToday();
+        else
+            BuildCalendar();
+
+        return true;
     }
 
     public void SetStatus(string text, bool isError)
@@ -749,7 +976,7 @@ public sealed class SyncStatusService
 
     public IReadOnlyList&lt;DaouCalendarEvent&gt; GetEventsForDate(DateTime date) =&gt;
         _events
-            .Where(e =&gt; OccursOnDate(e, date.Date))
+            .Where(e =&gt; CalendarGrid.OccursOnDate(e, date.Date))
             .OrderByDescending(e =&gt; e.IsAllDay)
             .ThenBy(e =&gt; e.StartTime)
             .ToList();
@@ -759,25 +986,15 @@ public sealed class SyncStatusService
             .Select(CreateEventChip)
             .ToList();
 
-    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange()
-    {
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
-        var gridEnd = gridStart.AddDays(42).AddMilliseconds(-1);
-        var offset = TimeSpan.FromHours(9);
-        return (
-            new DateTimeOffset(gridStart.Year, gridStart.Month, gridStart.Day, 0, 0, 0, offset),
-            new DateTimeOffset(gridEnd.Year, gridEnd.Month, gridEnd.Day, 23, 59, 59, 999, offset)
-        );
-    }
+    public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange() =&gt; CalendarGrid.GetVisibleRange(_displayMonth);
 
     private void BuildCalendar()
     {
         Days.Clear();
-        var first = _displayMonth;
-        var gridStart = first.AddDays(-(int)first.DayOfWeek);
+        var today = _today().Date;
+        var gridStart = CalendarGrid.GetGridStart(_displayMonth);
 
-        for (var i = 0; i &lt; 42; i++)
+        for (var i = 0; i &lt; CalendarGrid.CellCount; i++)
         {
             var date = gridStart.AddDays(i);
             var dayEvents = GetEventsForDate(date);
@@ -785,7 +1002,7 @@ public sealed class SyncStatusService
             {
                 Date = date,
                 IsCurrentMonth = date.Month == _displayMonth.Month &amp;&amp; date.Year == _displayMonth.Year,
-                IsToday = date.Date == DateTime.Today,
+                IsToday = date.Date == today,
                 // 제목 검색은 공휴일 색상을 숨기지 않지만, 캘린더 자체를 끈 경우에는 해당 캘린더의 효과도 숨긴다.
                 IsHoliday = GetVisibleUnfilteredEventsForDate(date).Any(IsHolidayEvent)
             };
@@ -804,7 +1021,7 @@ public sealed class SyncStatusService
     private void ApplyFilter()
     {
         IEnumerable&lt;DaouCalendarEvent&gt; query = _allEvents
-            .Where(e =&gt; !_hiddenCalendarIds.Contains(e.CalendarId));
+            .Where(e =&gt; !IsHiddenEvent(e));
 
         if (!string.IsNullOrWhiteSpace(_filterText))
             query = query.Where(MatchesFilter);
@@ -829,7 +1046,7 @@ public sealed class SyncStatusService
             _ =&gt; Contains(calendarEvent.Summary, needle)
         };
     }</code></pre><p>공휴일 색상은 제목 필터에 의해 사라지지 않도록 필터 전 이벤트에서 판정하되, 사용자가 해당 캘린더 자체를 숨긴 경우에는 공휴일 색상도 숨긴다.</p></section>
-<section id="storage"><h2>13. 설정·캐시·시작 프로그램</h2><div class="table-wrap"><table><thead><tr><th>데이터</th><th>경로/저장소</th><th>내용</th></tr></thead><tbody><tr><td>설정</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\settings.json</code></td><td>BaseUrl, calendarIds, hidden ids, refresh interval, topmost, 위치 잠금, 투명도, 창 좌표</td></tr><tr><td>일정 캐시</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\calendar-cache.json</code></td><td>마지막 정상 동기화 시각 + 일정 객체</td></tr><tr><td>Chrome Extension</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension</code></td><td>manifest, worker, 아이콘</td></tr><tr><td>Native Host manifest</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\NativeMessaging\com.daou.calendar_overlay.json</code></td><td>EXE 경로, allowed_origins</td></tr><tr><td>자동 시작</td><td><code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code></td><td>현재 EXE 경로</td></tr><tr><td>Native Host 등록</td><td><code>HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay</code></td><td>host manifest 경로</td></tr><tr><td>브라우저 세션 쿠키 캐시</td><td><code>chrome.storage.session</code></td><td>cookieHeader/count/baseUrl/capturedAt — 브라우저 세션 메모리 범위</td></tr></tbody></table></div><p>설정은 temp 파일에 먼저 쓴 뒤 최종 파일로 overwrite move한다. 일정 캐시를 먼저 표시하므로 부팅 직후 네트워크/Chrome 준비가 늦어도 이전 일정이 즉시 보인다.</p></section>
+<section id="storage"><h2>13. 설정·캐시·시작 프로그램</h2><div class="table-wrap"><table><thead><tr><th>데이터</th><th>경로/저장소</th><th>내용</th></tr></thead><tbody><tr><td>설정</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\settings.json</code></td><td>BaseUrl, calendarIds, hidden ids, refresh interval, StartWithWindows, topmost, 위치 잠금, 투명도, 창 좌표</td></tr><tr><td>일정 캐시</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\calendar-cache.json</code></td><td>마지막 정상 동기화 시각 + 조회 범위(RangeFrom/RangeTo) + 일정 객체</td></tr><tr><td>Chrome Extension</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension</code></td><td>manifest, worker, 아이콘</td></tr><tr><td>Native Host manifest</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\NativeMessaging\com.daou.calendar_overlay.json</code></td><td>EXE 경로, allowed_origins</td></tr><tr><td>자동 시작</td><td><code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code></td><td>값 이름 DaouCalendarOverlay, 현재 EXE 경로</td></tr><tr><td>Native Host 등록</td><td><code>HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay</code></td><td>host manifest 경로</td></tr><tr><td>브라우저 세션 쿠키 캐시</td><td><code>chrome.storage.session</code></td><td>cookieHeader/count/baseUrl/capturedAt — 브라우저 세션 메모리 범위</td></tr></tbody></table></div><p>설정은 temp 파일에 먼저 쓴 뒤 최종 파일로 overwrite move한다. 일정 캐시를 먼저 표시하므로 부팅 직후 네트워크/Chrome 준비가 늦어도 이전 일정이 즉시 보인다.</p><p>설정 값 제한: <code class="inline">RefreshMinutes</code>는 1~1440분만 허용한다(범위 밖 입력은 설정창에서 거부하고, settings.json에 들어 있는 값은 기동 시 보정한다). 캘린더 ID는 숫자 1~19자리만 허용한다(실데이터는 5자리 또는 19자리). <code class="inline">StartWithWindows</code>는 HKCU Run에 값 이름 <code>DaouCalendarOverlay</code>로 등록된다. single-file 실행 시 네이티브 라이브러리는 <code>%TEMP%\.net\DaouCalendarOverlay</code>에 추출된다.</p><p>settings.json과 calendar-cache.json은 <code class="inline">Services/AtomicJsonFileWriter.cs</code>가 공통으로 저장한다. 대상과 같은 디렉터리에 GUID 이름의 임시 파일(<code class="inline">settings.json.&lt;guid&gt;.tmp</code>)을 만들어 쓴 뒤 <code class="inline">File.Move(temp, final, overwrite: true)</code>로 원자적으로 교체하며, 같은 경로에 대한 동시 저장은 경로별 <code class="inline">SemaphoreSlim(1,1)</code>으로 직렬화된다(투명도 450ms·위치 400ms 저장 틱이 겹쳐도 공유 위반으로 종료되지 않는다). 실패해도 예외를 던지지 않고 false를 돌려주며 임시 파일을 지운다. 호출 측(App)은 이 결과를 관찰해 상태 표시줄에 &quot;설정 저장 실패 · 로그 확인&quot;(캐시는 &quot;캐시 저장 실패 · 로그 확인&quot;)을 표시하고 로그에 경로와 예외를 남긴다. 계산 속성 <code class="inline">AppSettings.IsConfigured</code>는 <code class="inline">[JsonIgnore]</code>라 settings.json에 저장되지 않으며, 기존 파일에 남아 있는 <code class="inline">IsConfigured</code> 키는 로드 시 무시된다.</p></section>
 <section id="single"><h2>14. 싱글 인스턴스, 트레이, 멀티 모니터 / DPI</h2><h3>14.1 싱글 인스턴스</h3><p><code class="inline">Local\DaouCalendarOverlay.Singleton</code> Mutex를 사용한다. 두 번째 실행은 activation pipe로 <code class="inline">activate</code>를 보내 기존 창을 표시한다.</p><pre><code>using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -936,7 +1153,7 @@ public sealed class SingleInstanceService : IAsyncDisposable
         _cts.Dispose();
     }
 }</code></pre><h3>14.2 DPI</h3><p><code class="inline">PerMonitorV2</code>를 선언하고 <code class="inline">WM_DPICHANGED</code> 및 display settings 변경 시 window를 현재 monitor work area 안으로 clamp한다.</p><h3>14.3 트레이</h3><p>WPF 창 닫기는 기본적으로 hide이며, WinForms <code class="inline">NotifyIcon</code>에서 보이기/숨기기, 새로고침, DaouOffice 열기, 확장 폴더, 설정, 종료를 제공한다.</p></section>
-<section id="security"><h2>15. 보안·데이터 경계</h2><div class="grid2"><div class="card"><h3 class="badge-good">적용된 보호</h3><ul><li>ID/PW를 앱에 저장하지 않음</li><li>Native Messaging <code>allowed_origins</code>를 고정 extension ID로 제한</li><li>Named Pipe <code>CurrentUserOnly</code></li><li>API용 BaseUrl은 HTTPS + daouoffice.com/subdomain 검증</li><li>Cookie는 settings.json에 저장하지 않음</li><li>requestId + lease로 stale result 무시</li><li>HTTP redirect 자동 추적 비활성화</li></ul></div><div class="card"><h3 class="badge-warn">주의할 데이터</h3><ul><li><code>calendar-cache.json</code>에는 일정 제목/설명/참석자 등이 평문 JSON으로 남음</li><li>Cookie header는 동기화 순간 프로세스 메모리와 <code>chrome.storage.session</code>에 존재</li><li>Unpacked extension 폴더는 현재 Windows 사용자가 수정 가능</li><li>내부 웹 API는 공식 public API 계약이 아님</li></ul></div></div><div class="callout warn"><strong>향후 보안 강화 후보:</strong> 회사 정책이 엄격하면 Windows DPAPI로 calendar cache를 암호화하거나 cache disable 옵션을 추가하는 것이 가장 직접적이다.</div></section>
+<section id="security"><h2>15. 보안·데이터 경계</h2><div class="grid2"><div class="card"><h3 class="badge-good">적용된 보호</h3><ul><li>ID/PW를 앱에 저장하지 않음</li><li>Native Messaging <code>allowed_origins</code>를 고정 extension ID로 제한</li><li>Named Pipe <code>CurrentUserOnly</code>(서버·클라이언트 양쪽) + native host가 서버 프로세스 실행 파일 경로를 <code>Environment.ProcessPath</code>와 대조한 뒤에만 전송</li><li>API용 BaseUrl은 HTTPS + daouoffice.com/subdomain 검증</li><li>Cookie는 settings.json에 저장하지 않음</li><li>requestId + lease + HTTP 완료 후 표시 범위 재확인으로 stale result 무시</li><li>HTTP redirect 자동 추적 비활성화</li></ul></div><div class="card"><h3 class="badge-warn">주의할 데이터</h3><ul><li><code>calendar-cache.json</code>에는 일정 제목/설명/참석자 등이 평문 JSON으로 남음</li><li>Cookie header는 동기화 순간 프로세스 메모리와 <code>chrome.storage.session</code>에 존재</li><li>Unpacked extension 폴더는 현재 Windows 사용자가 수정 가능</li><li>내부 웹 API는 공식 public API 계약이 아님</li></ul></div></div><div class="callout"><strong>Named Pipe 위협 모델:</strong> (1) <strong>다른 로컬 계정</strong>의 프로세스가 같은 이름의 파이프를 먼저 만들어 선점하는 경로는 서버·클라이언트 양쪽 <code class="inline">PipeOptions.CurrentUserOnly</code>로 차단된다. (2) <strong>동일 사용자 프로세스는 신뢰 경계 안</strong>이다. 같은 Windows 계정으로 실행되는 프로세스는 Chrome 프로필과 <code class="inline">%LOCALAPPDATA%</code>에 이미 접근할 수 있으므로, native host가 서버 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조하는 것은 심층 방어일 뿐이며 같은 EXE를 복제해 다시 실행하는 공격까지 막지는 못한다. (3) 싱글 인스턴스 활성화용 파이프(<code class="inline">SingleInstanceService.NotifyPrimaryAsync</code>)에는 <code class="inline">activate</code> 문자열만 흐르고 쿠키 등 비밀값이 없으므로 클라이언트 쪽에 <code class="inline">CurrentUserOnly</code>를 적용하지 않았다(적용하면 오버레이가 관리자 권한으로 실행됐을 때 활성화 신호가 깨진다).</div><div class="callout warn"><strong>향후 보안 강화 후보:</strong> 회사 정책이 엄격하면 Windows DPAPI로 calendar cache를 암호화하거나 cache disable 옵션을 추가하는 것이 가장 직접적이다.</div></section>
 <section id="build"><h2>16. 빌드·배포 구조</h2><p><strong>win-x64 / self-contained / single-file</strong> publish. .NET Runtime을 포함하고 trimming은 끈다.</p><pre><code>&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;
   &lt;PropertyGroup&gt;
     &lt;OutputType&gt;WinExe&lt;/OutputType&gt;
@@ -961,7 +1178,7 @@ public sealed class SingleInstanceService : IAsyncDisposable
 
   &lt;ItemGroup&gt;
     &lt;EmbeddedResource Include=&quot;ChromeExtension\manifest.json&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.manifest.json&quot; /&gt;
-    &lt;EmbeddedResource Include=&quot;ChromeExtension\service-worker-v700.js&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.service-worker-v700.js&quot; /&gt;
+    &lt;EmbeddedResource Include=&quot;ChromeExtension\service-worker-v710.js&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.service-worker-v710.js&quot; /&gt;
     &lt;EmbeddedResource Include=&quot;ChromeExtension\icon16.png&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.icon16.png&quot; /&gt;
     &lt;EmbeddedResource Include=&quot;ChromeExtension\icon32.png&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.icon32.png&quot; /&gt;
     &lt;EmbeddedResource Include=&quot;ChromeExtension\icon48.png&quot; LogicalName=&quot;DaouCalendarOverlay.ChromeExtension.icon48.png&quot; /&gt;
@@ -995,35 +1212,60 @@ dotnet publish $project `
 $exePath = Join-Path $out &quot;DaouCalendarOverlay.exe&quot;
 Write-Host &quot;&quot;
 Write-Host &quot;Publish completed: $exePath&quot;</code></pre><p>최종 결과는 <code class="inline">publish\DaouCalendarOverlay.exe</code>. 설정/캐시는 LocalAppData이므로 EXE 교체로 초기화되지 않는다.</p><h3>16.2 Extension 포함</h3><p>Chrome extension 파일은 EXE에 <code class="inline">EmbeddedResource</code>로 포함하고 앱 실행 시 LocalAppData로 추출한다.</p></section>
-<section id="files"><h2>17. 파일별 책임</h2><div class="table-wrap"><table><thead><tr><th>파일</th><th>책임</th></tr></thead><tbody><tr><td><code>App.xaml.cs</code></td><td>프로세스 모드 분기, 앱 수명주기, 타이머, 트레이, 브리지 이벤트, 설정 반영</td></tr><tr><td><code>Views/MainWindow.xaml(.cs)</code></td><td>오버레이 렌더링, 필터, 날짜 목록/상세 카드, 투명도, 드래그, 키보드, DPI/위치 보정</td></tr><tr><td><code>Views/SettingsWindow.xaml(.cs)</code></td><td>Daou 주소·calendarIds·새로고침 주기·시작 옵션 설정, Network URL 파싱</td></tr><tr><td><code>ViewModels/MainViewModel.cs</code></td><td>42일 월간 그리드 생성, 필터, 숨김 캘린더, 휴일 색상, 일정 칩</td></tr><tr><td><code>Models/CalendarModels.cs</code></td><td>Daou API JSON 모델, 작성자/참석자/공개범위 파생 표시값</td></tr><tr><td><code>Services/CalendarBridgeServer.cs</code></td><td>Named Pipe 서버, 동기화 lease/requestId, C# HTTP 조회, 재시도/backoff</td></tr><tr><td><code>Services/NativeMessagingHost.cs</code></td><td>Chrome이 실행하는 동일 EXE의 native-host 모드; stdio↔Named Pipe 중계</td></tr><tr><td><code>Services/NativeBridgeProtocol.cs</code></td><td>4-byte little-endian length + UTF-8 JSON framing, 상수/ID</td></tr><tr><td><code>Services/NativeMessagingRegistrationService.cs</code></td><td>HKCU NativeMessagingHosts 등록 및 host manifest 생성</td></tr><tr><td><code>Services/ChromeExtensionInstaller.cs</code></td><td>단일 EXE 내부 EmbeddedResource를 LocalAppData의 unpacked extension으로 추출</td></tr><tr><td><code>Services/SingleInstanceService.cs</code></td><td>Mutex + activation pipe로 싱글 인스턴스 보장</td></tr><tr><td><code>Services/SyncStatusService.cs</code></td><td>동기화 상태 머신과 health timeout 표시</td></tr><tr><td><code>Services/SettingsService.cs</code></td><td>settings.json 안전 저장(temp→replace)</td></tr><tr><td><code>Services/CacheService.cs</code></td><td>calendar-cache.json 저장/복구</td></tr><tr><td><code>Services/StartupService.cs</code></td><td>HKCU Run 자동시작</td></tr><tr><td><code>ChromeExtension/manifest.json</code></td><td>고정 Extension ID, 권한, MV3 service worker 정의</td></tr><tr><td><code>ChromeExtension/service-worker-v700.js</code></td><td>쿠키 수집/세션 캐시/Native Messaging 호출/30초 alarm</td></tr><tr><td><code>app.manifest</code></td><td>PerMonitorV2 DPI 및 longPathAware</td></tr><tr><td><code>publish.ps1</code></td><td>win-x64 self-contained single-file Release publish</td></tr></tbody></table></div><h3>프로젝트 트리</h3><div class="tree">DaouCalendarOverlay_MVP/
+<section id="files"><h2>17. 파일별 책임</h2><div class="table-wrap"><table><thead><tr><th>파일</th><th>책임</th></tr></thead><tbody><tr><td><code>App.xaml.cs</code></td><td>프로세스 모드 분기, 앱 수명주기, 타이머, 트레이, 브리지 이벤트, 설정 반영</td></tr><tr><td><code>Views/MainWindow.xaml(.cs)</code></td><td>오버레이 렌더링, 필터, 날짜 목록/상세 카드, 투명도, 드래그, 키보드, DPI/위치 보정</td></tr><tr><td><code>Views/SettingsWindow.xaml(.cs)</code></td><td>Daou 주소·calendarIds·새로고침 주기·시작 옵션 설정, Network URL 파싱</td></tr><tr><td><code>ViewModels/MainViewModel.cs</code></td><td>42일 월간 그리드 생성, 필터, 숨김 캘린더, 휴일 색상, 일정 칩</td></tr><tr><td><code>Models/CalendarModels.cs</code></td><td>Daou API JSON 모델, 작성자/참석자/공개범위 파생 표시값</td></tr><tr><td><code>Models/EventDeduplicator.cs</code></td><td>id 기준 이벤트 병합, 소속 캘린더 ID/이름 보존</td></tr><tr><td><code>Models/AppSettings.cs</code></td><td>사용자 설정 모델(BaseUrl, CalendarIds, RefreshMinutes, 투명도/위치, StartWithWindows)</td></tr><tr><td><code>Models/DayCellViewModel.cs</code></td><td>월 그리드 한 칸의 표시 상태(날짜, 오늘/휴일 여부, 일정 칩)</td></tr><tr><td><code>Models/CalendarGrid.cs</code></td><td>42칸 그리드 시작일·표시 범위·날짜 포함 판정(KST +09:00) 순수 로직</td></tr><tr><td><code>Services/CalendarBridgeServer.cs</code></td><td>Named Pipe 서버, 동기화 lease/requestId, C# HTTP 조회, 재시도/backoff</td></tr><tr><td><code>Services/BaseUrlPolicy.cs</code></td><td>BaseUrl 검증 정책 단일 지점(https + *.daouoffice.com, apex 제외), 정규화</td></tr><tr><td><code>Services/NoFetchReasons.cs</code></td><td>브리지 noFetchReason 코드 상수와 사용자 표시 문구 변환</td></tr><tr><td><code>Services/NativeMessagingHost.cs</code></td><td>Chrome이 실행하는 동일 EXE의 native-host 모드; stdio↔Named Pipe 중계</td></tr><tr><td><code>Services/NativeHostRelay.cs</code></td><td>native host → Named Pipe 연결, 서버 프로세스 신원 검증 후 프레임 중계</td></tr><tr><td><code>Services/PipePeerVerifier.cs</code></td><td>파이프 서버 PID/실행 파일 경로 조회와 자기 자신 여부 비교</td></tr><tr><td><code>Services/NativeBridgeProtocol.cs</code></td><td>4-byte little-endian length + UTF-8 JSON framing, 상수/ID</td></tr><tr><td><code>Services/NativeMessagingRegistrationService.cs</code></td><td>HKCU NativeMessagingHosts 등록 및 host manifest 생성</td></tr><tr><td><code>Services/ChromeExtensionInstaller.cs</code></td><td>단일 EXE 내부 EmbeddedResource를 LocalAppData의 unpacked extension으로 추출</td></tr><tr><td><code>Services/SingleInstanceService.cs</code></td><td>Mutex + activation pipe로 싱글 인스턴스 보장</td></tr><tr><td><code>Services/SyncStatusService.cs</code></td><td>동기화 상태 머신과 health timeout 표시</td></tr><tr><td><code>Services/LogService.cs</code></td><td>파일 로깅(일자별 파일, 1MB×5 롤링, 스레드 안전)</td></tr><tr><td><code>Services/LogFormatter.cs</code></td><td>로그 한 줄 포맷과 예외 들여쓰기</td></tr><tr><td><code>Services/LogRotation.cs</code></td><td>로그 파일명·롤링 계획 계산</td></tr><tr><td><code>Services/BridgeLogSummary.cs</code></td><td>브리지 요청/결과의 비밀값 제외 요약</td></tr><tr><td><code>Services/AtomicJsonFileWriter.cs</code></td><td>JSON 원자적 저장 공통 구현(GUID temp, 경로별 직렬화, 실패 시 false + 로그)</td></tr><tr><td><code>Services/SettingsService.cs</code></td><td>settings.json 안전 저장(GUID temp→replace, 경로별 저장 직렬화)</td></tr><tr><td><code>Services/CacheService.cs</code></td><td>calendar-cache.json 안전 저장(GUID temp→replace, 경로별 저장 직렬화)/복구</td></tr><tr><td><code>Services/BridgeRangeGuard.cs</code></td><td>HTTP 왕복 중 표시 범위 변경 감지(stale 결과 폐기)</td></tr><tr><td><code>Models/CacheRangePolicy.cs</code></td><td>캐시 범위가 오늘(KST)을 포함하는지 판정</td></tr><tr><td><code>Services/StartupService.cs</code></td><td>HKCU Run 자동시작</td></tr><tr><td><code>Services/CalendarUrlParser.cs</code></td><td>Daou Network URL에서 baseUrl·calendarIds 추출</td></tr><tr><td><code>ChromeExtension/manifest.json</code></td><td>고정 Extension ID, 권한, MV3 service worker 정의</td></tr><tr><td><code>ChromeExtension/service-worker-v710.js</code></td><td>쿠키 수집/세션 캐시/Native Messaging 호출/30초 alarm</td></tr><tr><td><code>app.manifest</code></td><td>PerMonitorV2 DPI 및 longPathAware</td></tr><tr><td><code>publish.ps1</code></td><td>win-x64 self-contained single-file Release publish</td></tr><tr><td><code>GlobalUsings.cs</code></td><td>프로젝트 전역 using 선언</td></tr><tr><td><code>README.md</code></td><td>설치·최초 실행·문제 해결 문서</td></tr><tr><td><code>.gitignore</code></td><td>로컬 설정·비밀값·빌드 산출물 제외 규칙</td></tr><tr><td><code>docs/</code></td><td>기술 문서(HTML), 작업 지시서, 검증 로그</td></tr><tr><td><code>tests/DaouCalendarOverlay.Tests/</code></td><td>xUnit 단위 테스트 프로젝트(순수 로직 대상)</td></tr></tbody></table></div><h3>프로젝트 트리</h3><div class="tree">DaouCalendarOverlay_MVP/
 ├─ DaouCalendarOverlay.sln
 ├─ publish.ps1
+├─ README.md
+├─ .gitignore
+├─ docs/
+├─ tests/DaouCalendarOverlay.Tests/
 └─ DaouCalendarOverlay/
    ├─ App.xaml / App.xaml.cs
    ├─ app.manifest
+   ├─ GlobalUsings.cs
    ├─ DaouCalendarOverlay.csproj
    ├─ Assets/DaouCalendarOverlayIcon.ico
    ├─ ChromeExtension/
    │  ├─ manifest.json
-   │  ├─ service-worker-v700.js
+   │  ├─ service-worker-v710.js
    │  └─ icon16/32/48/128.png
    ├─ Models/
+   │  ├─ AppSettings.cs
+   │  ├─ CalendarModels.cs
+   │  ├─ DayCellViewModel.cs
+   │  └─ CalendarGrid.cs
    ├─ ViewModels/MainViewModel.cs
    ├─ Views/
    └─ Services/
       ├─ CalendarBridgeServer.cs
+      ├─ BaseUrlPolicy.cs
+      ├─ NoFetchReasons.cs
       ├─ NativeMessagingHost.cs
+      ├─ NativeHostRelay.cs
+      ├─ PipePeerVerifier.cs
       ├─ NativeBridgeProtocol.cs
       ├─ NativeMessagingRegistrationService.cs
       ├─ ChromeExtensionInstaller.cs
       ├─ SingleInstanceService.cs
       ├─ SyncStatusService.cs
+      ├─ AtomicJsonFileWriter.cs
       ├─ SettingsService.cs
       ├─ CacheService.cs
+      ├─ CalendarUrlParser.cs
+      ├─ LogService.cs
+      ├─ LogFormatter.cs
+      ├─ LogRotation.cs
+      ├─ BridgeLogSummary.cs
       └─ StartupService.cs</div></section>
-<section id="operations"><h2>18. 운영·장애 대응 가이드</h2><div class="table-wrap"><table><thead><tr><th>표시/증상</th><th>의미</th><th>우선 확인</th></tr></thead><tbody><tr><td>정상 · 동기화 HH:mm</td><td>쿠키 확보 + API 200 + JSON 성공</td><td>정상.</td></tr><tr><td>Chrome 확장 연결 대기</td><td>95초 이상 bridge heartbeat 없음</td><td>Chrome background process, extension 7.0.0, Native Messaging 등록.</td></tr><tr><td>DaouOffice 재로그인 필요</td><td>Cookie 없음, 401/403, redirect, HTML 로그인 페이지</td><td>Chrome에서 DaouOffice 로그인 후 새로고침.</td></tr><tr><td>네트워크 오류 · 재시도 HH:mm</td><td>HttpRequestException/timeout</td><td>사내망/VPN/DNS/DaouOffice 접근.</td></tr><tr><td>native host not found</td><td>Extension ID 또는 HKCU host 등록 불일치</td><td>EXE 먼저 실행 → 구버전 확장 제거 → 최신 unpacked extension 로드.</td></tr><tr><td>공유 캘린더 누락</td><td>calendarIds[] 부족</td><td>Daou 웹 Network event URL에서 ID 재추출.</td></tr><tr><td>부팅 직후 이전 일정</td><td>캐시 우선 표시</td><td>background sync 후 동기화 시각 갱신 확인.</td></tr></tbody></table></div><h3>정상 부팅 흐름</h3><div class="diagram"><div class="flow"><div class="node"><div class="t">Windows 로그인</div><div class="s">HKCU Run</div></div><div class="arrow">→</div><div class="node"><div class="t">Overlay 시작</div><div class="s">캐시 즉시 표시</div></div><div class="arrow">→</div><div class="node"><div class="t">Chrome background</div><div class="s">Extension alarm</div></div><div class="arrow">→</div><div class="node"><div class="t">Native bridge</div><div class="s">cookie 전달</div></div><div class="arrow">→</div><div class="node"><div class="t">Daou API</div><div class="s">최신 일정 갱신</div></div></div></div></section>
+<section id="operations"><h2>18. 운영·장애 대응 가이드</h2><div class="table-wrap"><table><thead><tr><th>표시/증상</th><th>의미</th><th>우선 확인</th></tr></thead><tbody><tr><td>정상 · 동기화 HH:mm</td><td>쿠키 확보 + API 200 + JSON 성공</td><td>정상.</td></tr><tr><td>Chrome 확장 연결 대기</td><td>95초 이상 bridge heartbeat 없음</td><td>Chrome background process, extension 7.1.0, Native Messaging 등록.</td></tr><tr><td>… · 캐시 MM-dd HH:mm</td><td>캐시만 표시 중. 기동 후 Chrome 동기화가 아직 한 번도 성공하지 않음(“· 캐시(범위 밖)”가 함께 붙으면 저장된 조회 범위가 오늘을 포함하지 않는 상태)</td><td>Chrome 실행 여부, DaouOffice 로그인, 확장 활성화 확인. 동기화 성공 시 접미가 사라진다.</td></tr><tr><td>DaouOffice 재로그인 필요</td><td>Cookie 없음, 401/403, redirect, HTML 로그인 페이지</td><td>Chrome에서 DaouOffice 로그인 후 새로고침.</td></tr><tr><td>네트워크 오류 · 재시도 HH:mm</td><td>HttpRequestException/timeout</td><td>사내망/VPN/DNS/DaouOffice 접근.</td></tr><tr><td>설정 오류: …</td><td>BaseUrl이 정책(https + *.daouoffice.com, apex 제외) 위반이거나 캘린더 ID 미설정</td><td>트레이 → 설정에서 주소를 https://회사이름.daouoffice.com 형식으로 수정. 저장 시 거부되면 안내 문구의 사유를 따른다.</td></tr><tr><td>native host not found</td><td>Extension ID 또는 HKCU host 등록 불일치</td><td>EXE 먼저 실행 → 구버전 확장 제거 → 최신 unpacked extension 로드.</td></tr><tr><td>공유 캘린더 누락</td><td>calendarIds[] 부족</td><td>Daou 웹 Network event URL에서 ID 재추출.</td></tr><tr><td>부팅 직후 이전 일정</td><td>캐시 우선 표시</td><td>background sync 후 동기화 시각 갱신 확인.</td></tr><tr><td>… · 캐시(범위 밖)</td><td>저장된 캐시의 조회 범위(<code>RangeFrom</code>/<code>RangeTo</code>)가 오늘(KST)을 포함하지 않음 — 다른 달을 보다가 종료했거나 범위 키가 없는 옛 캐시</td><td>기동 시 강제 동기화가 바로 실행되므로 정상 동기화가 끝나면 접미가 사라진다. 계속 남으면 &quot;Chrome 확장 연결 대기&quot; 항목을 확인.</td></tr><tr><td>요청을 전송하지 않았습니다(확장 오류 메시지)</td><td>파이프 서버 EXE가 실행 중인 오버레이와 다름</td><td>오버레이 EXE 경로와 HKCU NativeMessagingHosts manifest의 path 일치 확인 → 오버레이 재시작(시작 시 manifest가 현재 EXE 경로로 다시 기록됨) → host 로그 확인.</td></tr><tr><td>현재 사용자 소유가 아니어서 연결하지 않았습니다</td><td>오버레이를 관리자 권한으로 실행해 파이프 소유자가 Administrators</td><td>오버레이를 일반 권한(asInvoker)으로 재실행.</td></tr></tbody></table></div><h3>로그와 진단</h3><div class="table-wrap"><table><thead><tr><th>항목</th><th>현재 값</th></tr></thead><tbody><tr><td>GUI(오버레이) 로그</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log</code></td></tr><tr><td>Native host 모드 로그</td><td><code>%LOCALAPPDATA%\DaouCalendarOverlay\logs\host-yyyyMMdd.log</code></td></tr><tr><td>롤링 정책</td><td>1 MB × 5 (활성 파일 + <code>.1</code> ~ <code>.4</code>)</td></tr><tr><td>폴더 열기</td><td>트레이 우클릭 메뉴 &quot;로그 폴더 열기&quot;</td></tr><tr><td>한 줄 형식</td><td><code>yyyy-MM-dd HH:mm:ss.fff [LEVEL] category: message</code></td></tr></tbody></table></div><pre><code>2026-09-22 09:12:03.114 [INFO] startup: overlay 시작 pid=12345
+2026-09-22 09:12:07.902 [INFO] bridge.pipe: type=getConfig elapsed=3ms ok=True
+2026-09-22 09:12:08.441 [INFO] bridge.result: requestId=9f3c… cookieCount=12 cookieSource=live hasError=False
+2026-09-22 09:12:09.118 [INFO] sync: 동기화 성공 events=37
+2026-09-22 09:31:02.077 [WARN] sync: 인증 실패: Chrome의 DaouOffice 세션이 만료되었습니다.
+2026-09-22 09:34:10.512 [WARN] host.pipe: 파이프 연결 실패
+2026-09-22 09:34:10.512 [WARN] extension: 확장 보고 오류 ver=7.1.0: getConfig: Specified native messaging host not found.</code></pre><p>로그에는 인증 Cookie 값이나 토큰을 남기지 않는다. 쿠키는 개수(<code class="inline">cookieCount</code>)와 출처(<code class="inline">cookieSource</code>)만 기록한다.</p><h3>정상 부팅 흐름</h3><div class="diagram"><div class="flow"><div class="node"><div class="t">Windows 로그인</div><div class="s">HKCU Run</div></div><div class="arrow">→</div><div class="node"><div class="t">Overlay 시작</div><div class="s">캐시 즉시 표시</div></div><div class="arrow">→</div><div class="node"><div class="t">Chrome background</div><div class="s">Extension alarm</div></div><div class="arrow">→</div><div class="node"><div class="t">Native bridge</div><div class="s">cookie 전달</div></div><div class="arrow">→</div><div class="node"><div class="t">Daou API</div><div class="s">최신 일정 갱신</div></div></div></div></section>
 <section id="limitations"><h2>19. 알려진 한계와 유지보수 포인트</h2><ol><li><strong>Daou 내부 API 의존:</strong> endpoint/query/JSON field 변경 시 bridge/model 수정 필요.</li><li><strong>Chrome 의존:</strong> Chrome process가 완전 종료되면 새로운 sync는 불가능하고 캐시만 표시.</li><li><strong>세션 만료:</strong> 서버 absolute lifetime 만료 시 Chrome 재로그인 필요.</li><li><strong>Unpacked extension:</strong> 현재 개발자 모드 수동 설치. 다수 배포 시 enterprise policy/정식 패키징 고려.</li><li><strong>KST 가정:</strong> 날짜 판정에 +09:00이 명시됨.</li><li><strong>로컬 캐시 평문:</strong> 보안정책에 따라 DPAPI 암호화 후보.</li></ol></section>
-<section id="appendix"><h2>20. 핵심 상수와 운영 경로</h2><div class="table-wrap"><table><thead><tr><th>항목</th><th>현재 값</th></tr></thead><tbody><tr><td>Native Host name</td><td><code>com.daou.calendar_overlay</code></td></tr><tr><td>고정 Extension ID</td><td><code>gkchgbpcbljkgabjcgjelacfkphcmhmi</code></td></tr><tr><td>Native bridge pipe</td><td><code>DaouCalendarOverlay.NativeBridge.v7</code></td></tr><tr><td>Single-instance Mutex</td><td><code>Local\DaouCalendarOverlay.Singleton</code></td></tr><tr><td>Activation pipe</td><td><code>DaouCalendarOverlay.Activation</code></td></tr><tr><td>Chrome alarm</td><td><code>daou-calendar-overlay-sync</code> / 0.5 min</td></tr><tr><td>HTTP timeout</td><td>30 sec</td></tr><tr><td>fetch lease</td><td>45 sec</td></tr><tr><td>health check</td><td>20 sec / heartbeat stale 95 sec</td></tr><tr><td>기본 refresh</td><td>5 min, 최소 1 min</td></tr><tr><td>UI Window</td><td>325 × 440</td></tr><tr><td>Daou endpoint</td><td><code>/gw/api/calendar/event</code></td></tr></tbody></table></div><h3>핵심 데이터 모델</h3><pre><code>    {
+<section id="appendix"><h2>20. 핵심 상수와 운영 경로</h2><div class="table-wrap"><table><thead><tr><th>항목</th><th>현재 값</th></tr></thead><tbody><tr><td>Native Host name</td><td><code>com.daou.calendar_overlay</code></td></tr><tr><td>고정 Extension ID</td><td><code>gkchgbpcbljkgabjcgjelacfkphcmhmi</code></td></tr><tr><td>Native bridge pipe</td><td><code>DaouCalendarOverlay.NativeBridge.v7</code></td></tr><tr><td>Single-instance Mutex</td><td><code>Local\DaouCalendarOverlay.Singleton</code></td></tr><tr><td>Activation pipe</td><td><code>DaouCalendarOverlay.Activation</code></td></tr><tr><td>Chrome alarm</td><td><code>daou-calendar-overlay-sync</code> / 0.5 min</td></tr><tr><td>HTTP timeout</td><td>30 sec</td></tr><tr><td>fetch lease</td><td>45 sec</td></tr><tr><td>health check</td><td>20 sec / heartbeat stale 95 sec</td></tr><tr><td>기본 refresh</td><td>5 min, 허용 범위 1~1440 min</td></tr><tr><td>캘린더 ID 형식</td><td>숫자 1~19자리</td></tr><tr><td>Native host → 앱 pipe connect</td><td>2,500 ms</td></tr><tr><td>Chrome → host 입력 상한</td><td>64 MiB</td></tr><tr><td>host → Chrome 출력 상한</td><td>1 MiB</td></tr><tr><td>pipe 프레임 상한</td><td>8 MiB</td></tr><tr><td>Activation pipe connect</td><td>350 ms × 5회</td></tr><tr><td>필터 입력 debounce</td><td>180 ms</td></tr><tr><td>창 위치 저장 debounce</td><td>400 ms</td></tr><tr><td>투명도 저장 debounce</td><td>450 ms</td></tr><tr><td>backoff 실제 상한</td><td>480 s (코드 상수 600 s는 도달 불가)</td></tr><tr><td>연속 실패 카운터 상한</td><td>8</td></tr><tr><td>UI Window</td><td>325 × 440</td></tr><tr><td>Daou endpoint</td><td><code>/gw/api/calendar/event</code></td></tr></tbody></table></div><h3>핵심 데이터 모델</h3><pre><code>    {
         get
         {
             var baseName = !string.IsNullOrWhiteSpace(Name)

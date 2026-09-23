@@ -25,9 +25,10 @@ public sealed class StartupService
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
         }
-        catch
+        catch (Exception ex)
         {
             // 시작프로그램 등록 실패가 앱 실행 자체를 막아서는 안 된다.
+            LogService.Warn("startup.run", "시작프로그램 등록 실패", ex);
         }
     }
 }

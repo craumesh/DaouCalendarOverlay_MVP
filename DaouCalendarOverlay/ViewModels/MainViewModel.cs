@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using MediaBrush = System.Windows.Media.Brush;
@@ -29,23 +30,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private List<string> _configuredCalendarIds = new();
     private string _filterField = "Title";
     private string _filterText = "";
-    private DateTime _displayMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime _displayMonth;
     private string _statusText = "준비 중";
+    private string? _statusToolTip;
     private bool _statusIsError;
     private bool _loginRequired;
+    private readonly Func<DateTime> _today;
+    private DateTime _lastKnownToday;
 
     public ObservableCollection<DayCellViewModel> Days { get; } = new();
     public string MonthTitle => _displayMonth.ToString("yyyy년 M월");
     public DateTime DisplayMonth => _displayMonth;
     public string StatusText { get => _statusText; private set { _statusText = value; OnPropertyChanged(); } }
+    public string? StatusToolTip { get => _statusToolTip; private set { _statusToolTip = value; OnPropertyChanged(); } }
     public bool StatusIsError { get => _statusIsError; private set { _statusIsError = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusForeground)); } }
     public MediaBrush StatusForeground => StatusIsError ? CreateBrush(MediaColor.FromRgb(0xFF, 0x9C, 0x9C)) : CreateBrush(MediaColor.FromRgb(0x9E, 0xA3, 0xAD));
     public bool LoginRequired { get => _loginRequired; private set { _loginRequired = value; OnPropertyChanged(); } }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public MainViewModel()
+    public MainViewModel() : this(() => DateTime.Today)
     {
+    }
+
+    public MainViewModel(Func<DateTime> today)
+    {
+        _today = today ?? throw new ArgumentNullException(nameof(today));
+        _lastKnownToday = _today().Date;
+        _displayMonth = new DateTime(_lastKnownToday.Year, _lastKnownToday.Month, 1);
         BuildCalendar();
     }
 
@@ -67,20 +79,38 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<CalendarDescriptor> GetCalendarDescriptors()
     {
-        var names = _allEvents
-            .Where(e => !string.IsNullOrWhiteSpace(e.CalendarId))
-            .GroupBy(e => e.CalendarId, StringComparer.Ordinal)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Select(e => e.CalendarName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? g.Key,
-                StringComparer.Ordinal);
+        var seen = new List<string>();
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        var ids = _configuredCalendarIds
-            .Concat(names.Keys)
+        foreach (var calendarEvent in _allEvents)
+        {
+            var ids = calendarEvent.CalendarIds;
+            var calendarNames = calendarEvent.CalendarNames;
+
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var id = ids[i];
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+
+                if (!names.ContainsKey(id) && !seen.Contains(id, StringComparer.Ordinal))
+                    seen.Add(id);
+
+                if (names.ContainsKey(id))
+                    continue;
+
+                var name = i < calendarNames.Count ? calendarNames[i] : null;
+                if (!string.IsNullOrWhiteSpace(name))
+                    names[id] = name!;
+            }
+        }
+
+        var allIds = _configuredCalendarIds
+            .Concat(seen)
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        return ids
+        return allIds
             .Select(id => new CalendarDescriptor
             {
                 Id = id,
@@ -93,9 +123,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool IsCalendarVisible(string calendarId) => !_hiddenCalendarIds.Contains(calendarId);
 
+    // 여러 캘린더에 공유된 일정은 소속 캘린더가 모두 숨김일 때만 숨긴다.
+    private bool IsHiddenEvent(DaouCalendarEvent calendarEvent)
+    {
+        var ids = calendarEvent.CalendarIds;
+        if (ids.Count == 0)
+            return false;
+
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (!_hiddenCalendarIds.Contains(ids[i]))
+                return false;
+        }
+
+        return true;
+    }
+
     public void SetEvents(IEnumerable<DaouCalendarEvent> events)
     {
-        _allEvents = events.OrderBy(e => e.StartTime).ToList();
+        _allEvents = EventDeduplicator.Deduplicate(events).OrderBy(e => e.StartTime).ToList();
         ApplyFilter();
     }
 
@@ -130,10 +176,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public void GoToday()
     {
-        _displayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var today = _today().Date;
+        _displayMonth = new DateTime(today.Year, today.Month, 1);
         OnPropertyChanged(nameof(MonthTitle));
         OnPropertyChanged(nameof(DisplayMonth));
         BuildCalendar();
+    }
+
+    /// <summary>시계가 가리키는 날짜가 바뀌었으면 달력을 다시 만들고 true를 반환한다.</summary>
+    public bool RefreshTodayIfChanged()
+    {
+        var today = _today().Date;
+        if (today == _lastKnownToday)
+            return false;
+
+        var previous = _lastKnownToday;
+        _lastKnownToday = today;
+
+        var monthChanged = today.Year != previous.Year || today.Month != previous.Month;
+        var viewingPreviousTodayMonth = _displayMonth.Year == previous.Year && _displayMonth.Month == previous.Month;
+
+        if (monthChanged && viewingPreviousTodayMonth)
+            GoToday();
+        else
+            BuildCalendar();
+
+        return true;
     }
 
     public void SetStatus(string text, bool isError)
@@ -141,6 +209,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         StatusText = text;
         StatusIsError = isError;
     }
+
+    public void SetLastUpdated(DateTimeOffset? updatedAt) =>
+        StatusToolTip = updatedAt is DateTimeOffset value
+            ? "마지막 갱신 " + value.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+            : null;
 
     public void SetLoginRequired(bool required) => LoginRequired = required;
 
@@ -161,6 +234,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void BuildCalendar()
     {
         Days.Clear();
+        var today = _today().Date;
         var gridStart = CalendarGrid.GetGridStart(_displayMonth);
 
         for (var i = 0; i < CalendarGrid.CellCount; i++)
@@ -171,7 +245,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 Date = date,
                 IsCurrentMonth = date.Month == _displayMonth.Month && date.Year == _displayMonth.Year,
-                IsToday = date.Date == DateTime.Today,
+                IsToday = date.Date == today,
                 // 제목 검색은 공휴일 색상을 숨기지 않지만, 캘린더 자체를 끈 경우에는 해당 캘린더의 효과도 숨긴다.
                 IsHoliday = GetVisibleUnfilteredEventsForDate(date).Any(IsHolidayEvent)
             };
@@ -190,7 +264,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void ApplyFilter()
     {
         IEnumerable<DaouCalendarEvent> query = _allEvents
-            .Where(e => !_hiddenCalendarIds.Contains(e.CalendarId));
+            .Where(e => !IsHiddenEvent(e));
 
         if (!string.IsNullOrWhiteSpace(_filterText))
             query = query.Where(MatchesFilter);
@@ -218,7 +292,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private IReadOnlyList<DaouCalendarEvent> GetVisibleUnfilteredEventsForDate(DateTime date) =>
         _allEvents
-            .Where(e => !_hiddenCalendarIds.Contains(e.CalendarId))
+            .Where(e => !IsHiddenEvent(e))
             .Where(e => CalendarGrid.OccursOnDate(e, date.Date))
             .OrderByDescending(e => e.IsAllDay)
             .ThenBy(e => e.StartTime)
@@ -255,7 +329,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var parts = new List<string>
         {
             e.Summary,
-            $"[{e.CalendarName}] {time}"
+            $"[{e.CalendarDisplayName}] {time}"
         };
 
         if (!string.IsNullOrWhiteSpace(e.Location))

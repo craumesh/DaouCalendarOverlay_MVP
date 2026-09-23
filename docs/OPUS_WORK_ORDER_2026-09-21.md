@@ -94,7 +94,7 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 ### P1. 기능·안정성 결함
 
-#### T1.1 파일 로깅 + 전역 예외 처리 — P1
+#### [부분] T1.1 파일 로깅 + 전역 예외 처리 — P1
 - 근거: 전체 소스에 로그 출력 없음. `App.xaml.cs:100-108`(초기화 실패 MessageBox 후 종료), `App.xaml.cs:179-205, 249-295`, `MainWindow.xaml.cs:393-400, 459-477, 624-629, 643-648`의 `async void` 핸들러가 파일/레지스트리 I/O를 try/catch 없이 호출. `CalendarBridgeServer.cs:97-102`, `StartupService.cs:28-31`, `NativeMessagingHost.cs:46-49, 61-62`, `App.xaml.cs:332-335`의 `catch {}`가 원인을 삼킴. 확장도 `service-worker-v700.js:144-148, 164-166`에서 오류를 버림.
 - 검증 상태: 코드 확인.
 - 지시:
@@ -105,60 +105,70 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
   5. 트레이 메뉴에 "로그 폴더 열기" 추가.
   6. 확장: `getConfig`/`postResult` 실패를 `chrome.storage.session`의 `lastError`에 기록하고, 다음 `getConfig` 요청에 `lastError`를 실어 보내 앱이 로그에 남기도록.
 - 완료 기준: 앱 시작·동기화 성공·인증 실패·네트워크 실패·파이프 실패가 로그에 각각 한 줄 이상 남는다. 설정 저장 중 파일을 읽기 전용으로 만들어도 앱이 종료되지 않고 상태 텍스트에 오류가 보인다. 문서 §18에 로그 경로와 대표 로그 라인 추가.
+- 적용 메모(2026-09-22): LogService/LogFormatter/LogRotation 신설 + 순수 로직 단위 테스트; 전역 예외 처리기 + async void 전수 try/catch + catch{} 로그 + 트레이 "로그 폴더 열기"; 확장 7.1.0 개명 + lastError 전달 프로토콜 필드 + README/기술문서 로그 절 갱신 수동 확인 9건 대기
 
-#### T1.2 설정/캐시 저장 직렬화 — P1
+#### [부분] T1.2 설정/캐시 저장 직렬화 — P1
 - 근거: `SettingsService.cs:35-53` temp 경로가 `settings.json.tmp` 고정. `MainWindow.xaml.cs:624-629`(투명도 450ms)와 `643-648`(위치 400ms)의 `async void` 틱이 각각 `App.SaveWindowBoundsAsync`/`SetUiOpacityAsync`를 통해 `SaveAsync`를 호출하므로 await 지점에서 겹치면 `File.Create(temp)` 공유 위반 → 처리되지 않은 예외로 종료. `CacheService.cs:35-43`은 예외 시 temp 미정리이며 `App.xaml.cs:143-147`에서 결과가 관찰되지 않음. `AppSettings.IsConfigured`(`AppSettings.cs:16-19`)가 settings.json에 직렬화됨(실데이터 확인).
 - 검증 상태: 코드 확인(경쟁 조건은 추정이나 구조상 가능), IsConfigured 직렬화는 실데이터 확인.
 - 지시: `SemaphoreSlim(1,1)`로 저장 직렬화, temp 파일명에 Guid 사용, 실패 시 temp 삭제, `IsConfigured`에 `[JsonIgnore]`. 저장 실패는 T1.1 로그 + 상태 텍스트.
 - 완료 기준: 동시 저장 100회 테스트 통과. settings.json에 `IsConfigured` 키가 사라짐(기존 파일의 키는 무시됨을 확인).
+- 적용 메모(2026-09-22): 원자적 JSON 저장기(AtomicJsonFileWriter) 도입 — SettingsService/CacheService 저장 직렬화 + IsConfigured 직렬화 제외; 저장 실패 결과 관찰 및 상태 텍스트 노출 + README·기술문서 §13/§17 갱신 수동 확인 4건 대기
 
-#### T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 — P1 (Q1)
+#### [부분] T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 — P1 (Q1)
 - 근거: `AppSettings.cs:16-19`와 `SettingsWindow.xaml.cs:63-69`는 http/https + 임의 호스트 허용. `CalendarBridgeServer.cs:167-176`(`BuildConfig`)는 https + `daouoffice.com`/서브도메인만 통과, 아니면 `NoFetch()`를 상태 변화 없이 반환 → "Chrome 브리지 연결됨 · 동기화 대기"에서 영원히 멈춤. 확장 `manifest.json:15-17` `host_permissions`는 `https://*.daouoffice.com/*`이라 apex `daouoffice.com`은 포함하지 않지만 BuildConfig는 apex를 허용(불일치).
 - 검증 상태: 코드 확인.
 - 지시(기본안 Q1-a): 검증 규칙을 한 곳(`AppSettings.Validate()` 또는 `Services/BaseUrlPolicy.cs`)으로 모으고 설정창·IsConfigured·BuildConfig가 모두 그것을 쓴다. 규칙: https 필수, 호스트는 `*.daouoffice.com`(apex 제외). 설정창은 위반 시 구체적 문구로 거부. BuildConfig가 NoFetch를 돌려주는 모든 경우에 사유(`NoFetchReason`)를 응답에 포함하고 `SyncStatusService`에 새 상태(`ConfigurationInvalid`)로 표시.
 - 완료 기준: http:// 저장 시도 → 거부 메시지. 기존 settings.json에 http://가 있으면 시작 시 설정창이 열리며 사유 표시. 테스트: 정책 함수 단위 테스트 6케이스 이상.
+- 적용 메모(2026-09-22): BaseUrlPolicy 도입 및 설정창·IsConfigured 검증 통일; BuildConfig NoFetch 사유 응답과 ConfigurationInvalid 상태 노출; T1.3 문서 반영(§10.2·§10.4·§17·§18, README) 수동 확인 6건 대기
 
-#### T1.4 중복 이벤트 처리 — P1 (Q2)
+#### [부분] T1.4 중복 이벤트 처리 — P1 (Q2)
 - 근거: 실데이터 37건 중 5건이 같은 `id`로 두 `calendarId`에 걸쳐 중복. `MainViewModel.SetEvents(:96-100)`/`ApplyFilter(:201-211)`에 id 기준 dedupe 없음 → 날짜 셀 "3개 이상" 규칙이 조기 발동하고 목록 카드에 같은 일정이 두 번.
 - 검증 상태: 실데이터 확인 + 코드 확인.
 - 지시(기본안 Q2-a): 수신 시 `id`로 그룹화해 대표 1건을 만들고 `CalendarIds`(복수)와 `CalendarNames`를 보존. 숨김 판정은 "소속 캘린더가 모두 숨김일 때만 숨김". 색은 첫 캘린더 기준. 상세 카드의 "캘린더" 행에 복수 이름 표시. 캐시 포맷은 원본 그대로 저장(역호환), dedupe는 로드 후 수행.
 - 완료 기준: 위 실데이터로 목록 카드에 중복이 사라짐. 두 캘린더 중 하나만 숨겨도 일정이 남음. 테스트 3케이스.
+- 적용 메모(2026-09-22): DaouCalendarEvent에 소속 캘린더 목록 필드 추가 + Models/EventDeduplicator 신설(+단위 테스트); MainViewModel/상세 카드에 병합 적용(숨김은 전부 숨김일 때만) + 테스트·문서 갱신 수동 확인 3건 대기
 
-#### T1.5 Named Pipe 클라이언트 보호 — P1
+#### [부분] T1.5 Named Pipe 클라이언트 보호 — P1
 - 근거: 서버(`CalendarBridgeServer.cs:83-88`)는 `PipeOptions.CurrentUserOnly`지만, native host 클라이언트(`NativeMessagingHost.cs:35-41`)는 `PipeOptions.Asynchronous`만 사용. 다른 로컬 계정 프로세스가 같은 이름의 파이프를 먼저 만들면 host가 거기에 연결해 `postResult`(세션 쿠키 전량)를 보낸다. 같은 사용자 프로세스의 선점은 Chrome App-Bound Encryption을 우회해 쿠키를 얻는 경로가 된다.
 - 검증 상태: 코드 확인(공격 시나리오는 추정).
 - 지시: 클라이언트에 `PipeOptions.CurrentUserOnly` 추가(다른 계정 차단). 같은 계정 선점에 대해서는 연결 후 `GetNamedPipeServerProcessId`로 서버 PID를 얻어 실행 파일 경로가 자기 자신(`Environment.ProcessPath`)과 같은지 확인하고, 다르면 전송하지 않고 로그. 문서 §15 위협 모델에 "동일 사용자 프로세스는 신뢰 경계 안"임을 명시.
 - 완료 기준: 다른 EXE가 파이프 이름을 선점한 상태에서 host가 쿠키를 보내지 않고 오류 응답. 단위 테스트는 경로 비교 함수만.
+- 적용 메모(2026-09-22): PipePeerVerifier: 파이프 서버 프로세스 신원 확인 순수 로직 + Win32 조회; NativeHostRelay 도입: 클라이언트 CurrentUserOnly + 서버 EXE 검증 후에만 전송; 문서 갱신: §7.2 코드 발췌·§15 위협 모델·§17 파일표·§18 장애 대응 + README + D1 §15 반영 수동 확인 4건 대기
 
-#### T1.6 stale 결과와 캐시 범위 — P1
+#### [부분] T1.6 stale 결과와 캐시 범위 — P1
 - 근거: `ProcessResultAsync(:209-222)`는 HTTP 호출 전에만 requestId를 검사하고 `_activeRequestId`를 지운다. 호출 중 사용자가 월을 이동하면(`UpdateRequest(:53-60)`가 새 범위 설정) 이전 범위 결과가 그대로 `SyncCompleted`로 전달돼 `App.xaml.cs:136-147`에서 UI와 캐시에 반영된다. 캐시(`App.xaml.cs:143-147`)는 마지막 성공 범위를 저장하므로, 다음 달을 보다가 종료하면 다음 기동 시 이번 달이 비어 보인다.
 - 검증 상태: 코드 확인.
 - 지시: HTTP 완료 후 `lock`에서 `fromSnapshot/toSnapshot == _from/_to`를 재확인, 다르면 결과를 버리고 즉시 재발행(`_forceRefresh = true`). 캐시에 `RangeFrom/RangeTo`를 저장하고, 기동 시 오늘이 범위 밖이면 캐시를 표시하되 상태에 "캐시(범위 밖)"로 표기하고 즉시 강제 동기화. 또는 현재 달 범위 결과만 캐시에 쓴다(둘 중 전자 권장).
 - 완료 기준: 월 이동 직후 이전 범위 응답이 UI를 덮지 않음(테스트로 `CalendarBridgeServer` 상태 전이 검증). 다음 달로 이동 후 재시작해도 이번 달 일정이 캐시로 보임.
+- 적용 메모(2026-09-22): HTTP 완료 후 범위 재확인으로 stale 동기화 결과 폐기 + 재발행; 캐시에 조회 범위 저장 + 기동 시 '캐시(범위 밖)' 표기 수동 확인 3건 대기
 
-#### T1.7 종료 지연 제거와 postResult 즉시 응답 — P1
+#### [부분] T1.7 종료 지연 제거와 postResult 즉시 응답 — P1
 - 근거: `client.SendAsync(:264)`에 취소 토큰 없음. `DisposeAsync(:390-398)`가 `_acceptLoop`를 기다리므로 HTTP 진행 중 종료하면 트레이 아이콘이 사라진 뒤 최대 30초 프로세스 잔류(`App.xaml.cs:384-394`). 또 `HandlePipeClientAsync(:106-130)`가 HTTP 완료까지 응답을 미루고 `maxNumberOfServerInstances: 1`이라 그 사이 `getConfig`는 2.5초 timeout(`NativeMessagingHost.cs:41`)으로 실패해 heartbeat가 끊긴다. `_leaseUntil`은 postResult 도착 시 해제(:220-221)되고 `_nextAttemptAt`은 과거라, 처리가 직렬이 아니었다면 중복 fetch가 발생하는 구조.
 - 검증 상태: 코드 확인.
 - 지시: (1) `_cts.Token`을 `SendAsync`에 전달. (2) `postResult`는 requestId 검증 후 즉시 ok 응답, HTTP는 백그라운드 Task로. (3) lease/`_activeRequestId` 해제를 HTTP 완료 시점으로 옮겨 중복 fetch 차단. (4) 파이프 서버 인스턴스를 2~4로 늘리거나 accept 루프를 요청 처리와 분리.
 - 완료 기준: 동기화 중 "종료" 클릭 시 1초 내 프로세스 종료. 30초짜리 가짜 HTTP 응답(테스트 서버)에서 `getConfig`가 실패하지 않음.
+- 적용 메모(2026-09-22): CalendarBridgeServer: postResult 즉시 ok 응답 + HTTP 백그라운드화 + lease 해제 시점 이동 + 취소 토큰 전달; 파이프 accept 루프와 요청 처리 분리(인스턴스 4) + 파이프 동시성 테스트 + 문서 §10.2/§10.3 정정 수동 확인 6건 대기
 
-#### T1.8 자정/월 전환 갱신 — P1
+#### [부분] T1.8 자정/월 전환 갱신 — P1
 - 근거: `MainViewModel.cs:32`의 `_displayMonth`는 생성 시 고정, `IsToday`(:185)는 `BuildCalendar` 시점 계산. `MainWindow.xaml.cs:543-561` 시계 타이머는 텍스트만 갱신. `App._refreshTimer(:297-306)`는 `RefreshAsync(false)`→`UpdateRequest(force:false)`가 범위/설정 불변이면 no-op이라 실질적으로 죽은 타이머(주기 동기화는 `RecordSuccess(:334-341)`의 `_nextAttemptAt`이 결정).
 - 검증 상태: 코드 확인.
 - 지시: 시계 틱에서 날짜 변경 감지 → `BuildCalendar()`; 월이 바뀌었고 사용자가 이번 달을 보고 있었다면 `GoToday()` + `RefreshAsync(true)`. `_refreshTimer`는 제거하거나 이 용도로 재정의하고 문서 §10.1을 "주기는 CalendarBridgeServer가 결정"으로 정정.
 - 완료 기준: 시스템 시각을 자정 넘겨 바꾸면 5초 내 오늘 배지가 이동. 테스트: `MainViewModel`에 `Now` 주입 가능하게 리팩터링 후 날짜 전환 케이스.
+- 적용 메모(2026-09-22): MainViewModel에 시계(Func<DateTime>) 주입 + RefreshTodayIfChanged 추가; 시계 틱에서 자정 전환 처리, App._refreshTimer 제거, §10.1/README 정정 수동 확인 3건 대기
 
-#### T1.9 설정 상한과 입력 검증 — P1
+#### [부분] T1.9 설정 상한과 입력 검증 — P1
 - 근거: `SettingsWindow.xaml.cs:84-88`은 `refreshMinutes < 1`만 검사. `App.xaml.cs:301-303`의 `DispatcherTimer.Interval`은 약 35,791분(Int32.MaxValue ms) 초과 시 예외 → 설정 저장 직후 종료. 캘린더 ID는 공백·쉼표·세미콜론으로 분리(`:71-76`)하나 숫자 형식 검증 없음.
 - 검증 상태: 코드 확인(상한 예외는 .NET 동작 기반 추정, 재현 후 확정).
 - 지시: RefreshMinutes 1~1440 제한, 캘린더 ID는 숫자만 허용(실데이터: 5자리 또는 19자리 정수). 설정창 안내 문구 갱신.
 - 완료 기준: 범위 밖 입력이 거부되고 앱이 종료되지 않음.
+- 적용 메모(2026-09-22): SettingsValidation 순수 정책 클래스 추가 + App의 RefreshMinutes 상한 클램프; 설정창 RefreshMinutes/캘린더 ID 검증 배선 + 안내 문구·문서(§13, §20, README) 갱신 수동 확인 4건 대기
 
-#### T1.10 캐시 시각 노출 — P1
+#### [부분] T1.10 캐시 시각 노출 — P1
 - 근거: `App.xaml.cs:86-98`에서 `SetEvents(..., "캐시 HH:mm")` 직후 `_syncStatus.MarkWaiting()`이 "Chrome 백그라운드 대기"로 덮어씀. `SyncStatusService._lastSuccess`는 캐시 로드 시 설정되지 않아 `EvaluateHealth(:76-98)`의 "마지막 HH:mm"도 안 나옴.
 - 검증 상태: 코드 확인.
 - 지시: `SyncStatusService.MarkCacheLoaded(DateTimeOffset)` 추가, 대기/연결 대기 문구에 "· 캐시 MM-dd HH:mm" 접미. `MainWindow.SetEvents`의 `updatedAt` 파라미터(현재 미사용, `MainWindow.xaml.cs:118-123`)를 활용하거나 제거.
 - 완료 기준: Chrome이 꺼진 상태로 부팅해도 상태에 캐시 시각이 보임.
+- 적용 메모(2026-09-22): SyncStatusService.MarkCacheLoaded 추가 + Decorate에 캐시 시각 접미 합성, App 기동 경로 연결; MainWindow.SetEvents의 updatedAt 활용 — 상태 텍스트 툴팁에 마지막 갱신 시각; 캐시 시각 노출 문서 반영 — 기술문서 §10.4/§18, README 수동 확인 6건 대기
 
 ### P2. 아키텍처·성능·배포 개선
 
