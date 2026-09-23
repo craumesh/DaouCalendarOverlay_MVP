@@ -67,7 +67,11 @@ public partial class App : WpfApplication
 
                 if (!_settings.IsConfigured)
                 {
-                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl));
+                    // 첫 실행 창은 Owner가 없어 XAML의 CenterOwner가 적용되지 않으므로 화면 중앙에 띄운다.
+                    var setup = new SettingsWindow(_settings, firstRun: true, BaseUrlPolicy.GetStartupNotice(_settings.BaseUrl))
+                    {
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen
+                    };
                     if (setup.ShowDialog() != true)
                     {
                         await ExitApplicationAsync();
@@ -278,6 +282,15 @@ public partial class App : WpfApplication
                     _overlayWindow.SetLoginRequired(false);
                     _syncStatus.MarkSuccess(now);
                     LogService.Info("sync", $"동기화 성공 events={e.Events.Count}");
+
+                    // 이번에 확인된 캘린더 이름을 settings.json CalendarNames에 기억한다(실제 변경이 있을 때만 저장).
+                    // ApplySettings를 다시 부르면 창 위치·투명도가 재적용되므로 이름 캐시만 최신화한다.
+                    // 종료(사용자 데이터 삭제 포함)가 시작된 뒤에는 settings.json을 새로 쓰지 않는다.
+                    if (!_isExiting && CalendarNameStore.Merge(_settings.CalendarNames, _overlayWindow.GetCalendarDescriptors()))
+                    {
+                        _overlayWindow.SetKnownCalendarNames(_settings.CalendarNames);
+                        await SaveSettingsAsync();
+                    }
 
                     try
                     {

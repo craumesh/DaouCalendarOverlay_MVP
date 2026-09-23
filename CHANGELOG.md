@@ -18,6 +18,8 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - README와 기술 문서에 지원 환경 매트릭스(Windows 10/11 x64, Chrome 120+, Edge 시험 지원, Whale/Brave/Firefox 미지원, 단일 프로필, KST)
 - README와 기술 문서에 빌드 전제조건·릴리스 절차(`publish.ps1` 파라미터, 산출물, `-Version` 일치 규칙, 코드 서명)
 - .NET 10 이전 시험: `tools/net10-trial.ps1`(TFM을 임시로 `net10.0-windows`로 바꿔 빌드·publish·EXE 크기·테스트·host 모드 왕복을 비교한 뒤 원복)과 측정 기록 `docs/net10-migration.md`. 현재 TFM은 `net8.0-windows` 유지(`TargetFrameworkGuardTests`로 고정), 전환은 별도 릴리스에서 결정
+- 오버레이 UX: 달력 일정 칩 ToolTip(제목·캘린더·시간), 오류 상태 텍스트 ToolTip에 잘린 문구 전문 + 마지막 갱신 시각, 검색창 포커스와 무관하게 달을 옮기는 `Ctrl+PageUp`/`Ctrl+PageDown`/`Ctrl+Home` 단축키
+- 캘린더 표시 이름 기억: settings.json 새 키 `CalendarNames`(캘린더 ID → 마지막으로 확인한 이름, 최대 200개, 없으면 빈 사전)에 동기화로 확인된 이름을 바뀐 경우에만 저장해, 조회 범위에 일정이 없는 캘린더도 컨텍스트 메뉴 "캘린더 표시"에서 ID 대신 이름으로 표시(`CalendarNameStore`)
 
 ### Changed
 - Chrome 확장 7.0.0 → 7.1.0, 서비스 워커 파일명 `service-worker-v710.js`, 확장이 `extensionVersion`을 앱에 전달
@@ -28,12 +30,19 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - 자동 새로고침 주기를 1~1440분으로 제한하고 캘린더 ID 입력을 검증
 - DaouOffice "열기"(오버레이 버튼·트레이 메뉴)가 기본 브라우저 대신 `App Paths\chrome.exe`(HKCU → HKLM)로 Chrome을 직접 실행하고, 찾지 못하거나 실행에 실패하면 기본 브라우저로 연다(`BrowserLauncher`)
 - 빌드·배포 정비: 개발 빌드는 framework-dependent(`DebugType=portable`), self-contained/single-file 설정은 publish 프로파일 `Properties/PublishProfiles/win-x64.pubxml`로 이동, `publish.ps1`이 `DaouCalendarOverlay-<버전>.exe` 산출물명·`publish\symbols\` PDB 분리·`-CertificateThumbprint` 서명 자리·`-DryRun`·csproj 버전과 다른 `-Version` 거부를 지원
+- 키보드 단축키를 `PreviewKeyDown` + `OverlayShortcutPolicy`로 판정: 검색창 포커스 중 PageUp/PageDown/Home은 텍스트 편집에 양보하고, Esc는 검색창에서 검색어만 비우며 창을 숨기지 않음. 첫 실행 설정 창은 화면 중앙에 표시
+- 일정 색 매핑을 `EventColorPalette`(색 인덱스 1~18 → 색 표, 표에 없는 값은 팔레트 나머지 연산, 숫자가 아니면 캘린더 ID 해시)로 분리. 실제 DaouOffice 색표 확보 전까지 기존 8색과 같은 색을 유지
+- Chrome 확장 쿠키 수집이 기본 쿠키 스토어(`"0"`)를 우선하고, 비었을 때만 암시적 스토어 → 쿠키가 있는 첫 스토어 하나를 사용(확장 버전 7.1.0 유지)
+- 투명도 슬라이더 100%가 alpha 상한 230(최대 약 90%)임을 README와 기술 문서에 명시
 
 ### Fixed
 - 여러 캘린더에 공유된 일정을 `id` 기준 1건으로 합치고 소속 캘린더 이름을 모두 표기
 - 자정·월 전환 시 오늘 날짜 갱신 누락
 - `publish.ps1`이 `dotnet` 실패(0이 아닌 종료 코드)에도 "Publish completed"를 출력하고 정상 종료하던 문제
 - 기동 시 Chrome 확장 파일 추출·Native Messaging 등록 실패(GPO·ACL로 HKCU 쓰기 차단 등)가 앱을 종료시키던 문제: 이제 로그(`startup.extension`/`startup.nativehost`)와 상태 문구("Native host 등록 실패: … · 로그 확인")로만 알리고 캐시 표시를 계속하며, 초기화 오류 문구가 원인과 무관하게 settings.json을 지목하던 것을 예외 종류별 사유와 로그 폴더 안내로 바꿈(`StartupFailureReasons`)
+- 필터 초기화 버튼이 콤보 변경 → 초기화 → 검색어 debounce 순으로 달력을 최대 3회 재구성하던 문제(변경 이벤트 억제로 1회)
+- 일정 색 값이 `-2147483648`(`int.MinValue`)이면 `Math.Abs`가 `OverflowException`을 던지던 경로
+- 시크릿 창·다른 프로필이 함께 열려 있을 때 여러 쿠키 스토어의 쿠키를 한 `Cookie` 헤더로 합쳐 인증이 깨질 수 있던 문제
 
 ### Security
 - 네임드 파이프 `CurrentUserOnly` + 서버 프로세스 실행 파일 경로 대조 후에만 쿠키 전달

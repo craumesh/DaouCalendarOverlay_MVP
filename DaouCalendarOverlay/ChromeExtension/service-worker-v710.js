@@ -7,6 +7,7 @@ const BACKOFF_PERIOD_MINUTES = [1, 2, 5];
 const BACKOFF_FAILURE_THRESHOLD = 3;
 const COOKIE_DEBOUNCE_MS = 5000;
 const BACKOFF_KEY = "daouBridgeBackoff";
+const DEFAULT_COOKIE_STORE_ID = "0";
 
 let inFlight = false;
 let cookieDebounceTimer = null;
@@ -43,13 +44,30 @@ async function sendNative(message) {
   return await chrome.runtime.sendNativeMessage(NATIVE_HOST, message);
 }
 
+// 기본 스토어("0") → 암시적 스토어 → 쿠키가 있는 첫 스토어 하나 순으로 찾는다.
+// 시크릿/다중 프로필 쿠키가 한 헤더에 섞이면 인증이 깨지므로 여러 스토어 결과를 합치지 않는다.
 async function readCookiesFromAllStores(calendarUrl) {
-  const result = [];
-  const seenStores = new Set();
+  try {
+    const cookies = await chrome.cookies.getAll({
+      url: calendarUrl,
+      storeId: DEFAULT_COOKIE_STORE_ID
+    });
+    if (Array.isArray(cookies) && cookies.length > 0) return cookies;
+  } catch {
+    // Fall through to the implicit-store query.
+  }
+
+  try {
+    const cookies = await chrome.cookies.getAll({ url: calendarUrl });
+    if (Array.isArray(cookies) && cookies.length > 0) return cookies;
+  } catch {
+    // Fall through to the other cookie stores.
+  }
 
   try {
     const stores = await chrome.cookies.getAllCookieStores();
-    for (const store of stores) {
+    const seenStores = new Set([DEFAULT_COOKIE_STORE_ID]);
+    for (const store of stores || []) {
       if (!store?.id || seenStores.has(store.id)) continue;
       seenStores.add(store.id);
 
@@ -58,24 +76,16 @@ async function readCookiesFromAllStores(calendarUrl) {
           url: calendarUrl,
           storeId: store.id
         });
-        result.push(...cookies);
+        if (Array.isArray(cookies) && cookies.length > 0) return cookies;
       } catch {
         // Continue with remaining stores.
       }
     }
   } catch {
-    // Fall through to the implicit-store query.
+    // The in-memory session cache may still be available.
   }
 
-  if (result.length === 0) {
-    try {
-      result.push(...await chrome.cookies.getAll({ url: calendarUrl }));
-    } catch {
-      // The in-memory session cache may still be available.
-    }
-  }
-
-  return result;
+  return [];
 }
 
 async function saveSessionCookieCache(config, cookieHeader, cookieCount) {

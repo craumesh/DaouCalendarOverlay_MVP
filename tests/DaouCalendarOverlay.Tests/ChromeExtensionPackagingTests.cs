@@ -115,6 +115,16 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Contains("chrome.alarms.create(ALARM_NAME", worker);
     }
 
+    /// <summary>쿠키 수집이 기본 스토어("0")를 먼저 조회하도록 상수가 선언돼 있는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_PrefersDefaultCookieStore()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains("DEFAULT_COOKIE_STORE_ID", worker);
+        Assert.Contains("\"0\"", worker);
+    }
+
     /// <summary>임베드된 manifest.json의 version이 ChromeExtensionInstaller.ExpectedExtensionVersion 상수와 같은지 확인한다.</summary>
     [Fact]
     public void EmbeddedManifest_VersionMatchesExpectedExtensionVersionConstant()

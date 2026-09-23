@@ -17,6 +17,9 @@ public sealed class AppSettings
     public double? Left { get; set; }
     public double? Top { get; set; }
 
+    /// <summary>캘린더 ID → 마지막으로 확인한 표시 이름. 키가 없는 옛 settings.json에서는 빈 사전이다.</summary>
+    public Dictionary<string, string> CalendarNames { get; set; } = new();
+
     [JsonIgnore]
     public bool IsConfigured =>
         BaseUrlPolicy.Validate(BaseUrl).IsValid &&
@@ -34,6 +37,10 @@ public sealed class AppSettings
         RegisterEdge = RegisterEdge,
         UiOpacity = UiOpacity,
         Left = Left,
-        Top = Top
+        Top = Top,
+        // settings.json에 "CalendarNames": null이 들어 있어도 복제(설정 창·저장 스냅샷)가 실패하지 않게 한다.
+        CalendarNames = CalendarNames is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string>(CalendarNames)
     };
 }

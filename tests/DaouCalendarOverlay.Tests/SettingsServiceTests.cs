@@ -175,4 +175,44 @@ public sealed class SettingsServiceTests : IDisposable
         var loaded = await service.LoadAsync();
         Assert.False(loaded.RegisterEdge);
     }
+
+    [Fact]
+    public async Task SaveAsync_LoadAsync_RoundTripsCalendarNames()
+    {
+        var service = new SettingsService(_dir);
+        var settings = new AppSettings
+        {
+            BaseUrl = "https://x.daouoffice.com",
+            CalendarIds = new List<string> { "123", "456" }
+        };
+        settings.CalendarNames["123"] = "팀 캘린더";
+        settings.CalendarNames["456"] = "내 캘린더";
+
+        Assert.True(await service.SaveAsync(settings));
+
+        var text = File.ReadAllText(SettingsPath);
+        Assert.Contains("\"CalendarNames\"", text, StringComparison.Ordinal);
+
+        var loaded = await service.LoadAsync();
+        Assert.Equal(2, loaded.CalendarNames.Count);
+        Assert.Equal("팀 캘린더", loaded.CalendarNames["123"]);
+        Assert.Equal("내 캘린더", loaded.CalendarNames["456"]);
+    }
+
+    /// <summary>CalendarNames 도입 전 settings.json에는 키가 없다. 이때 빈 사전으로 로드되고 다른 값은 그대로다.</summary>
+    [Fact]
+    public async Task LoadAsync_FileWithoutCalendarNames_DefaultsToEmptyDictionary()
+    {
+        File.WriteAllText(
+            SettingsPath,
+            "{\"BaseUrl\":\"https://x.daouoffice.com\",\"CalendarIds\":[\"123\"],\"RefreshMinutes\":7}");
+
+        var loaded = await new SettingsService(_dir).LoadAsync();
+
+        Assert.Equal("https://x.daouoffice.com", loaded.BaseUrl);
+        Assert.Equal(7, loaded.RefreshMinutes);
+        Assert.NotNull(loaded.CalendarNames);
+        Assert.Empty(loaded.CalendarNames);
+        Assert.True(loaded.IsConfigured);
+    }
 }

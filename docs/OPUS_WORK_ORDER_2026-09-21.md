@@ -228,7 +228,7 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 - 완료 기준: 레지스트리 키를 읽기 전용으로 만든 상태에서 앱이 캐시로 기동.
 - 적용 메모(2026-09-23): 기동 실패 사유 분류기(StartupFailureReasons)와 SyncStatusService 비치명 상태 API 추가; App.OnStartup의 확장 추출·native host 등록 실패를 비치명화하고 오류 문구·문서 갱신 수동 확인 4건 대기
 
-#### T2.9 UX 소소한 개선 묶음 — P2
+#### [부분] T2.9 UX 소소한 개선 묶음 — P2
 - 근거·지시(각각 한 커밋):
   1. 그리드 칩 ToolTip: `MainWindow.xaml:501-525` 칩 템플릿에 `ToolTip="{Binding Tooltip}"` 바인딩(`MainViewModel.BuildTooltip(:277-295)`은 계산되지만 미사용).
   2. 필터 포커스 키: `MainWindow.xaml.cs:344-377`의 `KeyDown`은 TextBox가 Home/PageUp/PageDown을 먼저 처리하면 안 옴. `PreviewKeyDown`에서 Ctrl 조합(예: Ctrl+Home)으로 처리하거나 필터 밖 포커스에서만 동작함을 문서화. Esc는 필터에 포커스가 있으면 필터만 비우고 창은 숨기지 않기.
@@ -240,6 +240,7 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
   8. 초기화 버튼 3회 재구성: `FilterReset_Click(:332-342)`에서 `SelectionChanged`→`ClearFilter`→디바운스 틱 순으로 `BuildCalendar` 최대 3회 → 플래그로 1회.
   9. 시크릿/다중 프로필: `readCookiesFromAllStores(:40-73)`가 여러 store 쿠키를 한 헤더에 합침 → 기본 store(`"0"`) 우선, 다른 store는 기본이 비었을 때만.
 - 완료 기준: 각 항목 수동 확인 기록.
+- 적용 메모(2026-09-23): 그리드 칩/상태 툴팁, 키 입력 정리, 첫 실행 창 위치, 초기화 1회 재구성; 이벤트 색상 매핑 분리와 int.MinValue 방어, 투명도 문서화, 확장 쿠키 스토어 우선순위; 캘린더 표시 이름 기억(settings.json CalendarNames) 수동 확인 12건 대기
 
 #### T2.10 죽은 코드 정리 — P2
 - 근거: `MainWindow.xaml.cs:649-661` `HasButtonAncestor` 미사용. `App.xaml:78-103` `MoreButtonStyle` 미사용. `EventChipViewModel.Tooltip`(T2.9-1에서 사용). `MainWindow.SetEvents`의 `updatedAt`(T1.10에서 사용). `BridgeSyncEventArgs.ExtensionFailure`(T2.2에서 사용). `App._refreshTimer`(T1.8에서 재정의). `NativeBridgeProtocol.Utf8(:43)` 미사용. 실행 파일 경로 획득이 두 방식(`Environment.ProcessPath` vs `Process.MainModule`, `App.xaml.cs:324-327`).
