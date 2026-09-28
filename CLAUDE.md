@@ -8,20 +8,30 @@
 
 | 에이전트 | 모델 | 언제 |
 |---|---|---|
-| `Explore` | Opus 5.5 ※ | **모든 탐색.** 파일·심볼 찾기, 구조 파악, 어디서 무엇을 처리하는지, 변경 영향 범위, 관련 테스트. |
+| `Explore` | Sonnet 5 | **모든 탐색.** 파일·심볼 찾기, 구조 파악, 어디서 무엇을 처리하는지, 변경 영향 범위, 관련 테스트. |
 | `architect` | Opus 5.5 | 새 기능의 최초 설계. 기능당 1회. |
 | `lead` | Opus 5.5 | **기능당 1회** 태스크 분해. 예외는 아래 replan 1회뿐. |
-| `implementer` | Opus 5.5 ※ | **모든 구현의 첫 시도.** 난이도와 상관없이 여기부터 시작한다. |
-| `senior-implementer` | Opus 5.5 | **승격 조건 네 가지 중 하나일 때만.** |
-| `verifier` | Opus 5.5 ※ | 구현 후 독립 검증. 구현자의 자가 보고를 믿지 말고 항상 거친다. |
+| `implementer` | Sonnet 5 | **tier=sonnet 태스크의 첫 시도.** 계획이 없는 작은 작업도 여기부터 시작한다. |
+| `senior-implementer` | Opus 5.5 | **승격 조건 네 가지 중 하나일 때만.** lead가 tier=opus로 사전 배정한 태스크(`tier-opus`) 포함. |
+| `verifier` | Opus 5.5 | 구현 후 독립 검증. 구현자의 자가 보고를 믿지 말고 항상 거친다. |
 | `mid-reviewer` | Opus 5.5 | 완료 태스크 3개마다 중간 검토. |
 | `reviewer` | Opus 5.5 | 최종 검토 1회. |
 
-모든 에이전트는 `.claude/agents/*.md`의 `model: claude-opus-5-5`로 고정돼 있다. 별칭(`opus`, `sonnet`)을 쓰지 않는다. Fable은 쓰지 않는다.
+모델은 `.claude/agents/*.md`의 `model:`에 전체 ID로 고정한다(`claude-sonnet-5`, `claude-opus-5-5`). 별칭(`opus`, `sonnet`)을 쓰지 않는다. Fable은 쓰지 않는다. (2026-09-23~28에 전 에이전트를 Opus 5.5로 돌린 시험은 끝났다. 2026-09-28부터 이 표대로 쓴다.)
 
-※ `Explore`, `implementer`, `verifier`는 원래 Sonnet 담당이다. 지금은 **시험적으로** Opus 5.5를 쓴다(2026-09-23 결정). 시험을 끝내면 이 세 파일의 `model:`만 되돌린다.
+## tier와 모델
 
-모델이 모두 같아도 역할 구분은 그대로 유지한다. `implementer`에서 `senior-implementer`로의 승격은 모델이 아니라 역할(근본 원인 진단, 엣지 케이스 열거, 더 긴 턴 상한)을 바꾸는 것이다. lead 계획의 `tier`(`sonnet`/`opus`)와 승격 조건 `tier-opus`는 모델명이 아니라 이 라우팅을 가리키는 라벨이며, `route-guard` 훅과 워크플로가 이 이름을 쓰므로 바꾸지 않는다.
+lead 계획의 `tier`는 **첫 시도 모델**을 가리킨다. `sonnet`이면 `implementer`(Sonnet 5)가, `opus`면 `senior-implementer`(Opus 5.5, 승격 조건 `tier-opus`)가 처음부터 맡는다. `route-guard` 훅과 워크플로가 이 이름을 쓰므로 바꾸지 않는다.
+
+- **사전 배정(중요도):** 중요도가 높은 태스크는 lead가 처음부터 tier=opus로 둔다. 확실한 신호가 있을 때만 해당한다.
+  - blast_radius high
+  - 동시성·트랜잭션·마이그레이션·보안·인증·데이터 삭제·레지스트리·프로세스 진입점
+  - 여러 모듈에 걸친 인터페이스 변경
+  - 검증에서 드러나기 어려운 오류가 치명적인 경우
+  
+  작업 그룹 전체에서 opus:sonnet ≈ 2:3을 목표로 한다. 비율을 맞추려고 신호가 없는 태스크를 올리지는 않는다.
+- **안전망(난이도):** 난이도 예측이 빗나간 태스크는 `failed-2x`/`blocked`로 `senior-implementer`에 이관된다. verifier는 실패를 slip(누락·오타)과 capability(spec 오해·근본 원인 미진단)로 나눠 기록한다. 이관 기준을 1회(capability 실패 시 즉시)로 낮출지는 Sonnet 5 첫 시도 통과율을 보고 사용자가 정한다.
+- 승격은 모델만이 아니라 역할(근본 원인 진단, 엣지 케이스 열거, 더 긴 턴 상한)도 바꾼다.
 
 `general-purpose` 에이전트는 쓰지 않는다. 조사는 `Explore`, 구현은 `implementer`에게 맡긴다.
 
@@ -40,7 +50,7 @@
 
 ## 구현 라우팅
 
-모든 구현은 `implementer`부터 시작하고, 프롬프트 첫 줄에 `[TASK: <태스크ID>]`를 붙인다. lead 계획의 id를 쓰고, 계획 없는 작은 작업이면 짧은 슬러그(예: `fix-login-typo`)를 쓴다.
+tier=sonnet 태스크와 계획 없는 작은 작업은 `implementer`부터 시작하고, 프롬프트 첫 줄에 `[TASK: <태스크ID>]`를 붙인다(tier=opus 태스크는 아래 `tier-opus`로 `senior-implementer`가 처음부터 맡는다). lead 계획의 id를 쓰고, 계획 없는 작은 작업이면 짧은 슬러그(예: `fix-login-typo`)를 쓴다.
 
 `senior-implementer`는 아래 네 조건 중 하나일 때만 부른다. 프롬프트 첫 줄은 `[ESCALATION: <조건> <태스크ID>]`다.
 
@@ -51,7 +61,7 @@
 | `blocked` | `implementer`가 STATUS: BLOCKED 보고 | 같은 태스크의 implementer 호출이 1회 이상 |
 | `mid-review-fix` | `mid-reviewer`의 critical/major 지적 수정 | 이 세션에 mid-reviewer 호출이 있음 |
 
-- "어려워 보인다", "중요하다", "파일이 많다"는 승격 조건이 아니다. 애매하면 `implementer`다. 실패하면 어차피 승격된다.
+- 구현 도중 "어려워 보인다", "중요하다", "파일이 많다"는 승격 조건이 아니다. 중요도 판단은 lead가 계획의 tier로 미리 한다(위 'tier와 모델'). 애매하면 `implementer`다. 실패하면 어차피 승격된다.
 - 승격할 때는 이전 시도의 구현자 보고와 검증 실패 내용 **전문**을 위임 프롬프트에 넣는다.
 - 서버 오류로 인한 중단은 실패 횟수에 넣지 않는다(아래 '실패 처리' 참고).
 

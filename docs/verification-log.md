@@ -191,3 +191,40 @@
 - P2 최종 검토 반영 B: 오버레이를 실행한 채 `DaouCalendarOverlay.exe --uninstall`을 실행하면 안내 창이 뜨고 레지스트리와 사용자 데이터가 그대로이며 종료 코드가 2인지 확인 — 미확인
 - P2 최종 검토 반영 B: 오버레이를 끈 상태에서 `--uninstall`이 예전처럼 확인 창 2단계로 진행하는지 확인 — 미확인
 - P2 최종 검토 반영 B: 트레이 "완전 제거…"가 오버레이 실행 중에도 막히지 않고 예전처럼 동작하는지 확인 — 미확인
+
+## P3
+
+| 날짜 | 작업 | 검증 방법 | 결과 |
+|---|---|---|---|
+| 2026-09-28 | T3.1 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.1a sonnet 1회, T3.1b sonnet 1회, T3.1c sonnet 1회) | PASS. PASS. 대장 39건 전부와 대장 밖 문장 12건을 원천과 대조했고 모두 일치. 발췌 4개도 글자 단위로 같음. 실행 결과: build 경고 0/오류 0(--no-incremental 재빌드 포함), 전체 test 503/503 통과, 필터 실행에서 TechnicalDoc 5개 모두 통과, check-html.js "OK tags balanced, ids=24, h2=1..24, nav links=24"(종료 코드 0), rg v7.0.0 0건 / Cookie Store 0건 / v7.1.0 5건, h2/h3/id 목록은 HEAD와 작업 트리 모두 100줄로 같음, status는 HTML과 새 테스트 파일 2개뿐. 직접 확인한 내용: (a) 발췌 비교는 이스케이프를 풀고 직접 만든 스크립트로 했다. §5는 Program.cs 1-51 전체, §7.1은 NativeBridgeProtocol.cs 1-60(ProtocolVersion 포함), §9.1은 SettingsWindow.xaml.cs 39-61 + 파일 경계 주석 한 줄 + CalendarUrlParser.cs 24-50, §9.3은 CalendarBridgeServer.cs 423-546이다. 모두 메서드·타입 경계에서 시작하고 끝난다. (b) §5-A 13단계는 App.xaml.cs 40-114 순서와 같다. 캐시 로드(93)와 _bridgeServer.Start()(110)는 Show·CreateTrayIcon(90-91) 뒤에 있다. ConfigureHealthTimer 20초(482-491) → MarkWaiting → RefreshAsync(true) 순서도 맞다. (c) §5-B의 제거 스위치 선행 판정(StartupModeParser.cs:9,15-22; Program.cs:12-16), IsNativ 수동 미확인 4건 |
+| 2026-09-28 | T3.2 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.2a sonnet 1회, T3.2b sonnet 1회, T3.2c sonnet 1회) | PASS. T3.2a는 acceptance 1~7을 모두 충족한다(판정 제외인 수동 확인 1건은 빼고). 기존 테스트 회귀가 없고 spec 항목 누락도 없다. 사실 대장 약 95건을 전부 원천 코드와 기록에 대조했고 틀린 항목은 0건이다. 대장에 없는 문장도 25건 이상 표본으로 골라 대조했으며 틀린 것은 없었다. 오류·로그·Describe 문구 등 46개 문자열은 이스케이프를 해제한 문서 텍스트와 코드 리터럴을 스크립트로 비교했고 모두 일치했다. 실행한 명령과 결과: - dotnet build -c Release: 경고 0, 오류 0. 증분 빌드와 --no-incremental 전체 재빌드 모두 같다. - dotnet test -c Release: 508건 통과, 실패 0. - --filter TechnicalDocumentationTests: 10건 통과. TechnicalDoc_HasRequirementsSection과 TechnicalDoc_HasBridgeSchemaSection이 실제로 실행됐다. - check-html.js: "OK tags balanced, ids=26, h2=1..26, nav links=26", 종료 코드 0. - rg -F: id="requirements", id="bridge-schema", href="#requirements", href="#bridge-schema"가 각각 1건 매치된다. - 마지막 h2는 <h2>26.이다. nav에서 새 링크 두 개가 #release 링크 뒤, </nav> 바로 앞에 순서대로 있다. - HEAD의 h2/h3 목록 76개는 현재 목록 87개 안에 같은 순서로 모두 있다(부분 수열). - v7.0.0은 0건이다. - git status에는 기술 문서 HTML과 TechnicalDocumentationTests.c 수동 미확인 3건 |
+| 2026-09-28 | T3.3 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.3a sonnet 1회, T3.3b sonnet 2회, T3.3c sonnet 1회) | PASS. PASS. I checked every item in the implementer's claim ledger (about 110) against the source files, plus 15+ facts from the new text that were not in the ledger. Nothing was wrong. Command results: - `dotnet build -c Release`: 0 warnings, 0 errors. - `dotnet test -c Release`: 514 passed, 0 failed. With the filter `FullyQualifiedName~TechnicalDocumentationTests`, 16 passed, including `TechnicalDoc_HasSettingsSchemaSection` and `TechnicalDoc_HasApiContractSection`. - check-html.js printed `OK tags balanced, ids=32, h2=1..32, nav links=32` and exited 0. - The rg checks all came out as expected: `settings-schema` 1, `api-contract` 1, one h2 each, the two new nav links are last before `</nav>` in order 31 then 32, and `v7.0.0` has no match. Structure against HEAD: - All 30 h2 headings, 81 h3 headings and 30 ids from HEAD are still there in the same order. The only additions are 2 h2, 13  수동 미확인 5건 |
+| 2026-09-28 | T3.4 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.4a sonnet 1회, T3.4b sonnet 1회, T3.4c sonnet 1회) | PASS. PASS. I checked all 61 claims in the ledger against the source files. I also picked about 20 new sentences that are not in the ledger (the §21 intro and table cells, the §22 ‘EXE는 이 폴더만 갱신’ and ‘확장 파일 6개’ sentences, the §23 OS, self-contained and background rows, and the 24.5–24.7 items) and checked each against the code, CHANGELOG, net10-migration.md, verification-log and README. Every one matches. Commands: - dotnet build -c Release, run both normally and with --no-incremental: 0 warnings, 0 errors. - dotnet test -c Release: 518 of 518 passed. - dotnet test with --filter TechnicalDocumentationTests: 20 of 20 passed, and TechnicalDoc_LegacySections_HaveP3Supplements shows as passed. - check-html.js: 'OK tags balanced, ids=35, h2=1..35, nav links=35', exit 0. Acceptance: - 5: <h3>24.5, 24.6 and 24.7 all match. - 6: 'v7.0.0' has no match (exit 1). - 7: all 143 HEAD h2/h3 headings ar 수동 미확인 6건 |
+| 2026-09-28 | T3.5 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.5a sonnet 1회, T3.5b sonnet 2회, T3.5c sonnet 2회) | PASS. T3.5a passes. The implementation meets every acceptance item and the spec's 16-item checklist. The cheap checks ran first and all passed. check-html printed "OK tags balanced, ids=39, h2=1..39, nav links=39" with exit 0. git status shows only the doc HTML and TechnicalDocumentationTests.cs. `v7.0.0` and the two forbidden `<td>` cells are absent. The h2/h3 list (168 entries), the `<section id>` list (38) and the `href="#"` list (39) are identical to HEAD, in the same order. The `<style>` block is unchanged once CRs are ignored, the file has no BOM, CRLF and LF counts are 1857/1857 as before, and the file still ends in `>` with no final newline. Build: `dotnet build -c Release --no-incremental` gave 0 warnings and 0 errors. Tests: `dotnet test -c Release` had 0 failures (526 passed). The TechnicalDocumentationTests filter passed 28 of 28, including TechnicalDoc_SectionReferencesResol 수동 미확인 6건 |
+
+### 수동 확인 대기 (P3)
+
+- T3.1: 브라우저로 HTML을 열어 §4·§5·§7.1·§9.1·§9.3·§9.4의 표·코드 블록·카드 레이아웃이 깨지지 않고 발췌 들여쓰기가 원본처럼 보이는지 확인 — 미확인
+- T3.1: 브라우저로 HTML을 열어 §10.2·§10.4 코드 블록이 끝까지 보이고, §10.4·§18 표가 늘어난 셀 때문에 레이아웃이 깨지지 않는지 확인 — 미확인
+- T3.1: 브라우저로 HTML을 열어 §17 트리의 들여쓰기·연결 문자(├─/└─)가 자연스럽고 §20 표·데이터 모델 코드 블록이 깨지지 않는지 확인 — 미확인
+- T3.1: GitHub(또는 마크다운 미리보기)에서 README의 프로젝트 구조 트리와 최초 실행 번호 목록이 올바르게 렌더링되는지 확인 — 미확인
+- T3.2: 브라우저에서 기술 문서를 열어 nav의 '25. 요구사항·비목표', '26. 브리지 메시지 스키마' 링크가 해당 절로 이동하고, 새 표들이 기존 표와 같은 스타일(table-wrap)로 가로 스크롤·줄바꿈되는지 눈으로 확인 — 미확인
+- T3.2: 브라우저에서 §27의 .seq 블록이 §8과 같은 2열 격자로 보이고, §28 전이표가 가로 스크롤 가능하게 표시되는지 눈으로 확인 — 미확인
+- T3.2: 브라우저에서 nav의 '29. 확장 트리거', '30. 스레딩 모델' 링크가 해당 절로 이동하고 표·callout이 기존 절과 같은 스타일로 보이는지 눈으로 확인 — 미확인
+- T3.3: 브라우저에서 기술 문서를 열어 §31·§32의 표·발췌·callout이 기존 절과 같은 스타일로 렌더링되고 좌측 nav의 두 링크가 해당 절로 이동하는지 확인 — 미확인
+- T3.3: 브라우저에서 §33·§34 표와 pre 블록(레지스트리 명령, 콘솔 명령)이 깨지지 않고 렌더링되는지, nav 두 링크가 이동하는지 확인 — 미확인
+- T3.3: chrome://extensions의 서비스 워커 콘솔 여는 절차와 UI 표기가 현재 Chrome 버전과 맞는지 실제 환경에서 확인(미확인 항목) — 미확인
+- T3.3: 브라우저에서 §35 표·callout·pre(reg delete 명령)가 정상 렌더링되고 nav 링크가 이동하는지 확인 — 미확인
+- T3.3: 수동 삭제 명령(reg delete, 폴더 삭제)을 시험 계정에서 실제로 실행해 흔적이 모두 사라지는지 확인(미확인 항목) — 미확인
+- T3.4: 브라우저에서 문서를 열어 §21~§24에 추가된 h3·표·목록이 기존 절 스타일(table-wrap, callout)대로 렌더링되고, 기존 내용 뒤에 자연스럽게 이어지는지 확인 — 미확인
+- T3.4: §22 '제거 후 남는 것' 목록에 같은 항목이 중복되지 않았는지 눈으로 확인 — 미확인
+- T3.4: 브라우저에서 nav의 '36. 위협 모델', '37. 버전 이력·정책' 링크가 해당 절로 이동하는지 확인 — 미확인
+- T3.4: §36·§37의 표가 기존 table-wrap 스타일로 렌더링되고 긴 셀이 깨지지 않는지 확인 — 미확인
+- T3.4: 브라우저에서 nav의 '38. 백로그', '39. 용어집' 링크가 해당 절로 이동하고 목차 끝이 39로 끝나는지 확인 — 미확인
+- T3.4: 용어집 표가 기존 table-wrap 스타일로 읽기 좋게 렌더링되는지 확인 — 미확인
+- T3.5: 브라우저로 기술 문서 HTML을 열어 이 태스크가 수정한 절(§6, §7, §10, §18, §20, §26~§30 등 보고서의 수정 목록)의 표·코드 블록·.seq 레이아웃이 깨지지 않고 기존 스타일대로 렌더링되는지 확인 — 미확인
+- T3.5: 좌측 nav의 25~39 링크가 각 절로 스크롤되는지 확인 — 미확인
+- T3.5: 브라우저로 기술 문서 HTML을 열어 이 태스크가 수정한 절(§4, §13, §15, §19, §22, §23, §31~§39 중 보고서의 수정 목록)의 표·callout 레이아웃이 기존 스타일대로 렌더링되는지 확인 — 미확인
+- T3.5: 브라우저로 기술 문서를 열어 표지의 '문서 기준일' pill과 footer 문장이 기존 스타일대로 보이는지 확인 — 미확인
+- T3.5: README.md를 마크다운 뷰어로 열어 '개발 메모' 절의 새 문단과 기술 문서 링크가 정상 렌더링되는지 확인 — 미확인
+- T3.5: 작업 지시서를 마크다운 뷰어로 열어 '결과 요약' 절의 표들이 깨지지 않고 렌더링되는지 확인 — 미확인

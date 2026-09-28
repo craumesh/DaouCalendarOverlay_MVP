@@ -38,7 +38,7 @@ Chrome에서 로그인한 다우오피스 세션을 활용하고, Chrome Extensi
 - WPF
 - Chrome Extension
 - Chrome Native Messaging
-- HTTP/CalDAV 기반 일정 연동
+- HTTP(DaouOffice 캘린더 REST API, GET) 기반 일정 조회
 - MVVM 구조
 
 ## 프로젝트 구조
@@ -49,14 +49,18 @@ DaouCalendarOverlay_MVP/
 ├─ README.md
 ├─ CHANGELOG.md
 ├─ .gitignore
+├─ .gitattributes
 ├─ publish.ps1
 ├─ tools/
+├─ docs/
+├─ tests/
 │
 └─ DaouCalendarOverlay/
    ├─ Program.cs
    ├─ App.xaml
    ├─ App.xaml.cs
    ├─ app.manifest
+   ├─ GlobalUsings.cs
    ├─ DaouCalendarOverlay.csproj
    ├─ Properties/PublishProfiles/win-x64.pubxml
    │
@@ -81,6 +85,8 @@ DaouCalendarOverlay_MVP/
 | `publish.ps1` | 릴리스 publish 스크립트(버전 산출물명, PDB 분리, 서명 파라미터) |
 | `DaouCalendarOverlay/Properties/PublishProfiles/win-x64.pubxml` | 릴리스 publish 전용 설정(win-x64 self-contained single-file, portable PDB) |
 | `tools/` | host 스폰 비용 측정 스크립트, .NET 10 비교 측정 스크립트(`net10-trial.ps1`) |
+| `docs/` | 기술 설계 문서(`DaouCalendarOverlay_Technical_Documentation.html`), 검증 기록(`verification-log.md`), .NET 10 이전 시험 기록(`net10-migration.md`), 작업 지시서(`OPUS_WORK_ORDER_2026-09-21.md`) |
+| `tests/` | xUnit 테스트 프로젝트(`tests/DaouCalendarOverlay.Tests`) |
 | `CHANGELOG.md` | 버전별 변경 이력 |
 
 ## 동작 구조
@@ -118,7 +124,7 @@ DaouCalendarOverlay_MVP/
 
 동기화 주기는 앱의 타이머가 아니라 `CalendarBridgeServer`가 결정합니다. Chrome 확장이 30초마다 `getConfig`를 물어보고, 앱이 가져올 때가 됐다고 답한 회차에만 일정을 가져옵니다(성공 후 다음 시도 시각은 설정의 새로고침 주기, 실패 시 backoff로 정해집니다). 확장 알람은 기본 30초 주기이며, 앱이 꺼져 있는 등의 이유로 native host 연결이 연속 3회 실패하면 1분 → 2분 → 5분으로 늘어났다가 연결에 성공하면 30초로 복귀합니다. DaouOffice 페이지에서 일어나는 쿠키 변경은 5초 debounce로 묶여 한 번의 동기화만 일으킵니다.
 
-달력의 '오늘' 표시 기준은 Windows 로컬 날짜입니다. 자정이 지나면 1초 시계 틱에서 오늘 배지가 자동으로 이동하고, 이번 달을 보고 있었다면 새 달로 이동한 뒤 한 번 동기화합니다. (일정이 어느 날짜에 속하는지 판정할 때는 KST +09:00을 사용합니다.)
+달력의 '오늘' 표시 기준은 Windows 로컬 날짜입니다. 자정이 지나면 1초 시계 틱에서 오늘 배지가 이동하고(이전 오늘이 속한 달을 보고 있었고 달이 바뀌었으면 새 달로 이동), 날짜가 바뀔 때마다 한 번 강제 동기화를 요청합니다. (일정이 어느 날짜에 속하는지 판정할 때는 KST +09:00을 사용합니다.)
 
 Chrome이 Native Messaging host로 같은 EXE를 실행할 때는 `Program.Main`이 실행 인자를 보고 WPF 창/리소스를 만들지 않은 채 stdin↔Named Pipe 중계만 수행한 뒤 종료합니다. 이때의 기록은 `host-yyyyMMdd.log`에 남습니다.
 
@@ -212,11 +218,10 @@ publish\symbols\*.pdb                    (크래시 분석용 PDB, 배포하지 
 
 1. Google Chrome을 설치합니다.
 2. Chrome에서 다우오피스에 로그인합니다.
-3. 프로젝트의 Chrome Extension을 설치/등록합니다. Extension 버전이 올라간 빌드로 교체했다면 `chrome://extensions`에서 해당 확장을 **새로고침**해야 새 Service Worker가 적용됩니다.
-4. Native Messaging Host가 정상적으로 등록되었는지 확인합니다.
-5. `DaouCalendarOverlay.exe`를 실행합니다.
-6. 애플리케이션에서 캘린더 동기화 상태를 확인합니다.
-7. (Edge를 쓰는 경우) 설정창의 **"Edge에도 Native Messaging 등록"** 이 켜져 있어야 하며(기본 켜짐), Edge에서도 `edge://extensions`를 열고 개발자 모드를 켠 뒤 같은 unpacked 확장(`%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension`)을 로드해야 합니다. Edge 지원은 시험 지원입니다.
+3. `DaouCalendarOverlay-<버전>.exe`를 실행합니다. 실행하면 먼저 확장 파일이 `%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension`에 추출되고 Native Messaging Host가 등록된 뒤 첫 실행 설정창이 열립니다. DaouOffice 주소와 캘린더 ID를 입력해 저장하면 추출·등록을 한 번 더 수행합니다. 앱은 기동할 때마다 이 두 작업을 다시 수행하며, 실패하면 상태 표시에 `Native host 등록 실패` 또는 `확장 파일 설치 실패`가 들어간 문구가 표시됩니다(아래 "문제 해결" 참고).
+4. Chrome에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램을 로드합니다**로 위 폴더를 선택합니다. 트레이 메뉴의 **"Chrome 확장 폴더 열기"** 로 이 폴더를 바로 열 수 있습니다. Extension 버전이 올라간 빌드로 교체했다면 `chrome://extensions`에서 해당 확장을 **새로고침**해야 새 Service Worker가 적용됩니다.
+5. 애플리케이션 하단 상태 표시에서 동기화 상태를 확인합니다(아래 "동작 확인" 참고).
+6. (Edge를 쓰는 경우) 설정창의 **"Edge에도 Native Messaging 등록"** 이 켜져 있어야 하며(기본 켜짐), Edge에서도 `edge://extensions`를 열고 개발자 모드를 켠 뒤 같은 unpacked 확장(`%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension`)을 로드해야 합니다. Edge 지원은 시험 지원입니다.
 
 DaouOffice 주소는 `https://회사이름.daouoffice.com` 형식만 허용합니다. `http://`, 다른 도메인, `daouoffice.com`(회사 이름 없는 주소)은 설정창에서 거부되며, 기존 설정에 이런 주소가 들어 있으면 앱 시작 시 설정창이 열리고 거부 사유가 표시됩니다.
 
@@ -230,9 +235,10 @@ Chrome Extension ID 및 Native Messaging 설정은 프로젝트의 Extension/Nat
 Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… → 정상 · 동기화 HH:mm
 ```
 
+- 앱이 기동 직후 곧바로 동기화를 요청하므로 첫 단계 `Chrome 백그라운드 대기`는 거의 보이지 않고 바로 `동기화 요청 중…`이 보일 수 있습니다.
 - 이전에 저장된 캐시가 있으면 첫 동기화 전까지 대기 문구 뒤에 `· 캐시 MM-dd HH:mm` 접미가 붙습니다(예: `Chrome 백그라운드 대기 · 캐시 09-21 08:30`). 저장된 조회 범위가 오늘을 포함하지 않으면 `· 캐시(범위 밖) · 캐시 MM-dd HH:mm` 순서로 두 접미가 함께 붙습니다. 동기화가 한 번 성공하면 접미는 사라집니다.
 - 상태 텍스트에 마우스를 올리면 `마지막 갱신 yyyy-MM-dd HH:mm` 툴팁으로 마지막으로 화면에 반영된 데이터 시각을 확인할 수 있습니다.
-- 95초 이상 확장 heartbeat가 없으면 `Chrome 확장 연결 대기`로 바뀝니다.
+- 확장 heartbeat를 한 번도 받지 못했거나 95초 넘게 받지 못하면 health 평가(20초 주기)에서 `Chrome 확장 연결 대기`로 바뀝니다(재로그인 필요·설정 오류 상태에서는 그 문구를 유지합니다). 동기화에 성공한 적이 있으면 `Chrome 확장 연결 대기 · 마지막 HH:mm`처럼 마지막 성공 시각이 붙습니다.
 
 ## 설치 · 업그레이드 · 제거
 
@@ -383,6 +389,8 @@ git push
 3. Native Messaging을 통해 Extension과 WPF 애플리케이션이 통신합니다.
 4. 다우오피스의 기존 브라우저 로그인 세션을 활용하여 별도의 애플리케이션 로그인 절차를 최소화합니다.
 5. 사용자별 로컬 설정은 애플리케이션 데이터 영역에 저장합니다.
+
+설계와 동작 계약의 세부는 기술 문서 [docs/DaouCalendarOverlay_Technical_Documentation.html](docs/DaouCalendarOverlay_Technical_Documentation.html)에 있습니다. 제품 범위는 "요구사항과 비목표" 절, 상태 표시 문구가 바뀌는 조건은 "상태 머신 전이표" 절, 로그 위치와 장애 진단 순서는 "로그·진단 절차" 절, 보안 가정과 남은 위험은 "위협 모델" 절, 아직 하지 않은 작업은 "백로그" 절을 참고하세요.
 
 ### .NET 10 이전 검토
 
