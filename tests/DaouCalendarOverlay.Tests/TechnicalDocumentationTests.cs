@@ -9,7 +9,7 @@ namespace DaouCalendarOverlay.Tests;
 /// <summary>
 /// 기술 문서 HTML의 구조 불변식(h2 번호가 1부터 연속, nav 링크 대상 id 존재·nav 링크 수 = h2 수,
 /// id 중복 없음, 닫는 태그로 끝남)과 D1 정정 결과 문자열(기술 문서·README), 신규 절(§25~)의
-/// id·h2 제목·nav 링크 존재를 고정한다.
+/// id·h2 제목·nav 링크 존재, 기존 §21~§24에 보강한 소절 제목을 고정한다.
 /// 절 개수·테스트 개수 리터럴은 단언하지 않는다(뒤 작업이 절을 추가한다).
 /// <c>v7.0.0</c> 부재는 <see cref="ChangelogTests"/>가 이미 단언한다. 저장소 파일은 읽기만 한다.
 /// </summary>
@@ -388,6 +388,90 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("--uninstall", section, StringComparison.Ordinal);
         Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", section, StringComparison.Ordinal);
         Assert.Contains(@"%TEMP%\.net\DaouCalendarOverlay", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_LegacySections_HaveP3Supplements()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        // §21~§24는 새 절로 만들지 않고 기존 절 안에 소절로 보강한다(각 소절이 자기 절 구간 안에 있어야 한다).
+        var perf = GetSectionHtml(html, "perf");
+        Assert.Contains("<h3>폴링 부하</h3>", perf, StringComparison.Ordinal);
+        Assert.Contains("<h3>그리드 재구성 비용</h3>", perf, StringComparison.Ordinal);
+
+        var lifecycle = GetSectionHtml(html, "lifecycle");
+        Assert.Contains("<h3>6.x에서 7.x로 업그레이드</h3>", lifecycle, StringComparison.Ordinal);
+        Assert.Contains("<h3>다운그레이드</h3>", lifecycle, StringComparison.Ordinal);
+
+        var browserMatrix = GetSectionHtml(html, "browser-matrix");
+        Assert.Contains("<h3>추가 전제 조건</h3>", browserMatrix, StringComparison.Ordinal);
+
+        var release = GetSectionHtml(html, "release");
+        Assert.Contains("<h3>24.5 확장 버전 상향 체크리스트</h3>", release, StringComparison.Ordinal);
+        Assert.Contains("<h3>24.6 태그와 검증 기록</h3>", release, StringComparison.Ordinal);
+        Assert.Contains("<h3>24.7 .NET 8 지원 종료 대비</h3>", release, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasThreatModelAndVersioningSections()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"threat-model\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>36. 위협 모델</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#threat-model\">36. 위협 모델</a>", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"versioning\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>37. 버전 이력과 버저닝 정책</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#versioning\">37. 버전 이력·정책</a>", html, StringComparison.Ordinal);
+        Assert.True(
+            html.IndexOf("id=\"threat-model\"", StringComparison.Ordinal) < html.IndexOf("id=\"versioning\"", StringComparison.Ordinal),
+            "§36(threat-model)이 §37(versioning)보다 앞에 있어야 한다.");
+
+        // 보안 보호 장치의 정본(§36): 파이프 양쪽 CurrentUserOnly와 서버 PID 확인(fail-closed).
+        var threatModel = GetSectionHtml(html, "threat-model");
+        Assert.Contains("CurrentUserOnly", threatModel, StringComparison.Ordinal);
+        Assert.Contains("GetNamedPipeServerProcessId", threatModel, StringComparison.Ordinal);
+
+        // 버저닝 정책(§37): 파이프 이름은 EXE·확장 버전이 아니라 프로토콜 호환 단위로 바뀐다.
+        var versioning = GetSectionHtml(html, "versioning");
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", versioning, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasBacklogAndGlossarySections()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"backlog\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>38. 백로그</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#backlog\">38. 백로그</a>", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"glossary\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>39. 용어집</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#glossary\">39. 용어집</a>", html, StringComparison.Ordinal);
+
+        var versioningIndex = html.IndexOf("id=\"versioning\"", StringComparison.Ordinal);
+        var backlogIndex = html.IndexOf("id=\"backlog\"", StringComparison.Ordinal);
+        var glossaryIndex = html.IndexOf("id=\"glossary\"", StringComparison.Ordinal);
+        Assert.True(versioningIndex < backlogIndex, "§37(versioning)이 §38(backlog)보다 앞에 있어야 한다.");
+        Assert.True(backlogIndex < glossaryIndex, "§38(backlog)이 §39(glossary)보다 앞에 있어야 한다.");
+
+        // 백로그의 정본(§38): 결정으로 보류된 Q3-b·Q6·Q8 항목.
+        var backlog = GetSectionHtml(html, "backlog");
+        Assert.Contains("connectNative", backlog, StringComparison.Ordinal);
+        Assert.Contains("DPAPI", backlog, StringComparison.Ordinal);
+        Assert.Contains("update_url", backlog, StringComparison.Ordinal);
+
+        // 용어집(§39): 브리지 lease 사유 코드와 확장 세션 쿠키 캐시 키.
+        var glossary = GetSectionHtml(html, "glossary");
+        Assert.Contains("lease_active", glossary, StringComparison.Ordinal);
+        Assert.Contains("daouSessionCookieCache", glossary, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
     }
 
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
