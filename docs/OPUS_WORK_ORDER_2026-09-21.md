@@ -252,8 +252,9 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 
 문서 파일은 `docs/DaouCalendarOverlay_Technical_Documentation.html`로 저장소에 복사해 버전 관리한다(현재는 Downloads에만 존재).
 
-#### D1 정확성 정정 목록 — P3
+#### [부분] D1 정확성 정정 목록 — P3
 각 항목을 해당 절에 반영한다. 코드 변경(P1/P2)으로 사실이 바뀌는 항목은 변경 후 상태로 쓴다.
+- 적용 메모(2026-09-28): P3 T3.1~T3.5 반영(브랜치 p3-docs). 렌더링 등 수동 확인은 verification-log "## P3" 대기 목록 참고.
 
 | 절 | 현재 서술 | 정정 |
 |---|---|---|
@@ -273,7 +274,8 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 | 표지/§18 | 버전 | T2.3 후 EXE 버전과 확장 버전 병기 |
 | 코드 발췌 | §9.1, §10.2, §20이 메서드 중간에서 시작 | 메서드 경계로 다시 자르기 |
 
-#### D2 신규 절 — P3
+#### [부분] D2 신규 절 — P3
+- 적용 메모(2026-09-28): P3 T3.1~T3.5 반영(브랜치 p3-docs). 렌더링 등 수동 확인은 verification-log "## P3" 대기 목록 참고.
 1. **시퀀스 다이어그램**(정상 / 쿠키 없음 / 401·리디렉션 / 네트워크 오류 / 오버레이 미실행 5가지): Chrome alarm → getConfig → host 스폰 → pipe → BuildConfig → 쿠키 수집 → postResult → HTTP → SyncCompleted → UI/캐시.
 2. **브리지 메시지 스키마 표**: `getConfig`, `postResult`(requestId, cookieHeader, cookieCount, cookieSource, userAgent, error, T2.2 후 extensionVersion/protocolVersion/lastError), 응답(ok, error, config{shouldFetch, requestId, baseUrl, timeMin, timeMax, includingAttendees, calendarIds, T1.3 후 noFetchReason}).
 3. **상태 머신 전이표**: 상태 × 트리거 × 표시 문구 × isError × health 평가 예외.
@@ -317,3 +319,71 @@ docs/OPUS_WORK_ORDER_2026-09-21.md 를 읽고 그 안의 작업을 수행해줘.
 6. **문서 HTML 편집**: 기존 스타일·구조를 유지하고 절 번호를 바꾸지 않는다(신규 절은 §21 이후 또는 부록). 코드 발췌는 실제 파일에서 다시 복사한다.
 7. **검증 기록**: 수동 확인이 필요한 항목은 `docs/verification-log.md`에 날짜·환경·결과를 남긴다.
 8. **보고**: 완료 후 이 파일 끝에 "결과 요약" 절을 추가한다(완료/부분/보류 목록, 측정치, 남은 결정).
+
+## 결과 요약
+
+- 작성일: 2026-09-28 (P3 완료 시점. 기술 문서 표지의 "문서 기준일"과 같다)
+- 기준: 브랜치 `p3-docs`, 커밋 `0fe3bed` + T3.5 작업 트리
+- 표시 규칙: [완료] = 완료 기준을 모두 만족. [부분] = 코드·문서·자동 테스트는 끝났고 수동 확인이 `docs/verification-log.md`에 '미확인'으로 남아 있음. [보류] = 착수하지 않음(이번 범위에서 해당 작업 없음).
+
+### 1. 작업 상태
+
+| 우선순위 | 작업 | 상태 | 수동 확인 대기 | 비고 |
+|---|---|---|---|---|
+| P0 | T0.1 git 저장소 초기화 | [완료] | 0 | 태그 `v7.0.0-asbuilt`가 `a046a1b`에 부여됨을 확인, 빌드 경고 0 |
+| P0 | T0.2 테스트 프로젝트 골격 | [완료] | 0 | PASS, 83건 통과(CalendarGrid 51, NativeBridgeProtocol 11, CalendarUrlParser 15, MainViewModel 5, 상수 가드 1) |
+| P1 | T1.1 파일 로깅 + 전역 예외 처리 | [부분] | 9 | PASS, 수동 미확인 9건 |
+| P1 | T1.2 설정/캐시 저장 직렬화 | [부분] | 4 | PASS, 수동 미확인 4건 |
+| P1 | T1.3 BaseUrl 검증 규칙 통일과 NoFetch 사유 노출 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P1 | T1.4 중복 이벤트 처리 | [부분] | 3 | PASS, 수동 미확인 3건 |
+| P1 | T1.5 Named Pipe 클라이언트 보호 | [부분] | 4 | PASS, 수동 미확인 4건 |
+| P1 | T1.6 stale 결과와 캐시 범위 | [부분] | 3 | PASS, 수동 미확인 3건 |
+| P1 | T1.7 종료 지연 제거와 postResult 즉시 응답 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P1 | T1.8 자정/월 전환 갱신 | [부분] | 3 | PASS, 수동 미확인 3건 |
+| P1 | T1.9 설정 상한과 입력 검증 | [부분] | 4 | PASS, 수동 미확인 4건 |
+| P1 | T1.10 캐시 시각 노출 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P2 | T2.1 Native host 경량화 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P2 | T2.2 확장 트리거·백오프·버전 협상 | [부분] | 3 | PASS, 수동 미확인 3건 |
+| P2 | T2.3 버전 체계 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P2 | T2.4 제거·업그레이드 경로 | [부분] | 7 | PASS, 수동 미확인 7건 |
+| P2 | T2.5 브라우저 매트릭스와 "열기" 버튼 | [부분] | 8 | PASS, 수동 미확인 8건 |
+| P2 | T2.6 빌드·배포 스크립트 정비 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P2 | T2.7 .NET 10 이전 시험 | [부분] | 4 | PASS, 수동 미확인 4건 |
+| P2 | T2.8 시작 실패 비치명화 | [부분] | 4 | PASS, 수동 미확인 4건 |
+| P2 | T2.9 UX 소소한 개선 묶음 | [부분] | 12 | PASS, 수동 미확인 12건 |
+| P2 | T2.10 죽은 코드 정리 | [부분] | 6 | PASS, 수동 미확인 6건 |
+| P2 | P2 최종 검토 반영 (커밋 `1357062`, `f1da095`) | [부분] | 3 | verification-log에 이 커밋에 대한 verifier 기록은 없음. `### 수동 확인 대기 (P2)`의 "P2 최종 검토 반영 B" 3건만 있음 |
+| P3 | T3.1 D1 정정 — 기존 절과 README | [부분] | 4 | 커밋 `a4cb7e4`. PASS, 수동 미확인 4건 |
+| P3 | T3.2 동작 계약 절(§25~§30) | [부분] | 3 | 커밋 `e07d5df`. PASS, 수동 미확인 3건 |
+| P3 | T3.3 데이터·운영 절(§31~§35) | [부분] | 5 | 커밋 `c0cee45`. PASS, 수동 미확인 5건 |
+| P3 | T3.4 보안·거버넌스 절(§36~§39)과 §21~§24 보강 | [부분] | 6 | 커밋 `0fe3bed`. PASS, 수동 미확인 6건 |
+| P3 | T3.5 교차 정합성·결과 요약 | [부분] | 커밋 단계가 기록 | 이 커밋 |
+
+P1·P2 수동 확인 대기 합계 113건(P1 48, P2 65), 전부 '미확인'.
+
+### 2. 측정치
+
+| 항목 | 값 | 출처 |
+|---|---|---|
+| host 스폰 경과 시간 중앙값(dev Release 빌드, 워밍업 제외 20회) | before 125.9 ms → after 54.4 ms(71.5 ms, 약 57% 감소). CPU 시간 중앙값 125.0 ms → 62.5 ms | 기술 문서 §21 표, `docs/verification-log.md` P2 T2.1 행 |
+| publish EXE 참고값 | 첫 실행(워밍업) 681.6 ms, 이후 20회 경과 중앙값 94.2 ms. 판정 기준 스폰당 300 ms 이하 → Q3-b(connectNative)는 백로그 | 기술 문서 §21 callout |
+| 자동 테스트 수 추이 | P0 종료 83건 → P1 T1.10 검증 289건 → P2 착수 기준선 292건 → P2 T2.10 검증 465건 → P2 최종 검토 반영 후 약 498건(verification-log 미기록) → P3 완료 시점 538건 | `docs/verification-log.md` 각 행(83/289/292/465), 2026-09-28 `dotnet test DaouCalendarOverlay.sln -c Release` 실측(538) |
+| .NET 10 시험 | publish EXE 72,087,080 bytes(68.75 MB) → 75,884,439 bytes(72.37 MB), +3.62 MB(약 +5.3%); publish 시간 6,391 ms → 6,750 ms; Release 증분 빌드 1,156 ms → 1,364 ms; 테스트 391/391 통과(양쪽, TFM 가드 제외); host 모드 왕복 중앙값 292 ms → 304 ms(파이프 타임아웃 미포함, 다른 사본이 서버 신원 확인에서 거부된 경로). 결론: 기술 장벽 없음, net10에서 창 표시·Native Messaging 등록·Chrome 동기화는 미확인(net10-migration.md 4~5절) | `docs/net10-migration.md` 3절 |
+
+host 모드 왕복(net10 시험)과 host 스폰 비용(§21)은 측정 스크립트와 조건이 달라 직접 비교하지 않는다.
+
+### 3. P3 문서 산출물
+
+- 기술 문서 신규 절(§25~§39): `25. 요구사항과 비목표`, `26. 브리지 메시지 스키마`, `27. 동기화 시퀀스`, `28. 상태 머신 전이표`, `29. 확장 서비스 워커 트리거`, `30. 스레딩 모델`, `31. settings.json 스키마와 검증`, `32. Daou API 응답 계약`, `33. 로그·진단 절차`, `34. 테스트 체크리스트와 검증 기록`, `35. 데이터 보존·삭제 규칙`, `36. 위협 모델`, `37. 버전 이력과 버저닝 정책`, `38. 백로그`, `39. 용어집`.
+- §21~§24 보강(T3.4가 추가한 h3, T3.3 커밋 대비 diff로 확인): §21(성능 특성)에 `폴링 부하`, `그리드 재구성 비용`; §22(설치·업그레이드·제거)에 `6.x에서 7.x로 업그레이드`, `다운그레이드`; §23(지원 환경 매트릭스)에 `추가 전제 조건`; §24(빌드·릴리스)에 `24.5 확장 버전 상향 체크리스트`, `24.6 태그와 검증 기록`, `24.7 .NET 8 지원 종료 대비`.
+- D1 정정은 기술 문서 HTML과 README에 반영했다.
+- D1 표의 "정정" 칸 중 현재 코드와 달라 **현재 코드 기준으로** 적은 것 4가지: (1) §9.4 "id는 occurrence·캘린더 간 중복" → occurrence id는 `{원본 id}_{13자리 숫자}` 형식으로 서로 다르고, id 중복은 캘린더 간에만 있다. 13자리 숫자를 epoch 밀리초로 해석하면 RRULE의 월·일을 양력으로 본 날짜이며 실제 시작일과 다를 수 있다(의미는 추정, 기술 문서 §9.4·§32), (2) §10.1 "확장 트리거 6종" → 리스너 5개(`runtime.onInstalled`, `runtime.onStartup`, `cookies.onChanged`, `alarms.onAlarm`, `action.onClicked`) + 최상위 `void ensureAlarm();`(`service-worker-v710.js`), (3) §10.4 "ExtensionError는 T2.2 전까지 도달 불가" → T2.2 이후 getConfig 버전 불일치로 도달한다(`SyncStatusService.MarkExtensionVersionMismatch`), (4) D2 #2가 `extensionVersion`/`protocolVersion`/`lastError`를 postResult 필드로 적었으나 실제로는 `getConfig` 최상위 필드다(`service-worker-v710.js`의 `syncOnce` 안 `sendNative({ type: "getConfig", lastError, extensionVersion: chrome.runtime.getManifest().version, protocolVersion: 1 })`, `Services/NativeBridgeProtocol.cs`).
+- 문서 구조 테스트: `tests/DaouCalendarOverlay.Tests/TechnicalDocumentationTests.cs`(h2 연속, nav↔id, 신규 절 존재, 절 참조 해석, 정본 참조, 문서 기준일, README 절 이름, 결과 요약 절).
+
+### 4. 남은 결정
+
+1. 수동 확인 수행: P1·P2 113건(P1 48, P2 65)과 P3 기록분(T3.1~T3.4 18건, T3.5는 커밋 단계가 추가)을 실제 환경에서 수행하고 `docs/verification-log.md`를 갱신할지, 어떤 순서로 할지.
+2. .NET 10 전환 시점: .NET 8 지원 종료 2026-11-10(`docs/net10-migration.md` 1절). 권고는 기한 전 별도 릴리스(Q5-b, `docs/net10-migration.md` 5절). 전환 전 추가 확인 3건(`docs/net10-migration.md` 5절)과 전환 체크리스트 (a)~(i)(6절, 전부 미체크).
+3. 백로그 채택 여부(기술 문서 "38. 백로그" 절): `Q3-b connectNative 장수명 포트`, `Q6 캐시 암호화(DPAPI)`, `Q8 CRX 패키징 + update_url`, `일정 알림`, `데스크톱 고정(bottom-most) 모드`.
+4. 코드 서명 인증서 확보(기술 문서 §24.4, `publish.ps1`의 `-CertificateThumbprint` 자리만 있음).
+5. `CHANGELOG.md` 정리: `> P2(배포·운영 정비) 작업이 진행 중입니다.`로 시작하는 낡은 줄이 실제로 있다 — P3에서는 헤딩 형식 고정 테스트 때문에 CHANGELOG를 수정하지 않았다. 낡은 안내 문구 정리와 7.1.0 릴리스 확정(태그 포함) 여부 결정 필요. `git tag -l` 결과는 `v7.0.0-asbuilt`뿐이고 `v7.1.0` 태그는 아직 없다.

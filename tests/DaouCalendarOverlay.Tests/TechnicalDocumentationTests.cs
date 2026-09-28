@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DaouCalendarOverlay.Models;
+using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.Tests;
 
@@ -19,6 +20,8 @@ public sealed class TechnicalDocumentationTests
         RepoLayout.Path("docs", "DaouCalendarOverlay_Technical_Documentation.html");
 
     private static readonly string ReadmePath = RepoLayout.Path("README.md");
+
+    private static readonly string WorkOrderPath = RepoLayout.Path("docs", "OPUS_WORK_ORDER_2026-09-21.md");
 
     private static readonly Regex H2NumberPattern = new(@"<h2>(\d+)\.", RegexOptions.CultureInvariant);
     private static readonly Regex NavBlockPattern = new(@"<nav>(.*?)</nav>", RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -472,6 +475,140 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("daouSessionCookieCache", glossary, StringComparison.Ordinal);
 
         Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_SectionReferencesResolveToExistingHeadings()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        // 코드 발췌와 스타일 블록 안의 문자는 절 참조가 아니므로 빼고 본다.
+        var prose = Regex.Replace(html, "<style>[\\s\\S]*?</style>", "");
+        prose = Regex.Replace(prose, "<pre>[\\s\\S]*?</pre>", "");
+
+        var h2Numbers = new HashSet<int>(
+            Regex.Matches(html, @"<h2>(\d+)\.")
+                .Select(match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)));
+        var h3Numbers = new HashSet<string>(
+            Regex.Matches(html, @"<h3[^>]*>(\d+\.\d+)[ <·]").Select(match => match.Groups[1].Value),
+            StringComparer.Ordinal);
+
+        var unresolved = new List<string>();
+        foreach (Match reference in Regex.Matches(prose, @"§(\d+)(?:\.(\d+))?"))
+        {
+            var section = int.Parse(reference.Groups[1].Value, CultureInfo.InvariantCulture);
+            if (!h2Numbers.Contains(section))
+            {
+                unresolved.Add(reference.Value);
+                continue;
+            }
+
+            if (reference.Groups[2].Success &&
+                !h3Numbers.Contains($"{reference.Groups[1].Value}.{reference.Groups[2].Value}"))
+                unresolved.Add(reference.Value);
+        }
+
+        Assert.True(unresolved.Count == 0, "해석되지 않는 절 참조: " + string.Join(", ", unresolved.Distinct()));
+    }
+
+    [Theory]
+    [InlineData("sync", "(§28)")]
+    [InlineData("sync", "(§26)")]
+    [InlineData("sync", "(§29)")]
+    [InlineData("native", "(§26)")]
+    [InlineData("chrome", "(§29)")]
+    public void TechnicalDoc_BehaviorSummariesReferenceCanonicalSections(string sectionId, string reference)
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        // 동작 계약의 정본(§26 브리지 스키마, §28 상태 전이, §29 확장 트리거)을 요약하는 기존 절은 정본 절을 가리킨다.
+        var match = Regex.Match(html, $"<section id=\"{sectionId}\"[^>]*>([\\s\\S]*?)</section>");
+        Assert.True(match.Success, $"기술 문서에서 <section id=\"{sectionId}\">를 찾지 못했다.");
+        Assert.Contains(reference, match.Groups[1].Value, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("storage", "(§31)")]
+    [InlineData("storage", "(§35)")]
+    [InlineData("lifecycle", "(§35)")]
+    [InlineData("security", "(§36)")]
+    [InlineData("limitations", "(§38)")]
+    public void TechnicalDoc_DataSecuritySummariesReferenceCanonicalSections(string sectionId, string reference)
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        // 데이터·보안·운영 계약의 정본(§31 settings.json 스키마, §35 데이터 보존·삭제, §36 위협 모델, §38 백로그)을
+        // 요약하는 기존 절은 정본 절을 가리킨다.
+        var match = Regex.Match(html, $"<section id=\"{sectionId}\"[^>]*>([\\s\\S]*?)</section>");
+        Assert.True(match.Success, $"기술 문서에서 <section id=\"{sectionId}\">를 찾지 못했다.");
+        Assert.Contains(reference, match.Groups[1].Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_CoverPillAndFooterShareDocumentDate()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var pill = Regex.Match(html, "<span class=\"pill\">문서 기준일 (\\d{4}-\\d{2}-\\d{2})</span>");
+        Assert.True(pill.Success, "표지 meta의 '문서 기준일' pill을 찾지 못했다.");
+
+        var footer = Regex.Match(html, "<div class=\"footer\">([^<]*)</div>");
+        Assert.True(footer.Success, "footer를 찾지 못했다.");
+
+        var footerDate = Regex.Match(footer.Groups[1].Value, "문서 기준일 (\\d{4}-\\d{2}-\\d{2})");
+        Assert.True(footerDate.Success, "footer에서 '문서 기준일'을 찾지 못했다.");
+
+        Assert.Equal(pill.Groups[1].Value, footerDate.Groups[1].Value);
+        Assert.True(
+            DateTime.TryParseExact(
+                pill.Groups[1].Value,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _),
+            $"문서 기준일 '{pill.Groups[1].Value}'가 yyyy-MM-dd 형식이 아니다.");
+
+        Assert.Contains($"v{AppVersion.Display}", footer.Groups[1].Value, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("요구사항과 비목표")]
+    [InlineData("상태 머신 전이표")]
+    [InlineData("로그·진단 절차")]
+    [InlineData("위협 모델")]
+    [InlineData("백로그")]
+    public void Readme_ReferencesTechnicalDocSectionsByTitle(string title)
+    {
+        var readme = File.ReadAllText(ReadmePath);
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains($"\"{title}\" 절", readme, StringComparison.Ordinal);
+        Assert.Contains("docs/DaouCalendarOverlay_Technical_Documentation.html", readme, StringComparison.Ordinal);
+        Assert.Contains($". {title}</h2>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkOrder_EndsWithResultSummarySection()
+    {
+        var lines = File.ReadAllText(WorkOrderPath)
+            .Split('\n')
+            .Select(line => line.TrimEnd('\r'))
+            .ToList();
+
+        var instructionsIndex = lines.FindIndex(line => line == "## 6. Opus 실행 지침");
+        var summaryIndex = lines.FindIndex(line => line == "## 결과 요약");
+
+        Assert.True(instructionsIndex >= 0, "'## 6. Opus 실행 지침' 줄을 찾지 못했다.");
+        Assert.True(summaryIndex >= 0, "'## 결과 요약' 줄을 찾지 못했다.");
+        Assert.True(instructionsIndex < summaryIndex, "'결과 요약'이 '6. Opus 실행 지침' 앞에 있다.");
+
+        var lastHeadingLine = lines.LastOrDefault(line => line.StartsWith("## ", StringComparison.Ordinal));
+        Assert.Equal("## 결과 요약", lastHeadingLine);
+
+        var afterSummary = lines.Skip(summaryIndex + 1).ToList();
+        Assert.Contains("### 1. 작업 상태", afterSummary);
+        Assert.Contains("### 2. 측정치", afterSummary);
+        Assert.Contains("### 4. 남은 결정", afterSummary);
     }
 
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
