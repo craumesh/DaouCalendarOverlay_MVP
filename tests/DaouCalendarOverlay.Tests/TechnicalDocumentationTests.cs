@@ -5,7 +5,8 @@ namespace DaouCalendarOverlay.Tests;
 
 /// <summary>
 /// 기술 문서 HTML의 구조 불변식(h2 번호가 1부터 연속, nav 링크 대상 id 존재·nav 링크 수 = h2 수,
-/// id 중복 없음, 닫는 태그로 끝남)과 D1 정정 결과 문자열(기술 문서·README)을 고정한다.
+/// id 중복 없음, 닫는 태그로 끝남)과 D1 정정 결과 문자열(기술 문서·README), 신규 절(§25~)의
+/// id·h2 제목·nav 링크 존재를 고정한다.
 /// 절 개수·테스트 개수 리터럴은 단언하지 않는다(뒤 작업이 절을 추가한다).
 /// <c>v7.0.0</c> 부재는 <see cref="ChangelogTests"/>가 이미 단언한다. 저장소 파일은 읽기만 한다.
 /// </summary>
@@ -202,6 +203,114 @@ public sealed class TechnicalDocumentationTests
         Assert.True(exeIndex >= 0, "'## 최초 실행' 절에 .exe가 없다.");
         Assert.True(extensionsIndex >= 0, "'## 최초 실행' 절에 chrome://extensions가 없다.");
         Assert.True(exeIndex < extensionsIndex, "'## 최초 실행' 절에서 EXE 실행이 chrome://extensions보다 먼저 나와야 한다.");
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasRequirementsSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"requirements\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>25. 요구사항과 비목표</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#requirements\">25. 요구사항·비목표</a>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasBridgeSchemaSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"bridge-schema\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>26. 브리지 메시지 스키마</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#bridge-schema\">26. 브리지 메시지 스키마</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "bridge-schema");
+        Assert.Contains("protocolVersion", section, StringComparison.Ordinal);
+        Assert.Contains("extensionVersion", section, StringComparison.Ordinal);
+        Assert.Contains("lastError", section, StringComparison.Ordinal);
+        Assert.Contains("cookieSource", section, StringComparison.Ordinal);
+        Assert.Contains("noFetchReason", section, StringComparison.Ordinal);
+        Assert.Contains("lease_active", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasSequenceSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"sequence\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>27. 동기화 시퀀스</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#sequence\">27. 동기화 시퀀스</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "sequence");
+        Assert.Contains("postResult", section, StringComparison.Ordinal);
+        Assert.Contains("recordHostFailure", section, StringComparison.Ordinal);
+        Assert.Contains("DiscardIfRangeChanged", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasStateMachineSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"state-machine\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>28. 상태 머신 전이표</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#state-machine\">28. 상태 전이표</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "state-machine");
+        Assert.Contains("Chrome 브리지 연결됨 · 동기화 대기", section, StringComparison.Ordinal);
+        Assert.Contains("Chrome 확장 연결 대기", section, StringComparison.Ordinal);
+        Assert.Contains("Chrome 확장 새로고침 필요 (", section, StringComparison.Ordinal);
+        Assert.Contains("7.0.0 이하", section, StringComparison.Ordinal);
+        Assert.Contains("EvaluateHealth", section, StringComparison.Ordinal);
+        Assert.Contains("ConfigurationInvalid", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasExtensionTriggersSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"extension-triggers\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>29. 확장 서비스 워커 트리거</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#extension-triggers\">29. 확장 트리거</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "extension-triggers");
+        Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
+        Assert.Contains("daouBridgeBackoff", section, StringComparison.Ordinal);
+        Assert.Contains("cookies.onChanged", section, StringComparison.Ordinal);
+        Assert.Contains("ensureAlarm", section, StringComparison.Ordinal);
+        Assert.Contains("inFlight", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasThreadingSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"threading\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>30. 스레딩 모델</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#threading\">30. 스레딩 모델</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "threading");
+        Assert.Contains("Dispatcher.InvokeAsync", section, StringComparison.Ordinal);
+        Assert.Contains("_healthTimer", section, StringComparison.Ordinal);
+        Assert.Contains("DisposeAsync", section, StringComparison.Ordinal);
+        Assert.Contains("AtomicJsonFileWriter", section, StringComparison.Ordinal);
+    }
+
+    /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
+    private static string GetSectionHtml(string html, string id)
+    {
+        var marker = $"<section id=\"{id}\">";
+        var start = html.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"기술 문서에서 {marker}를 찾지 못했다.");
+
+        const string closing = "</section>";
+        var end = html.IndexOf(closing, start, StringComparison.Ordinal);
+        Assert.True(end > start, $"기술 문서에서 {marker}의 닫는 {closing}을 찾지 못했다.");
+
+        return html.Substring(start, end + closing.Length - start);
     }
 
     private static List<int> H2Numbers(string html) =>

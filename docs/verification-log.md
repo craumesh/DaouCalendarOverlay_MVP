@@ -197,6 +197,7 @@
 | 날짜 | 작업 | 검증 방법 | 결과 |
 |---|---|---|---|
 | 2026-09-28 | T3.1 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.1a sonnet 1회, T3.1b sonnet 1회, T3.1c sonnet 1회) | PASS. PASS. 대장 39건 전부와 대장 밖 문장 12건을 원천과 대조했고 모두 일치. 발췌 4개도 글자 단위로 같음. 실행 결과: build 경고 0/오류 0(--no-incremental 재빌드 포함), 전체 test 503/503 통과, 필터 실행에서 TechnicalDoc 5개 모두 통과, check-html.js "OK tags balanced, ids=24, h2=1..24, nav links=24"(종료 코드 0), rg v7.0.0 0건 / Cookie Store 0건 / v7.1.0 5건, h2/h3/id 목록은 HEAD와 작업 트리 모두 100줄로 같음, status는 HTML과 새 테스트 파일 2개뿐. 직접 확인한 내용: (a) 발췌 비교는 이스케이프를 풀고 직접 만든 스크립트로 했다. §5는 Program.cs 1-51 전체, §7.1은 NativeBridgeProtocol.cs 1-60(ProtocolVersion 포함), §9.1은 SettingsWindow.xaml.cs 39-61 + 파일 경계 주석 한 줄 + CalendarUrlParser.cs 24-50, §9.3은 CalendarBridgeServer.cs 423-546이다. 모두 메서드·타입 경계에서 시작하고 끝난다. (b) §5-A 13단계는 App.xaml.cs 40-114 순서와 같다. 캐시 로드(93)와 _bridgeServer.Start()(110)는 Show·CreateTrayIcon(90-91) 뒤에 있다. ConfigureHealthTimer 20초(482-491) → MarkWaiting → RefreshAsync(true) 순서도 맞다. (c) §5-B의 제거 스위치 선행 판정(StartupModeParser.cs:9,15-22; Program.cs:12-16), IsNativ 수동 미확인 4건 |
+| 2026-09-28 | T3.2 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.2a sonnet 1회, T3.2b sonnet 1회, T3.2c sonnet 1회) | PASS. T3.2a는 acceptance 1~7을 모두 충족한다(판정 제외인 수동 확인 1건은 빼고). 기존 테스트 회귀가 없고 spec 항목 누락도 없다. 사실 대장 약 95건을 전부 원천 코드와 기록에 대조했고 틀린 항목은 0건이다. 대장에 없는 문장도 25건 이상 표본으로 골라 대조했으며 틀린 것은 없었다. 오류·로그·Describe 문구 등 46개 문자열은 이스케이프를 해제한 문서 텍스트와 코드 리터럴을 스크립트로 비교했고 모두 일치했다. 실행한 명령과 결과: - dotnet build -c Release: 경고 0, 오류 0. 증분 빌드와 --no-incremental 전체 재빌드 모두 같다. - dotnet test -c Release: 508건 통과, 실패 0. - --filter TechnicalDocumentationTests: 10건 통과. TechnicalDoc_HasRequirementsSection과 TechnicalDoc_HasBridgeSchemaSection이 실제로 실행됐다. - check-html.js: "OK tags balanced, ids=26, h2=1..26, nav links=26", 종료 코드 0. - rg -F: id="requirements", id="bridge-schema", href="#requirements", href="#bridge-schema"가 각각 1건 매치된다. - 마지막 h2는 <h2>26.이다. nav에서 새 링크 두 개가 #release 링크 뒤, </nav> 바로 앞에 순서대로 있다. - HEAD의 h2/h3 목록 76개는 현재 목록 87개 안에 같은 순서로 모두 있다(부분 수열). - v7.0.0은 0건이다. - git status에는 기술 문서 HTML과 TechnicalDocumentationTests.c 수동 미확인 3건 |
 
 ### 수동 확인 대기 (P3)
 
@@ -204,3 +205,6 @@
 - T3.1: 브라우저로 HTML을 열어 §10.2·§10.4 코드 블록이 끝까지 보이고, §10.4·§18 표가 늘어난 셀 때문에 레이아웃이 깨지지 않는지 확인 — 미확인
 - T3.1: 브라우저로 HTML을 열어 §17 트리의 들여쓰기·연결 문자(├─/└─)가 자연스럽고 §20 표·데이터 모델 코드 블록이 깨지지 않는지 확인 — 미확인
 - T3.1: GitHub(또는 마크다운 미리보기)에서 README의 프로젝트 구조 트리와 최초 실행 번호 목록이 올바르게 렌더링되는지 확인 — 미확인
+- T3.2: 브라우저에서 기술 문서를 열어 nav의 '25. 요구사항·비목표', '26. 브리지 메시지 스키마' 링크가 해당 절로 이동하고, 새 표들이 기존 표와 같은 스타일(table-wrap)로 가로 스크롤·줄바꿈되는지 눈으로 확인 — 미확인
+- T3.2: 브라우저에서 §27의 .seq 블록이 §8과 같은 2열 격자로 보이고, §28 전이표가 가로 스크롤 가능하게 표시되는지 눈으로 확인 — 미확인
+- T3.2: 브라우저에서 nav의 '29. 확장 트리거', '30. 스레딩 모델' 링크가 해당 절로 이동하고 표·callout이 기존 절과 같은 스타일로 보이는지 눈으로 확인 — 미확인
