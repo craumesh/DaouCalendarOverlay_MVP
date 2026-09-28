@@ -2,7 +2,8 @@
 //
 // Explore → Design → Plan(1회) → Implement(implementer, 승격 조건일 때만 senior-implementer) + Verify
 //   → Mid-review(주기적) → Final review
-// 모든 에이전트는 claude-opus-5-5로 고정돼 있다(CLAUDE.md 참고). tier 라벨은 모델이 아니라 라우팅을 뜻한다.
+// 모델은 에이전트 정의에 고정돼 있다(CLAUDE.md 참고): Explore·implementer는 Sonnet 5, 나머지는 Opus 5.5.
+// tier 라벨은 첫 시도 모델을 가리킨다: sonnet → implementer(Sonnet 5), opus → senior-implementer(Opus 5.5).
 //
 // 탐색은 Explore가 한 번만 하고, 그 결과를 architect·lead·구현자에게 넘겨 같은 파일을 다시 뒤지지 않게 한다.
 // lead·implementer·senior-implementer 프롬프트 첫 줄에는 CLAUDE.md와 같은 라우팅 태그를 붙인다
@@ -37,7 +38,7 @@
 
 export const meta = {
   name: 'feature',
-  description: '탐색 → 설계 → 태스크 분해(1회) → 구현(승격 조건일 때만 senior) → 검증 → 중간 검토 → 최종 검토 (전부 Opus 5.5)',
+  description: '탐색(Sonnet 5) → 설계 → 태스크 분해(1회) → 구현(tier=sonnet은 Sonnet 5, tier=opus·승격은 Opus 5.5) → 검증 → 중간 검토 → 최종 검토',
   phases: [
     { title: 'Design' },
     { title: 'Plan' },
@@ -211,7 +212,7 @@ async function run() {
   phase('Plan')
   state.stage = 'plan'
   const plan = await step(
-    `[LEAD: plan ${FEATURE_SLUG}]\n아래 설계 문서를 구현 태스크로 분해하라. depends_on 순서대로 정렬하고, 각 태스크에 tier와 blast_radius를 판정하라. tier는 기본 sonnet이고, opus면 판정 기준을 tier_reason에 적어라. 탐색 결과로 충분한 부분은 파일을 다시 읽지 말 것.\n\n목표:\n${goal}\n\n탐색 결과(Explore):\n${state.recon}\n\n설계 문서:\n${state.design}`,
+    `[LEAD: plan ${FEATURE_SLUG}]\n아래 설계 문서를 구현 태스크로 분해하라. depends_on 순서대로 정렬하고, 각 태스크에 tier와 blast_radius를 판정하라. tier는 첫 시도 모델이다(sonnet → Sonnet 5 implementer, opus → Opus 5.5 senior-implementer). 기본은 sonnet이다. 중요도가 높은 태스크는 opus로 둔다. 확실한 신호가 있을 때만 해당한다: blast_radius high, 동시성·트랜잭션·마이그레이션·보안·인증·데이터 삭제·레지스트리·프로세스 진입점, 여러 모듈에 걸친 인터페이스 변경, 검증에서 드러나기 어려운 오류가 치명적인 경우. 전체적으로 opus:sonnet이 대략 2:3이 되게 하되, 신호가 없는 태스크를 비율을 맞추려고 opus로 올리지는 마라. opus면 판정 기준을 tier_reason에 적어라. 탐색 결과로 충분한 부분은 파일을 다시 읽지 말 것.\n\n목표:\n${goal}\n\n탐색 결과(Explore):\n${state.recon}\n\n설계 문서:\n${state.design}`,
     { agentType: 'lead', label: 'lead:plan', phase: 'Plan', schema: PLAN_SCHEMA },
     p => (Array.isArray(p.tasks) && p.tasks.length > 0) || '태스크 목록이 비어 있음',
   )
