@@ -1,5 +1,8 @@
 using System.Globalization;
+using System.Reflection;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using DaouCalendarOverlay.Models;
 
 namespace DaouCalendarOverlay.Tests;
 
@@ -297,6 +300,94 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("_healthTimer", section, StringComparison.Ordinal);
         Assert.Contains("DisposeAsync", section, StringComparison.Ordinal);
         Assert.Contains("AtomicJsonFileWriter", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasSettingsSchemaSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"settings-schema\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>31. settings.json 스키마와 검증</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#settings-schema\">31. settings.json 스키마</a>", html, StringComparison.Ordinal);
+
+        // settings.json 키 = AppSettings의 public 인스턴스 속성 중 [JsonIgnore]가 아닌 것.
+        // 모델에 키가 추가·변경되면 §31 키 표도 바뀌어야 하므로 개수가 아니라 이름 전부를 확인한다.
+        var section = GetSectionHtml(html, "settings-schema");
+        var keys = typeof(AppSettings)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.GetCustomAttribute<JsonIgnoreAttribute>() is null)
+            .Select(property => property.Name)
+            .ToList();
+
+        Assert.NotEmpty(keys);
+        foreach (var key in keys)
+            Assert.Contains($"<code>{key}</code>", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasApiContractSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"api-contract\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>32. Daou API 응답 계약</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#api-contract\">32. Daou API 계약</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "api-contract");
+        Assert.Contains("/gw/api/calendar/event", section, StringComparison.Ordinal);
+        Assert.Contains("includingAttendees=true", section, StringComparison.Ordinal);
+        Assert.Contains("UNTIL=20261231", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasDiagnosticsSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"diagnostics\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>33. 로그·진단 절차</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#diagnostics\">33. 로그·진단</a>", html, StringComparison.Ordinal);
+
+        var section = GetSectionHtml(html, "diagnostics");
+        Assert.Contains("com.daou.calendar_overlay", section, StringComparison.Ordinal);
+        Assert.Contains("gkchgbpcbljkgabjcgjelacfkphcmhmi", section, StringComparison.Ordinal);
+        Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
+        Assert.Contains("host-", section, StringComparison.Ordinal);
+        Assert.Contains("overlay-", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasTestingSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"testing\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>34. 테스트 체크리스트와 검증 기록</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#testing\">34. 테스트·검증 기록</a>", html, StringComparison.Ordinal);
+
+        // 수동 확인 항목은 모두 미확인이다. 이 절은 어떤 항목도 확인을 마친 것으로 적지 않는다.
+        var section = GetSectionHtml(html, "testing");
+        Assert.Contains("미확인", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("검증 완료", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TechnicalDoc_HasDataRetentionSection()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("id=\"data-retention\"", html, StringComparison.Ordinal);
+        Assert.Contains("<h2>35. 데이터 보존·삭제 규칙</h2>", html, StringComparison.Ordinal);
+        Assert.Contains("<a href=\"#data-retention\">35. 데이터 보존·삭제</a>", html, StringComparison.Ordinal);
+
+        // 캐시·설정·로그 위치와 삭제의 정본(§35)이 다루는 대상과 제거 진입점, 비영속 흔적, 제거되지 않는 추출 폴더.
+        var section = GetSectionHtml(html, "data-retention");
+        Assert.Contains("calendar-cache.json", section, StringComparison.Ordinal);
+        Assert.Contains("settings.json", section, StringComparison.Ordinal);
+        Assert.Contains("--uninstall", section, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", section, StringComparison.Ordinal);
+        Assert.Contains(@"%TEMP%\.net\DaouCalendarOverlay", section, StringComparison.Ordinal);
     }
 
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
