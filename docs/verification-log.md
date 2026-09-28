@@ -191,3 +191,16 @@
 - P2 최종 검토 반영 B: 오버레이를 실행한 채 `DaouCalendarOverlay.exe --uninstall`을 실행하면 안내 창이 뜨고 레지스트리와 사용자 데이터가 그대로이며 종료 코드가 2인지 확인 — 미확인
 - P2 최종 검토 반영 B: 오버레이를 끈 상태에서 `--uninstall`이 예전처럼 확인 창 2단계로 진행하는지 확인 — 미확인
 - P2 최종 검토 반영 B: 트레이 "완전 제거…"가 오버레이 실행 중에도 막히지 않고 예전처럼 동작하는지 확인 — 미확인
+
+## P3
+
+| 날짜 | 작업 | 검증 방법 | 결과 |
+|---|---|---|---|
+| 2026-09-28 | T3.1 | verifier 독립 실행: build 경고 0, test 실패 0, HTML 형식 점검 OK, 사실 대장 전 항목·표본 대조 (구현 T3.1a sonnet 1회, T3.1b sonnet 1회, T3.1c sonnet 1회) | PASS. PASS. 대장 39건 전부와 대장 밖 문장 12건을 원천과 대조했고 모두 일치. 발췌 4개도 글자 단위로 같음. 실행 결과: build 경고 0/오류 0(--no-incremental 재빌드 포함), 전체 test 503/503 통과, 필터 실행에서 TechnicalDoc 5개 모두 통과, check-html.js "OK tags balanced, ids=24, h2=1..24, nav links=24"(종료 코드 0), rg v7.0.0 0건 / Cookie Store 0건 / v7.1.0 5건, h2/h3/id 목록은 HEAD와 작업 트리 모두 100줄로 같음, status는 HTML과 새 테스트 파일 2개뿐. 직접 확인한 내용: (a) 발췌 비교는 이스케이프를 풀고 직접 만든 스크립트로 했다. §5는 Program.cs 1-51 전체, §7.1은 NativeBridgeProtocol.cs 1-60(ProtocolVersion 포함), §9.1은 SettingsWindow.xaml.cs 39-61 + 파일 경계 주석 한 줄 + CalendarUrlParser.cs 24-50, §9.3은 CalendarBridgeServer.cs 423-546이다. 모두 메서드·타입 경계에서 시작하고 끝난다. (b) §5-A 13단계는 App.xaml.cs 40-114 순서와 같다. 캐시 로드(93)와 _bridgeServer.Start()(110)는 Show·CreateTrayIcon(90-91) 뒤에 있다. ConfigureHealthTimer 20초(482-491) → MarkWaiting → RefreshAsync(true) 순서도 맞다. (c) §5-B의 제거 스위치 선행 판정(StartupModeParser.cs:9,15-22; Program.cs:12-16), IsNativ 수동 미확인 4건 |
+
+### 수동 확인 대기 (P3)
+
+- T3.1: 브라우저로 HTML을 열어 §4·§5·§7.1·§9.1·§9.3·§9.4의 표·코드 블록·카드 레이아웃이 깨지지 않고 발췌 들여쓰기가 원본처럼 보이는지 확인 — 미확인
+- T3.1: 브라우저로 HTML을 열어 §10.2·§10.4 코드 블록이 끝까지 보이고, §10.4·§18 표가 늘어난 셀 때문에 레이아웃이 깨지지 않는지 확인 — 미확인
+- T3.1: 브라우저로 HTML을 열어 §17 트리의 들여쓰기·연결 문자(├─/└─)가 자연스럽고 §20 표·데이터 모델 코드 블록이 깨지지 않는지 확인 — 미확인
+- T3.1: GitHub(또는 마크다운 미리보기)에서 README의 프로젝트 구조 트리와 최초 실행 번호 목록이 올바르게 렌더링되는지 확인 — 미확인
