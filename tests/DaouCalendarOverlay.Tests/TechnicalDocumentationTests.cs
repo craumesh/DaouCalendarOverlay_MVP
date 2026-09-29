@@ -96,7 +96,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("StartupModeParser.IsUninstallInvocation(args)", html, StringComparison.Ordinal);
         Assert.Contains("UninstallFlow.RunInteractive()", html, StringComparison.Ordinal);
         // §7.1: NativeBridgeProtocol 발췌에 ProtocolVersion 포함
-        Assert.Contains("public const int ProtocolVersion = 1;", html, StringComparison.Ordinal);
+        Assert.Contains("public const int ProtocolVersion = 2;", html, StringComparison.Ordinal);
         // §9.1: 일요일 시작 42칸 그리드 기준 예시 날짜와 메서드 경계 발췌
         Assert.Contains("2026-08-30T00:00:00.000+09:00", html, StringComparison.Ordinal);
         Assert.Contains("2026-10-10T23:59:59.999+09:00", html, StringComparison.Ordinal);
@@ -128,7 +128,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("Native host 등록 실패", html, StringComparison.Ordinal);
         Assert.Contains("확장 파일 설치 실패", html, StringComparison.Ordinal);
         Assert.Contains("DaouOffice 응답 시간 초과", html, StringComparison.Ordinal);
-        Assert.Contains("네트워크 요청이 취소되었습니다.", html, StringComparison.Ordinal);
+        Assert.Contains("네트워크 오류: DaouOffice에 연결하지 못했습니다", html, StringComparison.Ordinal);
         Assert.Contains("저장 실패 · 로그 확인", html, StringComparison.Ordinal);
         // §14.3: 트레이 메뉴 전체
         Assert.Contains("로그 폴더 열기", html, StringComparison.Ordinal);

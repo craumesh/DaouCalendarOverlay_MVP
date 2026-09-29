@@ -62,17 +62,16 @@ internal static class Program
         }
     }
 }</code></pre><p class="caption">Program.Main이 WPF 생성 이전에 제거 모드와 native 모드를 먼저 분기한다.</p></section>
-<section id="chrome"><h2>6. Chrome Extension (Manifest V3)</h2><h3>6.1 권한 구성</h3><div class="table-wrap"><table><thead><tr><th>권한</th><th>역할</th></tr></thead><tbody><tr><td><code>cookies</code></td><td>DaouOffice의 로그인 쿠키를 Chrome cookie store에서 읽는다.</td></tr><tr><td><code>storage</code></td><td><code>chrome.storage.session</code>에 마지막 정상 cookie header를 브라우저 세션 동안 메모리 캐시하려는 설계 의도다. 실제로 언제 비워지는지는 Chrome 동작이라 미확인이다(§29.4).</td></tr><tr><td><code>alarms</code></td><td>MV3 service worker를 30초 단위로 깨운다. native host 연결이 연속 3/4/5회 이상 실패하면 1/2/5분으로 늘렸다가 성공하면 30초로 복귀한다(§29).</td></tr><tr><td><code>background</code></td><td>사용자 Chrome 설정이 허용할 때 마지막 창을 닫은 뒤에도 background mode를 유지하는 데 사용된다.</td></tr><tr><td><code>nativeMessaging</code></td><td>등록된 Windows native host에 JSON 메시지를 보낸다.</td></tr><tr><td><code>host_permissions</code></td><td><code>https://*.daouoffice.com/*</code> 범위로 권한을 제한한다.</td></tr></tbody></table></div><pre><code>{
+<section id="chrome"><h2>6. Chrome Extension (Manifest V3)</h2><h3>6.1 권한 구성</h3><div class="table-wrap"><table><thead><tr><th>권한</th><th>역할</th></tr></thead><tbody><tr><td><code>storage</code></td><td><code>chrome.storage.session</code>에 마지막 오류(<code>daouBridgeLastError</code>)와 native host 연결 실패 횟수(<code>daouBridgeBackoff</code>)를 보관한다. 7.1.0까지 세션 쿠키 캐시(<code>daouSessionCookieCache</code>)도 여기에 두었고, 7.2.0 worker는 시작할 때 그 키를 삭제만 한다. 이 저장소가 실제로 언제 비워지는지는 Chrome 동작이라 미확인이다(§29.4).</td></tr><tr><td><code>alarms</code></td><td>MV3 service worker를 30초 단위로 깨운다. native host 연결이 연속 3/4/5회 이상 실패하면 1/2/5분으로 늘렸다가 성공하면 30초로 복귀한다(§29).</td></tr><tr><td><code>background</code></td><td>사용자 Chrome 설정이 허용할 때 마지막 창을 닫은 뒤에도 background mode를 유지하는 데 사용된다.</td></tr><tr><td><code>nativeMessaging</code></td><td>등록된 Windows native host에 JSON 메시지를 보낸다.</td></tr><tr><td><code>host_permissions</code></td><td><code>https://*.daouoffice.com/*</code> 범위로 권한을 제한한다.</td></tr></tbody></table></div><div class="callout"><strong>cookies 권한은 7.2.0에서 제거했다.</strong> 이유는 둘이다. 첫째, 쿠키 변경 이벤트(<code class="inline">onChanged</code>)의 페이로드(<code class="inline">changeInfo.cookie</code>)에는 쿠키 값이 실려 온다(Chrome API 일반 지식, 추정). 리스너가 있으면 “쿠키 값을 읽지 않는다”를 구조적으로 보장할 수 없다. 둘째, 회복 시간 이득이 거의 없다. 인증 실패 뒤 앱은 1분 backoff를 걸고(<code class="inline">CalendarBridgeServer.RecordFailure</code>), <code class="inline">BuildConfig</code>의 due 판정이 그 전의 <code class="inline">getConfig</code>를 모두 <code class="inline">backoff</code>로 돌려보내므로 이벤트로 앞당겨 보내도 조회가 일어나지 않는다. 이득은 최대 약 25초다(30초 알람 − 5초 debounce, 계산, §10.3). 권한을 빼면 <code class="inline">chrome.cookies</code>가 정의되지 않으므로, 쿠키 API를 쓰지 않는다는 것을 manifest 파싱 테스트(<code class="inline">EmbeddedManifest_TargetsV720WorkerWithoutCookiesPermission</code>)와 worker 문자열 검사(<code class="inline">EmbeddedServiceWorker_DoesNotUseCookieApisOrIdentityHeaders</code>)로 고정한다. fetch에 세션이 실리는 것은 <code class="inline">host_permissions</code>만으로 충분하다고 추정하지만 실환경에서는 <strong>미확인</strong>이다(§34).</div><p>아래 발췌는 <code class="inline">ChromeExtension/manifest.json</code> 전체(7.2.0)다. <code class="inline">permissions</code>에 <code class="inline">cookies</code>가 없고 worker 파일은 <code class="inline">service-worker-v720.js</code>다(항목별 요약은 §29.5).</p><pre><code>{
   &quot;manifest_version&quot;: 3,
   &quot;name&quot;: &quot;Daou Calendar Overlay Bridge&quot;,
-  &quot;version&quot;: &quot;7.1.0&quot;,
+  &quot;version&quot;: &quot;7.2.0&quot;,
   &quot;minimum_chrome_version&quot;: &quot;120&quot;,
   &quot;description&quot;: &quot;Native Messaging bridge for Daou Calendar Overlay. Reuses the existing Chrome DaouOffice session without localhost networking.&quot;,
   &quot;key&quot;: &quot;MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoVtcLz/s89ZU6TY1uhc94rteHKd75K8P9oAQotTFx0fD4Kx2JPPJj4FNXTT3Wgh7F0+VDRteFuV1CknE5664nAL4kgeDMsUbS6BB2xlfteSxPYt/kS/VpfMVmKFEST0KWFCboE61SoOuki84gdpcKyECz+2LM1xtwAU0L1nnsSb/lyXsB7TwcIh0zy5X0xyIFnE1SRTLnIzy3liQNUQsGowZndFr15TyRAAoYdClr7THeRX2U+PNGCE5XumxWKHMwqiL5hG339Zgt0QEuuRDYzr51x0isp5V0K9n/qgYpEX90s2icOxOu8uhFa82GVD7SqJTc0jdHGZu7ZbJNuW5fQIDAQAB&quot;,
   &quot;permissions&quot;: [
     &quot;alarms&quot;,
     &quot;background&quot;,
-    &quot;cookies&quot;,
     &quot;storage&quot;,
     &quot;nativeMessaging&quot;
   ],
@@ -80,7 +79,7 @@ internal static class Program
     &quot;https://*.daouoffice.com/*&quot;
   ],
   &quot;background&quot;: {
-    &quot;service_worker&quot;: &quot;service-worker-v710.js&quot;
+    &quot;service_worker&quot;: &quot;service-worker-v720.js&quot;
   },
   &quot;icons&quot;: {
     &quot;16&quot;: &quot;icon16.png&quot;,
@@ -91,7 +90,59 @@ internal static class Program
   &quot;action&quot;: {
     &quot;default_title&quot;: &quot;Daou Calendar Overlay Bridge&quot;
   }
-}</code></pre><h3>6.2 왜 고정 Extension ID인가</h3><p><code class="inline">manifest.json</code>에 공개키 <code class="inline">key</code>를 포함해 unpacked extension도 동일 ID를 갖도록 만든다. Native Messaging host manifest의 <code class="inline">allowed_origins</code>는 정확한 extension origin을 요구하므로 ID가 매번 바뀌면 연결이 깨진다.</p><h3>6.3 세션 쿠키 수집 방식</h3><p><code class="inline">readCookiesFromAllStores</code>는 해당 Daou URL의 쿠키를 한 store에서만 가져온다. 먼저 기본 store(<code class="inline">DEFAULT_COOKIE_STORE_ID = "0"</code>)를 <code class="inline">chrome.cookies.getAll({ url, storeId: "0" })</code>로 조회하고, 비었을 때만 storeId를 지정하지 않은 암시적 store를 조회한다. 그래도 비면 <code class="inline">chrome.cookies.getAllCookieStores()</code>를 순회하되(기본 store는 건너뜀) 쿠키가 나온 첫 store 하나의 결과만 사용한다. 여러 store의 쿠키를 한 <code class="inline">Cookie</code> 헤더로 합치지 않는다. 시크릿 창이나 다른 프로필의 세션 쿠키가 섞이면 인증이 깨지기 때문이다. 각 단계의 예외는 삼키고 다음 단계로 넘어간다. live cookie 조회가 모두 비면 기존과 같이 <code class="inline">chrome.storage.session</code> 캐시를 fallback으로 사용한다.</p><div class="callout good"><strong>쿠키 캐시는 디스크 영구 저장용이 아니다.</strong> <code class="inline">chrome.storage.session</code>에 두어 service worker suspend/resume에는 살아 있고 완전한 Chrome 재시작 시에는 비워지게 하려는 설계 의도다. 실제로 언제 비워지는지는 Chrome 동작이라 미확인이다(§29.4).</div></section>
+}</code></pre><h3>6.2 왜 고정 Extension ID인가</h3><p><code class="inline">manifest.json</code>에 공개키 <code class="inline">key</code>를 포함해 unpacked extension도 동일 ID를 갖도록 만든다. Native Messaging host manifest의 <code class="inline">allowed_origins</code>는 정확한 extension origin을 요구하므로 ID가 매번 바뀌면 연결이 깨진다.</p><h3>6.3 DaouOffice 직접 조회(fetch)</h3><p>7.2.0부터 worker가 DaouOffice 캘린더 API를 직접 조회한다. 앱이 <code class="inline">getConfig</code> 응답으로 <code class="inline">shouldFetch: true</code>와 조회 조건(<code class="inline">baseUrl</code>, <code class="inline">timeMin</code>, <code class="inline">timeMax</code>, <code class="inline">includingAttendees</code>, <code class="inline">calendarIds</code>)을 내려 주면 <code class="inline">syncOnce</code>가 <code class="inline">fetchCalendar(config)</code>를 부른다(흐름 전체는 §29.2). 아래 발췌는 <code class="inline">ChromeExtension/service-worker-v720.js</code>의 <code class="inline">fetchCalendar</code> 전체(바로 위 주석 한 줄 포함)다.</p><pre><code>// 쿠키는 브라우저가 붙인다(credentials: &quot;include&quot;). worker는 쿠키 값을 읽지도 넘기지도 않는다.
+async function fetchCalendar(config) {
+  const result = { requestId: String(config.requestId || &quot;&quot;), outcome: &quot;error&quot;, elapsedMs: 0 };
+  const startedAt = Date.now();
+
+  let url;
+  try {
+    url = buildCalendarUrl(config);
+  } catch {
+    result.errorName = &quot;InvalidUrl&quot;;
+    return result;
+  }
+  if (!isAllowedCalendarUrl(url)) {
+    result.errorName = &quot;InvalidUrl&quot;;
+    return result;
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() =&gt; { timedOut = true; controller.abort(); }, FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: &quot;GET&quot;,
+      credentials: &quot;include&quot;,
+      redirect: &quot;manual&quot;,
+      cache: &quot;no-store&quot;,
+      headers: { Accept: &quot;application/json, text/plain, */*&quot; },
+      signal: controller.signal
+    });
+    result.status = response.status;
+    result.responseType = response.type;
+    result.redirected = response.type === &quot;opaqueredirect&quot; || response.redirected === true;
+    result.contentType = String(response.headers.get(&quot;content-type&quot;) || &quot;&quot;).slice(0, 200);
+    const text = response.type === &quot;opaqueredirect&quot; ? &quot;&quot; : await response.text();
+    result.bodyLength = text.length;
+    if (text.length &gt; MAX_BODY_CHARS) {
+      result.outcome = &quot;tooLarge&quot;;
+    } else {
+      result.outcome = &quot;response&quot;;
+      result.body = text;
+    }
+  } catch (error) {
+    result.outcome = timedOut ? &quot;timeout&quot; : (error instanceof TypeError ? &quot;network&quot; : &quot;error&quot;);
+    result.errorName = errorName(error);
+  } finally {
+    clearTimeout(timer);
+    result.elapsedMs = Date.now() - startedAt;
+  }
+  return result;
+}</code></pre><ul><li><strong>세션 재사용:</strong> <code class="inline">credentials: "include"</code>로 Chrome이 DaouOffice 도메인의 세션 쿠키를 요청에 붙이게 한다(<code class="inline">cookies</code> 권한 없이도 실제로 실리는지는 추정이며 실환경 미확인, R1, §34). worker는 쿠키 값을 읽지도 넘기지도 않는다(7.2.0에서 <code class="inline">cookies</code> 권한 제거, §6.1).</li><li><strong>리디렉션:</strong> <code class="inline">redirect: "manual"</code>이라 로그인 페이지를 따라가 HTML을 받아 오지 않는다. 리디렉션 응답은 <code class="inline">response.type === "opaqueredirect"</code>(status 0)로 판정할 수 있고, worker는 이 경우 본문을 읽지 않고 <code class="inline">redirected: true</code>로 보고한다.</li><li><strong>캐시:</strong> <code class="inline">cache: "no-store"</code>로 HTTP 캐시가 옛 응답을 돌려주지 않게 한다.</li><li><strong>요청 헤더:</strong> worker가 명시하는 헤더는 <code class="inline">Accept: application/json, text/plain, */*</code> 하나뿐이다. Cookie, User-Agent, Referer, Accept-Language는 설정하지 않고 브라우저가 관리한다.</li><li><strong>시간 초과:</strong> <code class="inline">FETCH_TIMEOUT_MS = 25000</code>이다. 타이머는 <code class="inline">fetch</code>뿐 아니라 <code class="inline">response.text()</code>(본문 읽기)까지 덮는다. MV3는 응답이 30초 넘게 오지 않는 fetch를 가진 worker를 종료할 수 있어(추정) 그보다 짧게 잡았고, 앱이 getConfig에서 잡는 lease 45초(<code class="inline">FetchLeaseSeconds</code>, §10.2) 안에 끝나야 한다.</li><li><strong>본문 크기:</strong> <code class="inline">MAX_BODY_CHARS = 1000000</code>(UTF-16 단위, JS <code class="inline">string.length</code>)이다. 넘으면 본문을 싣지 않고 <code class="inline">outcome: "tooLarge"</code>와 <code class="inline">bodyLength</code>만 보낸다. 앱의 <code class="inline">BridgeResultClassifier.MaxBodyChars</code>와 같은 값이다(파이프 한도와의 관계는 §7.1).</li><li><strong>outcome:</strong> 응답을 받으면 <code class="inline">response</code>, 시간 초과는 <code class="inline">timeout</code>, <code class="inline">TypeError</code>는 <code class="inline">network</code>, 그 밖의 예외는 <code class="inline">error</code>다. URL 생성 실패나 허용되지 않은 호스트는 fetch 없이 <code class="inline">error</code>와 <code class="inline">errorName: "InvalidUrl"</code>로 끝난다.</li></ul><p>조회 대상은 <code class="inline">isAllowedCalendarUrl</code>이 제한한다. 아래 발췌는 같은 파일의 <code class="inline">isAllowedCalendarUrl</code> 전체다. https이고 호스트가 <code class="inline">daouoffice.com</code>이거나 <code class="inline">.daouoffice.com</code>으로 끝날 때만 통과시키며, 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 같은 범위다.</p><pre><code>function isAllowedCalendarUrl(url) {
+  const host = url.hostname.toLowerCase();
+  return url.protocol === &quot;https:&quot; &amp;&amp; (host === &quot;daouoffice.com&quot; || host.endsWith(&quot;.daouoffice.com&quot;));
+}</code></pre><p>worker는 상태 문구를 만들지 않고 코드(주석 제외)에 한글을 쓰지 않는다. 인증 필요·API 오류·성공의 의미 판정과 한국어 상태 문구는 앱의 <code class="inline">BridgeResultClassifier</code>가 만든다(§9.3, §32.4).</p><div class="callout good"><strong>쿠키는 Chrome 밖으로 나가지 않는다.</strong> 7.1.0까지 있던 쿠키 읽기(<code class="inline">chrome.cookies</code>), 세션 쿠키 캐시, Cookie 헤더 전달은 7.2.0에서 제거됐다. 7.1.0이 남겼을 수 있는 캐시 키(<code class="inline">daouSessionCookieCache</code>)는 7.2.0 worker가 시작할 때 삭제만 한다(§29.4). <code class="inline">cookies</code> 권한 없이도 fetch에 쿠키가 실린다는 것은 추정이며 실환경 확인 전(미확인)이다(§34).</div></section>
 <section id="native"><h2>7. Chrome Native Messaging + Windows Named Pipe</h2><h3>7.1 메시지 framing</h3><p>Chrome Native Messaging은 stdin/stdout에 JSON을 그대로 쓰는 것이 아니라 <strong>4바이트 little-endian payload length + UTF-8 JSON</strong> 프레임을 사용한다. 동일 framing을 Named Pipe에도 재사용한다. 아래 발췌는 <code class="inline">Services/NativeBridgeProtocol.cs</code>의 첫 줄부터 <code class="inline">NativeBridgeProtocol</code> 정적 클래스 끝까지다.</p><pre><code>using System.Buffers.Binary;
 using System.IO;
 using System.IO.Pipes;
@@ -102,12 +153,15 @@ namespace DaouCalendarOverlay.Services;
 
 public static class NativeBridgeProtocol
 {
-    public const string PipeName = &quot;DaouCalendarOverlay.NativeBridge.v7&quot;;
+    public const string PipeName = &quot;DaouCalendarOverlay.NativeBridge.v8&quot;;
     public const string HostName = &quot;com.daou.calendar_overlay&quot;;
     public const string ExtensionId = &quot;gkchgbpcbljkgabjcgjelacfkphcmhmi&quot;;
     public const string ExtensionOrigin = &quot;chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/&quot;;
-    /// &lt;summary&gt;네이티브 브리지 메시지 프로토콜 버전. 호환 불가 변경 시에만 올린다(파이프 이름도 함께 올려야 한다).&lt;/summary&gt;
-    public const int ProtocolVersion = 1;
+    /// &lt;summary&gt;
+    /// 네이티브 브리지 메시지 프로토콜 버전. 호환 불가 변경 시에만 올린다(파이프 이름도 함께).
+    /// 7.2.0에서 2로 올렸다(postResult 스키마 교체).
+    /// &lt;/summary&gt;
+    public const int ProtocolVersion = 2;
 
     public static async Task&lt;byte[]?&gt; ReadFrameAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
     {
@@ -151,7 +205,7 @@ public static class NativeBridgeProtocol
 
         return true;
     }
-}</code></pre><h3>7.2 Native Host는 얇은 relay</h3><p>Chrome이 실행하는 native host는 독립 프로세스다. 실제 UI 상태·설정·동기화 requestId는 이미 실행 중인 GUI 프로세스에 있으므로 host는 stdin 메시지를 Named Pipe로 넘기고 응답을 stdout으로 돌려주는 역할만 한다. worker가 보내는 요청은 <code class="inline">getConfig</code>(최상위 필드 <code class="inline">type</code>, <code class="inline">lastError</code>, <code class="inline">extensionVersion</code>, <code class="inline">protocolVersion</code>)와 <code class="inline">postResult</code>(<code class="inline">result</code> 안에 <code class="inline">requestId</code>, <code class="inline">cookieHeader</code>, <code class="inline">cookieCount</code>, <code class="inline">cookieSource</code>, <code class="inline">userAgent</code>, <code class="inline">error</code>) 두 가지이고, host는 요청 본문을 해석하지 않고 그대로 파이프에 쓴다. 필드 전체와 응답 형식(<code class="inline">ok</code>, <code class="inline">error</code>, <code class="inline">config</code>)은 브리지 메시지 스키마 절에 있다(§26).</p><pre><code>// Services/NativeMessagingHost.cs — Chrome stdio↔Named Pipe 중계
+}</code></pre><p><code class="inline">ProtocolVersion</code>은 호환 불가 변경 시에만 올리고 파이프 이름도 함께 올린다. postResult 스키마를 통째로 바꾼 7.2.0에서 <code class="inline">ProtocolVersion</code>을 2로, <code class="inline">PipeName</code>을 <code class="inline">DaouCalendarOverlay.NativeBridge.v8</code>로 올렸다. 앱은 getConfig의 <code class="inline">protocolVersion</code>이 2가 아니면(필드가 없어도) 조회를 지시하지 않고(<code class="inline">noFetchReason</code>은 <code class="inline">protocol_mismatch</code>), postResult의 최상위 <code class="inline">protocolVersion</code>이 2가 아니면 <code class="inline">Unsupported protocolVersion.</code>으로 거부한다(§10.2).</p><p><strong>크기 한도와 본문 상한.</strong> worker가 싣는 본문은 <code class="inline">MAX_BODY_CHARS = 1000000</code>자(UTF-16 단위) 이하다. JSON 이스케이프는 UTF-16 한 단위당 최대 6바이트(<code class="inline">\uXXXX</code>)이므로, 최악의 postResult 크기는 6 × 1,000,000 + 64KiB(기타 필드 여유) = 6,065,536바이트(계산)다. 이 값은 파이프 한도 <code class="inline">NativeHostRelay.PipeMessageLimit</code>(<code class="inline">8 * 1024 * 1024</code> = 8,388,608바이트)보다 작다. 파이프 서버는 <code class="inline">NativeBridgeProtocol.ReadFrameAsync(pipe, NativeHostRelay.PipeMessageLimit, cancellationToken)</code>로 요청을 읽는다. Chrome에서 host로 오는 방향(stdin) 한도 <code class="inline">ChromeInputLimit</code>는 64MiB로 더 여유가 있다. host에서 Chrome으로 가는 방향(stdout) 한도 <code class="inline">ChromeOutputLimit</code>는 1MiB인데, 이 방향에는 getConfig 응답과 postResult ack 같은 작은 메시지만 흐른다. 크기 관계 <code class="inline">6L * BridgeResultClassifier.MaxBodyChars + 64 * 1024 &lt;= NativeHostRelay.PipeMessageLimit</code>는 <code class="inline">ChromeExtensionPackagingTests.EmbeddedServiceWorker_LimitsMatchApp</code>가 고정한다. 2026-09-29에 실측한 응답 53,088자에 견주면 본문 상한은 약 18.8배(계산)다. 필드별 정본은 브리지 메시지 스키마 절이다(§26).</p><h3>7.2 Native Host는 얇은 relay</h3><p>Chrome이 실행하는 native host는 독립 프로세스다. 실제 UI 상태·설정·동기화 requestId는 이미 실행 중인 GUI 프로세스에 있으므로 host는 stdin 메시지를 Named Pipe로 넘기고 응답을 stdout으로 돌려주는 역할만 한다. worker가 보내는 요청은 <code class="inline">getConfig</code>(최상위 필드 <code class="inline">type</code>, <code class="inline">lastError</code>, <code class="inline">extensionVersion</code>, <code class="inline">protocolVersion</code>)와 <code class="inline">postResult</code>(최상위 <code class="inline">protocolVersion</code>과 <code class="inline">result</code>, <code class="inline">result</code> 안에 <code class="inline">requestId</code>, <code class="inline">outcome</code>, <code class="inline">status</code>, <code class="inline">responseType</code>, <code class="inline">redirected</code>, <code class="inline">contentType</code>, <code class="inline">body</code>, <code class="inline">bodyLength</code>, <code class="inline">elapsedMs</code>, <code class="inline">errorName</code>) 두 가지이고, host는 요청 본문을 해석하지 않고 그대로 파이프에 쓴다. 필드 전체와 응답 형식(<code class="inline">ok</code>, <code class="inline">error</code>, <code class="inline">config</code>)은 브리지 메시지 스키마 절에 있다(§26).</p><pre><code>// Services/NativeMessagingHost.cs — Chrome stdio↔Named Pipe 중계
 private const int ChromeInputLimit = 64 * 1024 * 1024;
 private const int ChromeOutputLimit = 1024 * 1024;
 
@@ -255,7 +309,7 @@ public static async Task&lt;byte[]&gt; ConnectAndExchangeAsync(
         LogService.Warn(LogCategory, &quot;파이프 연결 실패&quot;, ex);
         return SerializeError($&quot;Daou Calendar Overlay가 실행 중이지 않거나 Native Bridge에 연결할 수 없습니다: {ex.Message}&quot;);
     }
-}</code></pre><p>클라이언트 쪽 파이프도 <code class="inline">PipeOptions.CurrentUserOnly</code>를 지정하므로 다른 Windows 계정이 만든 파이프에는 애초에 연결되지 않는다. 같은 계정이 파이프 이름을 선점한 경우를 대비해, 연결 직후 <code class="inline">GetNamedPipeServerProcessId</code>로 서버 PID를 얻고 그 프로세스의 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조한다. 경로가 다르거나 확인할 수 없으면 <strong>요청 프레임을 한 바이트도 쓰지 않고</strong> 오류 응답만 stdout으로 돌려주므로, 세션 쿠키가 담긴 <code class="inline">postResult</code> 페이로드가 선점 프로세스로 넘어가지 않는다.</p><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다. 설정 <code class="inline">RegisterEdge</code>가 켜져 있으면 같은 manifest를 Edge 키(<code class="inline">HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay</code>)에도 등록하고, 꺼져 있으면 Edge 키만 삭제한다. Chrome/Edge 레지스트리 경로는 <code class="inline">UninstallService.BuildNativeHostKeyPath</code>에서 만들어 제거 경로(§22)와 같은 출처를 쓴다.</p><pre><code>using System.IO;
+}</code></pre><p>클라이언트 쪽 파이프도 <code class="inline">PipeOptions.CurrentUserOnly</code>를 지정하므로 다른 Windows 계정이 만든 파이프에는 애초에 연결되지 않는다. 같은 계정이 파이프 이름을 선점한 경우를 대비해, 연결 직후 <code class="inline">GetNamedPipeServerProcessId</code>로 서버 PID를 얻고 그 프로세스의 실행 파일 경로를 <code class="inline">Environment.ProcessPath</code>와 대조한다. 경로가 다르거나 확인할 수 없으면 <strong>요청 프레임을 한 바이트도 쓰지 않고</strong> 오류 응답만 stdout으로 돌려주므로, DaouOffice 응답 원문(일정 데이터)이 담긴 <code class="inline">postResult</code> 페이로드가 선점 프로세스로 넘어가지 않는다.</p><h3>7.3 등록</h3><p>앱 시작 시 현재 EXE 경로를 host manifest에 기록하고 HKCU에 등록한다. 관리자 권한이 필요하지 않는다. 설정 <code class="inline">RegisterEdge</code>가 켜져 있으면 같은 manifest를 Edge 키(<code class="inline">HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.daou.calendar_overlay</code>)에도 등록하고, 꺼져 있으면 Edge 키만 삭제한다. Chrome/Edge 레지스트리 경로는 <code class="inline">UninstallService.BuildNativeHostKeyPath</code>에서 만들어 제거 경로(§22)와 같은 출처를 쓴다.</p><pre><code>using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -367,13 +421,24 @@ public sealed class NativeMessagingRegistrationService
         }
     }
 }</code></pre></section>
-<section id="auth"><h2>8. 인증과 세션 재사용</h2><div class="seq"><div class="who">1. Chrome</div><div class="what">사용자가 평소대로 DaouOffice에 로그인한다. 서버가 Chrome 프로필에 세션 쿠키를 발급한다.</div><div class="who">2. Extension</div><div class="what">쿠키를 수집해 <code>name=value; ...</code> Cookie header 문자열과 User-Agent를 만든다.</div><div class="who">3. Native Messaging</div><div class="what">postResult 요청의 <code>result</code>에 requestId, cookieHeader, cookieCount, cookieSource, userAgent, error를 담아 native host로 보낸다(§26).</div><div class="who">4. Named Pipe</div><div class="what">native host가 실행 중인 GUI bridge server로 payload를 relay한다.</div><div class="who">5. C# HttpClient</div><div class="what">복사된 Cookie header를 붙여 DaouOffice Calendar API를 직접 호출한다.</div><div class="who">6. 서버 판정</div><div class="what">200/JSON이면 성공. 401/403/3xx/HTML 로그인 페이지면 세션 만료로 판정한다.</div></div><div class="callout"><strong>왜 ID/PW를 저장하지 않는가?</strong> 문제의 본질이 “DaouOffice가 새 로그인으로 기존 Chrome 세션을 무효화”하는 것이었기 때문이다. 기존 세션을 재사용하면 추가 로그인 자체가 사라져 충돌도 사라진다.</div></section>
+<section id="auth"><h2>8. 인증과 세션 재사용</h2><div class="seq"><div class="who">1. Chrome</div><div class="what">사용자가 평소대로 DaouOffice에 로그인한다. 로그인 세션은 Chrome 프로필이 보관하고 관리한다.</div><div class="who">2. Extension</div><div class="what">앱이 getConfig 응답으로 조회를 지시하면 worker의 <code>fetchCalendar</code>가 <code>fetch</code>(<code>credentials: "include"</code>, <code>redirect: "manual"</code>, <code>cache: "no-store"</code>)로 DaouOffice Calendar API를 직접 호출한다. Chrome이 세션 쿠키를 요청에 붙이며(<code>cookies</code> 권한 없이도 실리는지는 추정, 실환경 미확인, R1, §34) worker는 쿠키 값을 읽지도 넘기지도 않는다(<code>cookies</code> 권한은 7.2.0에서 제거, §6.1, §6.3).</div><div class="who">3. Native Messaging</div><div class="what">postResult 요청의 <code>result</code>에 requestId, outcome, status, responseType, redirected, contentType, body, bodyLength, elapsedMs, errorName을 담아 native host로 보낸다(§26). 쿠키와 요청 헤더는 담기지 않는다.</div><div class="who">4. Named Pipe</div><div class="what">native host가 실행 중인 GUI bridge server로 payload를 relay한다.</div><div class="who">5. 앱 BridgeResultClassifier</div><div class="what">앱은 DaouOffice에 요청을 보내지 않고, 전달받은 전송 수준 사실을 순수 함수 <code>BridgeResultClassifier.Classify</code>로 판정한다(§9.3).</div><div class="who">6. 서버 판정</div><div class="what">200/JSON이고 code가 200이면 성공. 401/403, 리디렉션(opaqueredirect), 2xx HTML 로그인 페이지, 200 응답 안의 code <code>ROUTE-0004</code>는 인증 필요로 판정한다(판정 순서는 §32.4, 표시 문구는 §10.4).</div></div><div class="callout"><strong>왜 ID/PW를 저장하지 않는가?</strong> 문제의 본질이 “DaouOffice가 새 로그인으로 기존 Chrome 세션을 무효화”하는 것이었기 때문이다. 기존 세션을 재사용하면 추가 로그인 자체가 사라져 충돌도 사라진다.</div><div class="callout good"><strong>브라우저 세션과 앱이 쓰는 세션이 항상 같다.</strong> 7.1.0까지는 worker가 쿠키를 모아 앱에 넘기고 앱이 HTTP로 조회했다. 그래서 Chrome에서 로그아웃한 뒤에도 세션 캐시에 남은 옛 쿠키로 조회가 계속 성공하는 경우가 있었다(2026-09-29에 확정된 원인). 7.2.0은 조회 자체를 Chrome 안에서 하므로 로그아웃하면 다음 조회가 401 응답(2026-09-29 실측: 본문 47자, code <code>ROUTE-0004</code>)이나 리디렉션으로 돌아와 재로그인 필요로 표시된다. 7.2.0 worker로 이 경로를 실환경에서 확인한 기록은 아직 없다(미확인, §34). 재로그인 뒤 회복 시간은 §10.3이다.</div></section>
 <section id="api"><h2>9. DaouOffice Calendar API 사용</h2><h3>9.1 endpoint</h3><pre><code>GET https://company.daouoffice.com/gw/api/calendar/event
     ?timeMin=2026-08-30T00:00:00.000+09:00
     &amp;timeMax=2026-10-10T23:59:59.999+09:00
     &amp;includingAttendees=true
     &amp;calendarIds[]=...
-    &amp;calendarIds[]=...</code></pre><p>위 값은 2026년 9월을 볼 때의 예시다. 그리드는 일요일 시작 42칸이라 조회 범위는 그리드 첫 칸 00:00부터 마지막 칸 23:59:59.999(+09:00)까지다(<code class="inline">CalendarGrid.GetVisibleRange</code>, 날짜는 계산).</p><p>설정 화면에서는 Chrome Network에서 복사한 전체 URL을 붙여넣으면 <code class="inline">BaseUrl</code>과 모든 <code class="inline">calendarIds[]</code>를 자동 추출한다. 아래 발췌는 추출 버튼 처리기 <code class="inline">SettingsWindow.Extract_Click</code>(<code class="inline">Views/SettingsWindow.xaml.cs</code>)과 URL 해석 <code class="inline">CalendarUrlParser.Parse</code>(<code class="inline">Services/CalendarUrlParser.cs</code>)다.</p><pre><code>    private void Extract_Click(object sender, RoutedEventArgs e)
+    &amp;calendarIds[]=...</code></pre><p>위 값은 2026년 9월을 볼 때의 예시다. 그리드는 일요일 시작 42칸이라 조회 범위는 그리드 첫 칸 00:00부터 마지막 칸 23:59:59.999(+09:00)까지다(<code class="inline">CalendarGrid.GetVisibleRange</code>, 날짜는 계산).</p><p>조회 URL은 worker가 만든다. 아래 발췌는 <code class="inline">ChromeExtension/service-worker-v720.js</code>의 <code class="inline">buildCalendarUrl</code> 전체다. <code class="inline">getConfig</code> 응답의 <code class="inline">baseUrl</code>에 경로 <code class="inline">/gw/api/calendar/event</code>를 붙이고 <code class="inline">timeMin</code>, <code class="inline">timeMax</code>, <code class="inline">includingAttendees</code>와 <code class="inline">calendarIds[]</code>(캘린더마다 하나씩)를 쿼리로 넣는다. 값은 앱이 <code class="inline">BaseUrlPolicy</code>로 검증한 <code class="inline">BaseUrl</code>과 표시 범위에서 오고, worker는 <code class="inline">isAllowedCalendarUrl</code>(§6.3)로 https와 <code class="inline">*.daouoffice.com</code>을 한 번 더 확인한 뒤에만 fetch한다.</p><pre><code>function buildCalendarUrl(config) {
+  const url = new URL(&quot;/gw/api/calendar/event&quot;, config.baseUrl);
+  url.searchParams.set(&quot;timeMin&quot;, config.timeMin);
+  url.searchParams.set(&quot;timeMax&quot;, config.timeMax);
+  url.searchParams.set(&quot;includingAttendees&quot;, config.includingAttendees ? &quot;true&quot; : &quot;false&quot;);
+
+  for (const calendarId of config.calendarIds || []) {
+    url.searchParams.append(&quot;calendarIds[]&quot;, String(calendarId));
+  }
+
+  return url;
+}</code></pre><p>설정 화면에서는 Chrome Network에서 복사한 전체 URL을 붙여넣으면 <code class="inline">BaseUrl</code>과 모든 <code class="inline">calendarIds[]</code>를 자동 추출한다. 아래 발췌는 추출 버튼 처리기 <code class="inline">SettingsWindow.Extract_Click</code>(<code class="inline">Views/SettingsWindow.xaml.cs</code>)과 URL 해석 <code class="inline">CalendarUrlParser.Parse</code>(<code class="inline">Services/CalendarUrlParser.cs</code>)다.</p><pre><code>    private void Extract_Click(object sender, RoutedEventArgs e)
     {
         var parsed = CalendarUrlParser.Parse(ApiUrlTextBox.Text);
 
@@ -424,131 +489,124 @@ public sealed class NativeMessagingRegistrationService
             BaseUrl = $&quot;{uri.Scheme}://{uri.Authority}&quot;,
             CalendarIds = ids.Distinct().ToList()
         };
-    }</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 실제 HTTP는 C#에서</h3><p>Extension은 인증 정보만 제공하고 실제 API 요청은 C#에서 수행한다. 이를 통해 timeout, redirect 차단, HTML 로그인 페이지 감지, JSON code 검사, retry/backoff를 한 곳에서 처리한다. 아래 발췌는 <code class="inline">Services/CalendarBridgeServer.cs</code>의 <code class="inline">ProcessResultAsync</code> 전체다. 쿠키가 없거나 쿠키와 함께 확장 오류가 오면 HTTP를 보내지 않고 실패로 기록하며, HTTP 왕복 중 표시 범위나 설정(BaseUrl/캘린더 ID)이 바뀌었으면 결과를 버리고 즉시 재발행되게 한다(<code class="inline">DiscardIfRangeChanged</code>).</p><pre><code>    private async Task ProcessResultAsync(BridgeResultPayload result, AppSettings settingsSnapshot,
+    }</code></pre><h3>9.2 조회 기간</h3><p>현재 표시 월의 1일만 조회하는 것이 아니라 <strong>6주(42칸) 월간 그리드 전체 범위</strong>를 조회한다. 전월/익월 날짜 셀에도 일정이 보이기 때문에 그리드 시작일부터 42일 끝까지 KST(+09:00)로 구성한다.</p><h3>9.3 조회는 확장, 판정은 앱</h3><p>DaouOffice 캘린더 API 요청은 Chrome 확장 worker가 보낸다(<code class="inline">fetchCalendar</code>, §6.3). worker는 상태 코드, 응답 종류, 리디렉션 여부, <code class="inline">content-type</code>, 본문 원문 같은 전송 수준 사실만 <code class="inline">postResult</code>로 앱에 보내고(필드는 §26), 인증 필요·API 오류·성공의 의미 판정은 앱의 순수 함수 <code class="inline">BridgeResultClassifier.Classify</code>가 한 곳에서 한다(판정 순서는 §32.4). 앱은 DaouOffice에 HTTP 요청을 보내지 않고 쿠키도 받지 않는다(7.2.0). 그래서 브라우저 로그인 상태와 동기화가 쓰는 세션이 항상 같다(§8). 아래 발췌는 <code class="inline">Services/CalendarBridgeServer.cs</code>의 <code class="inline">ProcessResultAsync</code> 전체다. 판정이 성공이 아니면 <code class="inline">RecordFailure</code>와 함께 실패 이벤트를 올리고, 성공이면 결과 처리 도중 표시 범위나 설정(BaseUrl/캘린더 ID)이 바뀌었는지 확인해 바뀌었으면 결과를 버리고 즉시 재발행되게 한다(<code class="inline">DiscardIfRangeChanged</code>).</p><pre><code>    private async Task ProcessResultAsync(BridgeResultPayload result, AppSettings settingsSnapshot,
         DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot, CancellationToken cancellationToken)
     {
         LogService.Info(&quot;bridge.result&quot;, BridgeLogSummary.DescribeResult(result));
 
-        if (string.IsNullOrWhiteSpace(result.CookieHeader) || result.CookieCount &lt;= 0)
+        var hook = ResultProcessingHook;
+        if (hook is not null)
+            await hook(cancellationToken);
+
+        var verdict = BridgeResultClassifier.Classify(result);
+        LogVerdict(result.RequestId, verdict);
+
+        if (!verdict.IsSuccess)
         {
-            var retryAt = RecordFailure(authenticationFailure: true);
-            var message = string.IsNullOrWhiteSpace(result.Error)
-                ? &quot;Chrome에서 DaouOffice 로그인 쿠키를 찾지 못했습니다.&quot;
-                : result.Error!;
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.AuthRequired(message, retryAt));
+            var authentication = verdict.Kind == BridgeFailureKind.Authentication;
+            var retryAt = RecordFailure(authenticationFailure: authentication);
+            SyncCompleted?.Invoke(this, authentication
+                ? BridgeSyncEventArgs.AuthRequired(verdict.Message, retryAt)
+                : BridgeSyncEventArgs.Fail(verdict.Message, verdict.Kind, retryAt));
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(result.Error))
+        if (DiscardIfRangeChanged(settingsSnapshot, fromSnapshot, toSnapshot))
         {
-            var retryAt = RecordFailure(authenticationFailure: false);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(result.Error!, BridgeFailureKind.General, retryAt));
+            LogService.Warn(&quot;bridge&quot;, &quot;표시 범위 또는 설정이 변경되어 이전 결과를 버리고 즉시 재발행합니다.&quot;);
             return;
         }
 
-        try
+        RecordSuccess(settingsSnapshot.RefreshMinutes);
+        SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(verdict.Events, fromSnapshot, toSnapshot));
+    }</code></pre><p>처리 순서는 <code class="inline">bridge.result</code> 요약 로그(<code class="inline">BridgeLogSummary.DescribeResult</code>) → 테스트 확장점 <code class="inline">ResultProcessingHook</code>(운영 코드는 설정하지 않는다) → <code class="inline">Classify</code> → 판정 로그(<code class="inline">LogVerdict</code>) → 실패면 <code class="inline">RecordFailure</code>와 <code class="inline">SyncCompleted</code>, 성공이면 <code class="inline">DiscardIfRangeChanged(settingsSnapshot, fromSnapshot, toSnapshot)</code> → <code class="inline">RecordSuccess</code> → <code class="inline">SyncCompleted(Ok)</code>다. 인증 판정(<code class="inline">BridgeFailureKind.Authentication</code>)은 <code class="inline">RecordFailure(authenticationFailure: true)</code>로 1분 backoff를 걸고 <code class="inline">BridgeSyncEventArgs.AuthRequired</code>를, 나머지 실패는 <code class="inline">RecordFailure(authenticationFailure: false)</code>와 <code class="inline">BridgeSyncEventArgs.Fail</code>을 올린다. 이 메서드는 네트워크를 쓰지 않는다.</p><p>예외 경로는 <code class="inline">ProcessResultAsync</code>를 부르는 <code class="inline">RunResultProcessingAsync</code>가 맡는다(발췌는 §10.2). 종료 중 취소(<code class="inline">OperationCanceledException</code>이고 종료 토큰이 취소됨)는 <code class="inline">종료 중 결과 처리 취소</code> 로그만 남긴다. 그 밖의 예외는 <code class="inline">LogService.Error("bridge", "postResult 처리 실패", ex)</code>를 남기고 <code class="inline">RecordFailure(authenticationFailure: false)</code> 뒤 <code class="inline">string.Format(CultureInfo.InvariantCulture, BridgeResultClassifier.ProcessingFailedFormat, ex.GetType().Name)</code> 문구(<code class="inline">동기화 결과 처리 실패: {예외 형식 이름}</code>)를 담은 일반 실패 이벤트를 올린다. 예외 메시지 원문은 문구에 넣지 않는다. 이 이벤트의 구독자가 예외를 던져도 백그라운드 Task가 faulted로 끝나지 않도록 <code class="inline">SyncCompleted</code> 호출은 한 번 더 <code class="inline">try/catch</code>로 감싸 있고, 구독자 예외는 <code class="inline">LogService.Error("bridge", "postResult 처리 실패 알림 실패", notifyException)</code>로 남긴다. 성공·실패·취소와 관계없이 마지막에는 <code class="inline">ReleaseActiveRequest</code>가 lease를 해제한다.</p><p>postResult가 도착한 시점에 잡는 표시 범위·설정 스냅샷(<code class="inline">AcceptResult</code>)은 getConfig 시점의 조회 조건과 같다고 볼 수 있다. 조회 조건을 바꾸는 경로(<code class="inline">UpdateRequest</code>, <code class="inline">ForceRefresh</code>, <code class="inline">DiscardIfRangeChanged</code>)가 모두 활성 requestId를 비우므로, requestId가 아직 활성이면 그 사이 범위와 설정은 바뀌지 않았다. 바뀐 뒤에 도착한 옛 requestId의 postResult는 <code class="inline">postResult 무시: requestId 불일치</code> 경고와 함께 버려지고, 새 범위는 다음 getConfig에서 새 requestId로 조회된다.</p><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않고 API가 준 <code class="inline">startTime/endTime</code>으로 날짜를 매칭한다. 실데이터(작업 지시서 2절, 2026-09-28 캐시 관측)에서 확인한 응답 규칙은 다음과 같다(응답 계약 전체는 §32).</p><ul><li><strong>템플릿·범위 밖 occurrence</strong>: 반복 일정은 조회 범위 안 occurrence가 개별 이벤트로 온다. 음력 공휴일은 여기에 더해 1970년 날짜의 템플릿 이벤트 3건(<code class="inline">1970-02-06</code>, <code class="inline">1970-02-07</code>, <code class="inline">1970-05-12</code>)과 조회 범위 밖 occurrence 1건(2027년)이 섞여 왔다. 이들은 그 조회의 42칸 그리드(조회 범위) 밖 날짜이고, 앱은 <code class="inline">CalendarGrid.OccursOnDate</code>로 자기 날짜 셀에만 매칭하므로(<code class="inline">MainViewModel.GetEventsForDate</code>) 그 달 화면에는 나타나지 않는다.</li><li><strong>occurrence id</strong>: 반복 occurrence의 <code class="inline">id</code>는 <code class="inline">{원본 id}_{13자리 숫자}</code> 형식으로 서로 다르다(관측 예: <code class="inline">175971_1786633200000</code>). 숫자를 epoch 밀리초로 해석하면 RRULE의 월·일을 양력으로 본 날짜(예: <code class="inline">175903_1798556400000</code> → 2026-12-30 00:00 KST, 계산)이며 실제 시작일(이 예는 2027-02-06)과 다를 수 있다(의미는 추정).</li><li><strong>id 중복</strong>: 같은 <code class="inline">id</code>는 <strong>서로 다른 캘린더 사이에서만</strong> 관측됐다(같은 일정이 두 <code class="inline">calendarId</code>로 5건). 처리는 아래 문단의 <code class="inline">EventDeduplicator</code>가 맡는다.</li><li><strong>종일 일정 종료 시각</strong>: <code class="inline">00:00:00</code>(공휴일 등, 시작과 같은 값), <code class="inline">23:59:00</code>, <code class="inline">23:59:59.999</code> 세 종류이며 모두 종료일을 <strong>포함</strong>하는 의미다. 앱은 종료 날짜까지 포함해 매칭하고, 종료 날짜가 시작 날짜보다 이르면 시작일로 본다(<code class="inline">CalendarGrid.OccursOnDate</code>).</li><li><strong>공휴일 기한</strong>: 공휴일 RRULE은 모두 <code class="inline">UNTIL=20261231</code>이라 2027년 공휴일은 서버 데이터가 갱신돼야 내려온다(앱 버그 아님). 단 음력 12/30(RRULE <code class="inline">BYMONTH=12;BYMONTHDAY=30</code>)이 양력 2027-02-06으로 내려온 사례가 있어 2027년 초 날짜 일부는 내려온다(관측). 서버가 <code class="inline">UNTIL</code>을 어떤 기준으로 판정하는지는 미확인이다.</li><li><strong>음력</strong>: 앱에는 음력 변환 로직이 없다. <code class="inline">lunar</code> 필드(<code class="inline">Models/CalendarModels.cs</code>의 <code class="inline">DaouCalendarEvent.Lunar</code>)는 역직렬화만 하고 날짜 계산에 쓰지 않으므로, 음력 날짜의 양력 변환은 서버 결과를 그대로 쓴다.</li></ul><p>같은 일정이 여러 캘린더에 공유되면 API는 동일한 <code class="inline">id</code>를 캘린더 수만큼 내려보낸다(실데이터 37건 중 5건). UI는 <code class="inline">Models/EventDeduplicator.cs</code>에서 <code class="inline">id</code> 기준으로 이를 1건으로 합치고, 소속 캘린더 ID/이름을 모두 <code class="inline">CalendarIds</code>/<code class="inline">CalendarNames</code>에 보존한다. 캐시 파일에는 병합 전 원본 이벤트를 그대로 저장하며(역호환), 병합은 캐시 로드 직후 화면에 표시하기 직전에 수행한다. 숨김 판정은 소속 캘린더가 모두 숨겨진 경우에만 적용되고, 하나라도 표시 중이면 일정은 계속 보인다.</p></section>
+<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다. 알람이 계속 반복되므로 worker는 사실상 상시 활성이다.</p></div><div class="card"><h3>앱 쪽</h3><p>다음 fetch 시점을 정하는 것은 <code class="inline">CalendarBridgeServer._nextAttemptAt</code>이다(성공 시 설정의 <code class="inline">RefreshMinutes</code>, 실패 시 backoff). 앱에는 fetch를 유발하는 주기 타이머가 없다. 앱의 1초 시계 타이머(<code class="inline">MainWindow.ClockTimer_Tick</code>)는 시각을 갱신하고, 날짜가 바뀌면 <code class="inline">MainViewModel.RefreshTodayIfChanged()</code>가 달력을 다시 만든 뒤(달이 바뀌었고 이전 “오늘”의 달을 보고 있었으면 <code class="inline">GoToday()</code>로 새 달로 이동, 아니면 <code class="inline">BuildCalendar()</code>) true를 돌려준다. 그때 <code class="inline">App.RefreshAsync(true)</code>로 <strong>강제 동기화를 한 번 요청</strong>한다. 날짜가 바뀌지 않은 틱은 동기화를 만들지 않으므로 이 타이머는 주기 fetch 타이머가 아니다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. worker는 <code class="inline">getConfig</code> 응답의 <code class="inline">shouldFetch</code>가 false면 그 회차를 fetch 없이 끝내고, 다음 알람에 다시 깨어난다.</p><p>확장이 <code class="inline">syncOnce(trigger)</code>를 호출하는 트리거는 4종이다(정본은 §29). 쿠키 변경 트리거는 7.2.0에서 제거됐다(이유는 §6.1). service worker 최초 로드 시의 top-level <code class="inline">syncOnce</code> 호출은 없고, 최상위 코드는 시작 로그, 7.1.0이 남긴 세션 쿠키 캐시 키의 삭제(<code class="inline">purgeLegacySessionCookieCache</code>), <code class="inline">ensureAlarm()</code> 세 줄뿐이다(worker가 깨어날 때마다 host를 즉시 스폰하지 않는다).</p><ul><li><code class="inline">chrome.runtime.onInstalled</code> — 알람 보장 후 1회 동기화(trigger <code class="inline">installed</code>)</li><li><code class="inline">chrome.runtime.onStartup</code> — 알람 보장 후 1회 동기화(trigger <code class="inline">startup</code>)</li><li><code class="inline">chrome.alarms.onAlarm</code> — 기본 30초 주기 알람(trigger <code class="inline">alarm</code>)</li><li><code class="inline">chrome.action.onClicked</code> — 툴바 아이콘 클릭(trigger <code class="inline">action</code>)</li></ul><p>host 연결(<code class="inline">getConfig</code> <code class="inline">sendNativeMessage</code>)이 연속 3/4/5회 이상 실패하면 확장 알람 주기가 1/2/5분으로 늘어나고, host가 다시 응답하면 30초로 복귀한다. 실패로 세는 것은 <code class="inline">sendNativeMessage</code> 자체가 예외를 던진 경우와, native host가 오버레이 파이프에 닿지 못해 <code class="inline">ok: false</code>로 답한 경우(오버레이 미실행 등)다. 실행 중인 오버레이는 <code class="inline">getConfig</code>에 항상 <code class="inline">ok: true</code>로 답하므로 이 응답이 오면(<code class="inline">shouldFetch</code>가 false여도) 성공으로 보고 카운터를 0으로 되돌린다. <code class="inline">ensureAlarm</code>은 기존 알람의 <code class="inline">periodInMinutes</code>가 목표 주기와 다르면 <code class="inline">chrome.alarms.create</code>로 재생성한다. MV3 worker는 수시로 종료되므로 실패 카운터는 모듈 변수가 아니라 <code class="inline">chrome.storage.session</code>의 <code class="inline">daouBridgeBackoff</code>에 보관한다(상한 99, 오버레이 서버의 <code class="inline">_consecutiveFailures</code>와 별개). <code class="inline">postResult</code> 전송 실패는 이 카운터에 반영하지 않는다(§29).</p><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease(<code class="inline">FetchLeaseSeconds</code>)를 만든다. worker는 이 안에 DaouOffice 조회(시간 초과 25초 포함)와 <code class="inline">postResult</code> 전송을 끝내야 한다. <code class="inline">postResult</code>는 먼저 <code class="inline">protocolVersion</code>을 확인하고(아래 protocol 게이트), 받은 <code class="inline">requestId</code>가 현재 활성 요청과 같은지만 확인한 뒤 <strong>즉시 ok로 응답</strong>한다. 결과 처리(판정과 반영)는 백그라운드 Task에서 수행하며 네트워크를 쓰지 않는다. 결과를 받아들인 시점에 lease를 60초(<code class="inline">ResultLeaseSeconds</code>)로 갱신하고 <code class="inline">_activeRequestId</code>는 그대로 두므로, 결과 처리가 끝나기 전에는 새 fetch가 발행되지 않는다. lease와 <code class="inline">_activeRequestId</code>는 결과 처리가 끝난 시점(성공·실패·취소 모두)에 그 사이 다른 요청으로 교체되지 않았을 때만 해제된다. 종료가 진행 중이면(<code class="inline">_cts.IsCancellationRequested</code>) 늦게 도착한 <code class="inline">postResult</code>는 결과 처리 없이 요청을 해제(<code class="inline">ReleaseActiveRequest</code>)하고 ok로 응답한다. 같은 <code class="inline">requestId</code>로 <code class="inline">postResult</code>가 두 번 들어와도 결과 처리는 한 번만 실행된다. 파이프 서버 인스턴스는 4개이고 accept 루프가 요청 처리와 분리돼 있어, 결과 처리가 오래 걸려도 <code class="inline">getConfig</code>/<code class="inline">ping</code>은 native host의 2.5초 connect timeout 안에 응답한다. <code class="inline">shouldFetch</code>가 false인 모든 응답에는 사유(<code class="inline">noFetchReason</code>: <code class="inline">not_configured</code>, <code class="inline">invalid_base_url</code>, <code class="inline">range_not_ready</code>, <code class="inline">lease_active</code>, <code class="inline">backoff</code>, <code class="inline">not_due</code>, <code class="inline">protocol_mismatch</code>)가 함께 내려가고(§26), 설정 문제(<code class="inline">not_configured</code>/<code class="inline">invalid_base_url</code>)는 상태 표시에 <code class="inline">설정 오류: …</code>로 노출된다. <code class="inline">protocol_mismatch</code>는 설정 문제가 아니라서 <code class="inline">ConfigurationInvalid</code>를 올리지 않는다. BaseUrl 정책은 <code class="inline">Services/BaseUrlPolicy</code>(https + <code class="inline">*.daouoffice.com</code>, apex 제외) 한 곳에서만 판정하며 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 일치한다.</p><p><strong>protocol 게이트.</strong> <code class="inline">HandleRequestAsync</code>의 <code class="inline">getConfig</code> 처리 순서는 고정이다. (1) <code class="inline">lastError</code>가 있으면 300자로 잘라 <code class="inline">extension</code> 카테고리에 Warn 로그를 남긴다. (2) <code class="inline">ExtensionVersionGuard</code>로 버전을 확인한다. 불일치면 <code class="inline">SyncCompleted(ExtensionFailure)</code>, 일치하면 <code class="inline">ExtensionVersionConfirmed</code>를 올린다. (3) protocol 게이트: <code class="inline">request.ProtocolVersion != NativeBridgeProtocol.ProtocolVersion</code>(필드가 없으면 null이라 불일치)이면 <code class="inline">getConfig protocolVersion 불일치 reported=… expected=2</code> Warn 로그를 남기고 <code class="inline">BridgeConfigResponse.NoFetch(NoFetchReasons.ProtocolMismatch)</code>로 답한다. 이때 <code class="inline">BuildConfig</code>를 부르지 않으므로 requestId와 lease가 발급되지 않아 구버전 worker의 조회를 유발하지 않는다. (4) 게이트를 통과하면 <code class="inline">BuildConfig()</code>를 부르고, 이어서 <code class="inline">ShouldFetch</code>/<code class="inline">IsConfigurationProblem</code> 분기가 실행된다. <code class="inline">postResult</code>는 <code class="inline">protocolVersion</code>이 다르면 lease와 상태를 건드리지 않고 <code class="inline">NativeBridgeResponse.Fail("Unsupported protocolVersion.")</code>으로 거부한다. protocol 게이트 자체는 별도 오류 상태를 게시하지 않는다. 7.1.0 worker는 <code class="inline">extensionVersion</code>이 달라 버전 불일치 문구(<code class="inline">Chrome 확장 새로고침 필요 (7.1.0 → 7.2.0)</code>)가 보인다(§10.4, §27.6).</p><p>아래 발췌 셋은 모두 <code class="inline">Services/CalendarBridgeServer.cs</code>다. 첫째는 lease 상수 <code class="inline">FetchLeaseSeconds</code>와 <code class="inline">ResultLeaseSeconds</code>, 둘째는 <code class="inline">HandleRequestAsync</code> 전체(protocol 게이트 포함), 셋째는 <code class="inline">BuildConfig</code>부터 <code class="inline">AcceptResult</code>, <code class="inline">RunResultProcessingAsync</code>, <code class="inline">ReleaseActiveRequest</code>까지 이어지는 구간이다.</p><pre><code>    /// &lt;summary&gt;
+    /// getConfig에서 조회를 지시할 때 잡는 lease 길이(초). 확장이 DaouOffice 조회(시간 초과 포함)와
+    /// postResult 전송을 이 안에 끝내야 한다. 확장의 fetch 시간 초과는 이 값보다 충분히 짧아야 한다.
+    /// &lt;/summary&gt;
+    public const int FetchLeaseSeconds = 45;
+
+    /// &lt;summary&gt;postResult를 받은 뒤 결과 처리를 진행하는 동안 유지하는 lease 길이(초).&lt;/summary&gt;
+    private const int ResultLeaseSeconds = 60;</code></pre><pre><code>    /// &lt;summary&gt;파이프 요청 처리 진입점. 테스트에서 직접 호출한다.&lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// 모든 분기가 즉시 반환한다. &lt;c&gt;postResult&lt;/c&gt;의 결과 처리는 백그라운드 Task로 넘어가므로
+    /// 파이프 응답이 결과 처리에 묶이지 않는다.
+    /// &lt;/remarks&gt;
+    public Task&lt;NativeBridgeResponse&gt; HandleRequestAsync(NativeBridgeRequest? request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Type))
+            return Task.FromResult(NativeBridgeResponse.Fail(&quot;Invalid native bridge request.&quot;));
+
+        BridgeHeartbeat?.Invoke(this, EventArgs.Empty);
+
+        switch (request.Type)
         {
-            var requestUri = BuildCalendarUri(settingsSnapshot, fromSnapshot, toSnapshot);
-            using var handler = HttpMessageHandlerFactory?.Invoke() ?? CreateDefaultHandler();
-            using var client = new HttpClient(handler, disposeHandler: false)
+            case &quot;ping&quot;:
+                return Task.FromResult(NativeBridgeResponse.Success());
+
+            case &quot;getConfig&quot;:
             {
-                Timeout = TimeSpan.FromSeconds(30)
-            };
-            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            request.Headers.TryAddWithoutValidation(&quot;Cookie&quot;, result.CookieHeader);
-            request.Headers.TryAddWithoutValidation(&quot;Accept&quot;, &quot;application/json, text/plain, */*&quot;);
-            request.Headers.TryAddWithoutValidation(&quot;Accept-Language&quot;, &quot;ko-KR,ko;q=0.9,en;q=0.8&quot;);
-            if (!string.IsNullOrWhiteSpace(result.UserAgent))
-                request.Headers.TryAddWithoutValidation(&quot;User-Agent&quot;, result.UserAgent);
+                if (!string.IsNullOrWhiteSpace(request.LastError))
+                {
+                    var reported = request.LastError!.Length &gt; 300
+                        ? request.LastError!.Substring(0, 300)
+                        : request.LastError!;
+                    LogService.Warn(&quot;extension&quot;, $&quot;확장 보고 오류 ver={request.ExtensionVersion ?? &quot;?&quot;}: {reported}&quot;);
+                }
 
-            if (Uri.TryCreate(settingsSnapshot.BaseUrl, UriKind.Absolute, out var baseUri))
-                request.Headers.Referrer = new Uri(baseUri, &quot;/gw/app/calendar&quot;);
+                var expectedExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion;
+                if (ExtensionVersionGuard.IsMismatch(request.ExtensionVersion, expectedExtensionVersion))
+                {
+                    LogService.Warn(&quot;extension&quot;,
+                        $&quot;확장 버전 불일치 reported={request.ExtensionVersion ?? &quot;(없음)&quot;} expected={expectedExtensionVersion}&quot;);
+                    SyncCompleted?.Invoke(this, BridgeSyncEventArgs.ExtensionFailure(request.ExtensionVersion, expectedExtensionVersion));
+                }
+                else
+                {
+                    ExtensionVersionConfirmed?.Invoke(this, EventArgs.Empty);
+                }
 
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? &quot;&quot;;
-            var location = response.Headers.Location?.ToString() ?? &quot;&quot;;
+                // protocol 게이트: 불일치면 BuildConfig를 부르지 않는다(requestId·lease를 발급하지 않는다).
+                BridgeConfigResponse config;
+                if (request.ProtocolVersion != NativeBridgeProtocol.ProtocolVersion)
+                {
+                    LogService.Warn(&quot;bridge&quot;, $&quot;getConfig protocolVersion 불일치 reported={request.ProtocolVersion?.ToString(CultureInfo.InvariantCulture) ?? &quot;(없음)&quot;} expected={NativeBridgeProtocol.ProtocolVersion}&quot;);
+                    config = BridgeConfigResponse.NoFetch(NoFetchReasons.ProtocolMismatch);
+                }
+                else
+                {
+                    config = BuildConfig();
+                }
 
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                var retryAt = RecordFailure(authenticationFailure: true);
-                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.AuthRequired(&quot;Chrome의 DaouOffice 세션이 만료되었습니다.&quot;, retryAt));
-                return;
+                if (config.ShouldFetch)
+                {
+                    LogService.Info(&quot;bridge&quot;, $&quot;fetch 발행 requestId={config.RequestId}&quot;);
+                    FetchIssued?.Invoke(this, EventArgs.Empty);
+                }
+                else if (NoFetchReasons.IsConfigurationProblem(config.NoFetchReason))
+                {
+                    LogService.Warn(&quot;bridge&quot;, $&quot;getConfig noFetch reason={config.NoFetchReason}&quot;);
+                    ConfigurationInvalid?.Invoke(this, config.NoFetchReason!);
+                }
+
+                return Task.FromResult(NativeBridgeResponse.Success(config));
             }
 
-            if ((int)response.StatusCode is &gt;= 300 and &lt; 400)
-            {
-                var retryAt = RecordFailure(authenticationFailure: true);
-                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.AuthRequired(&quot;DaouOffice가 로그인 페이지로 리디렉션했습니다.&quot;, retryAt));
-                return;
-            }
+            case &quot;postResult&quot;:
+                // 구버전 확장의 결과(쿠키 필드 형식 포함)는 lease와 상태를 건드리지 않고 거부한다.
+                if (request.ProtocolVersion != NativeBridgeProtocol.ProtocolVersion)
+                {
+                    LogService.Warn(&quot;bridge&quot;, $&quot;postResult 거부: protocolVersion={request.ProtocolVersion?.ToString(CultureInfo.InvariantCulture) ?? &quot;(없음)&quot;} expected={NativeBridgeProtocol.ProtocolVersion}&quot;);
+                    return Task.FromResult(NativeBridgeResponse.Fail(&quot;Unsupported protocolVersion.&quot;));
+                }
+                if (request.Result is null)
+                    return Task.FromResult(NativeBridgeResponse.Fail(&quot;Missing bridge result payload.&quot;));
+                return Task.FromResult(AcceptResult(request.Result));
 
-            var looksLikeHtml = contentType.Contains(&quot;text/html&quot;, StringComparison.OrdinalIgnoreCase) ||
-                                body.TrimStart().StartsWith(&quot;&lt;&quot;, StringComparison.Ordinal);
-            var redirectedToLogin = location.Contains(&quot;login&quot;, StringComparison.OrdinalIgnoreCase);
-
-            if (looksLikeHtml || redirectedToLogin)
-            {
-                var retryAt = RecordFailure(authenticationFailure: true);
-                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.AuthRequired(&quot;Chrome의 DaouOffice 세션이 만료되었거나 로그인 페이지로 이동했습니다.&quot;, retryAt));
-                return;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var retryAt = RecordFailure(authenticationFailure: false);
-                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;DaouOffice HTTP {(int)response.StatusCode}&quot;, BridgeFailureKind.Api, retryAt));
-                return;
-            }
-
-            var envelope = JsonSerializer.Deserialize&lt;DaouApiEnvelope&gt;(body, _jsonOptions);
-            if (envelope is null)
-                throw new JsonException(&quot;응답 JSON이 비어 있습니다.&quot;);
-
-            if (!IsSuccessCode(envelope.Code))
-            {
-                var message = string.IsNullOrWhiteSpace(envelope.Message) ? &quot;DaouOffice API 오류&quot; : envelope.Message!;
-                var retryAt = RecordFailure(authenticationFailure: false);
-                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.Api, retryAt));
-                return;
-            }
-
-            if (DiscardIfRangeChanged(settingsSnapshot, fromSnapshot, toSnapshot))
-            {
-                LogService.Warn(&quot;bridge&quot;, &quot;표시 범위 또는 설정이 변경되어 이전 결과를 버리고 즉시 재발행합니다.&quot;);
-                return;
-            }
-
-            RecordSuccess(settingsSnapshot.RefreshMinutes);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Ok(envelope.Data, fromSnapshot, toSnapshot));
+            default:
+                return Task.FromResult(NativeBridgeResponse.Fail($&quot;Unknown native bridge request: {request.Type}&quot;));
         }
-        catch (HttpRequestException ex)
-        {
-            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 네트워크 오류&quot;, ex);
-            var retryAt = RecordFailure(authenticationFailure: false);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;네트워크 오류: {ex.Message}&quot;, BridgeFailureKind.Network, retryAt));
-        }
-        catch (TaskCanceledException ex)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                LogService.Info(&quot;bridge&quot;, &quot;종료 중 HTTP 요청 취소&quot;);
-                return;
-            }
-
-            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 요청 취소/시간 초과&quot;, ex);
-            var retryAt = RecordFailure(authenticationFailure: false);
-            var message = ex.InnerException is TimeoutException ? &quot;DaouOffice 응답 시간 초과&quot; : &quot;네트워크 요청이 취소되었습니다.&quot;;
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.Network, retryAt));
-        }
-        catch (Exception ex)
-        {
-            LogService.Warn(&quot;bridge.http&quot;, &quot;DaouOffice 세션 브리지 실패&quot;, ex);
-            var retryAt = RecordFailure(authenticationFailure: false);
-            SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail($&quot;DaouOffice 세션 브리지 실패: {ex.Message}&quot;, BridgeFailureKind.General, retryAt));
-        }
-    }</code></pre><h3>9.4 반복/음력</h3><p>UI는 <code class="inline">recurrence</code>를 재계산하지 않고 API가 준 <code class="inline">startTime/endTime</code>으로 날짜를 매칭한다. 실데이터(작업 지시서 2절, 2026-09-28 캐시 관측)에서 확인한 응답 규칙은 다음과 같다(응답 계약 전체는 §32).</p><ul><li><strong>템플릿·범위 밖 occurrence</strong>: 반복 일정은 조회 범위 안 occurrence가 개별 이벤트로 온다. 음력 공휴일은 여기에 더해 1970년 날짜의 템플릿 이벤트 3건(<code class="inline">1970-02-06</code>, <code class="inline">1970-02-07</code>, <code class="inline">1970-05-12</code>)과 조회 범위 밖 occurrence 1건(2027년)이 섞여 왔다. 이들은 그 조회의 42칸 그리드(조회 범위) 밖 날짜이고, 앱은 <code class="inline">CalendarGrid.OccursOnDate</code>로 자기 날짜 셀에만 매칭하므로(<code class="inline">MainViewModel.GetEventsForDate</code>) 그 달 화면에는 나타나지 않는다.</li><li><strong>occurrence id</strong>: 반복 occurrence의 <code class="inline">id</code>는 <code class="inline">{원본 id}_{13자리 숫자}</code> 형식으로 서로 다르다(관측 예: <code class="inline">175971_1786633200000</code>). 숫자를 epoch 밀리초로 해석하면 RRULE의 월·일을 양력으로 본 날짜(예: <code class="inline">175903_1798556400000</code> → 2026-12-30 00:00 KST, 계산)이며 실제 시작일(이 예는 2027-02-06)과 다를 수 있다(의미는 추정).</li><li><strong>id 중복</strong>: 같은 <code class="inline">id</code>는 <strong>서로 다른 캘린더 사이에서만</strong> 관측됐다(같은 일정이 두 <code class="inline">calendarId</code>로 5건). 처리는 아래 문단의 <code class="inline">EventDeduplicator</code>가 맡는다.</li><li><strong>종일 일정 종료 시각</strong>: <code class="inline">00:00:00</code>(공휴일 등, 시작과 같은 값), <code class="inline">23:59:00</code>, <code class="inline">23:59:59.999</code> 세 종류이며 모두 종료일을 <strong>포함</strong>하는 의미다. 앱은 종료 날짜까지 포함해 매칭하고, 종료 날짜가 시작 날짜보다 이르면 시작일로 본다(<code class="inline">CalendarGrid.OccursOnDate</code>).</li><li><strong>공휴일 기한</strong>: 공휴일 RRULE은 모두 <code class="inline">UNTIL=20261231</code>이라 2027년 공휴일은 서버 데이터가 갱신돼야 내려온다(앱 버그 아님). 단 음력 12/30(RRULE <code class="inline">BYMONTH=12;BYMONTHDAY=30</code>)이 양력 2027-02-06으로 내려온 사례가 있어 2027년 초 날짜 일부는 내려온다(관측). 서버가 <code class="inline">UNTIL</code>을 어떤 기준으로 판정하는지는 미확인이다.</li><li><strong>음력</strong>: 앱에는 음력 변환 로직이 없다. <code class="inline">lunar</code> 필드(<code class="inline">Models/CalendarModels.cs</code>의 <code class="inline">DaouCalendarEvent.Lunar</code>)는 역직렬화만 하고 날짜 계산에 쓰지 않으므로, 음력 날짜의 양력 변환은 서버 결과를 그대로 쓴다.</li></ul><p>같은 일정이 여러 캘린더에 공유되면 API는 동일한 <code class="inline">id</code>를 캘린더 수만큼 내려보낸다(실데이터 37건 중 5건). UI는 <code class="inline">Models/EventDeduplicator.cs</code>에서 <code class="inline">id</code> 기준으로 이를 1건으로 합치고, 소속 캘린더 ID/이름을 모두 <code class="inline">CalendarIds</code>/<code class="inline">CalendarNames</code>에 보존한다. 캐시 파일에는 병합 전 원본 이벤트를 그대로 저장하며(역호환), 병합은 캐시 로드 직후 화면에 표시하기 직전에 수행한다. 숨김 판정은 소속 캘린더가 모두 숨겨진 경우에만 적용되고, 하나라도 표시 중이면 일정은 계속 보인다.</p></section>
-<section id="sync"><h2>10. 동기화 스케줄, 상태 머신, 재시도</h2><h3>10.1 두 개의 주기</h3><div class="grid2"><div class="card"><h3>Chrome 쪽</h3><p>MV3 alarm: <strong>30초</strong>. Worker를 깨워 native host에 <code>getConfig</code>를 물어본다. 알람이 계속 반복되므로 worker는 사실상 상시 활성이다.</p></div><div class="card"><h3>앱 쪽</h3><p>다음 fetch 시점을 정하는 것은 <code class="inline">CalendarBridgeServer._nextAttemptAt</code>이다(성공 시 설정의 <code class="inline">RefreshMinutes</code>, 실패 시 backoff). 앱에는 fetch를 유발하는 주기 타이머가 없다. 앱의 1초 시계 타이머(<code class="inline">MainWindow.ClockTimer_Tick</code>)는 시각을 갱신하고, 날짜가 바뀌면 <code class="inline">MainViewModel.RefreshTodayIfChanged()</code>가 달력을 다시 만든 뒤(달이 바뀌었고 이전 “오늘”의 달을 보고 있었으면 <code class="inline">GoToday()</code>로 새 달로 이동, 아니면 <code class="inline">BuildCalendar()</code>) true를 돌려준다. 그때 <code class="inline">App.RefreshAsync(true)</code>로 <strong>강제 동기화를 한 번 요청</strong>한다. 날짜가 바뀌지 않은 틱은 동기화를 만들지 않으므로 이 타이머는 주기 fetch 타이머가 아니다.</p></div></div><p>30초마다 Daou API를 직접 때리는 구조가 아니다. worker는 <code class="inline">getConfig</code> 응답의 <code class="inline">shouldFetch</code>가 false면 그 회차를 fetch 없이 끝내고, 다음 알람에 다시 깨어난다.</p><p>확장이 <code class="inline">syncOnce()</code>를 호출하는 트리거는 5종이다. service worker 최초 로드 시의 top-level <code class="inline">syncOnce()</code> 호출은 제거됐고, 최상위에서는 <code class="inline">ensureAlarm()</code>만 수행한다(worker가 깨어날 때마다 host를 즉시 스폰하지 않는다).</p><ul><li><code class="inline">chrome.runtime.onInstalled</code> — 알람 보장 후 1회 동기화</li><li><code class="inline">chrome.runtime.onStartup</code> — 알람 보장 후 1회 동기화</li><li><code class="inline">chrome.cookies.onChanged</code> — 쿠키 도메인이 daouoffice.com 또는 그 서브도메인일 때, <strong>5초 debounce</strong>(창 안의 연속 변경은 1회로 합침)</li><li><code class="inline">chrome.alarms.onAlarm</code> — 기본 30초 주기 알람</li><li><code class="inline">chrome.action.onClicked</code> — 툴바 아이콘 클릭</li></ul><p>host 연결(<code class="inline">getConfig</code> <code class="inline">sendNativeMessage</code>)이 연속 3/4/5회 이상 실패하면 확장 알람 주기가 1/2/5분으로 늘어나고, host가 다시 응답하면 30초로 복귀한다. 실패로 세는 것은 <code class="inline">sendNativeMessage</code> 자체가 예외를 던진 경우와, native host가 오버레이 파이프에 닿지 못해 <code class="inline">ok: false</code>로 답한 경우(오버레이 미실행 등)다. 실행 중인 오버레이는 <code class="inline">getConfig</code>에 항상 <code class="inline">ok: true</code>로 답하므로 이 응답이 오면(<code class="inline">shouldFetch</code>가 false여도) 성공으로 보고 카운터를 0으로 되돌린다. <code class="inline">ensureAlarm</code>은 기존 알람의 <code class="inline">periodInMinutes</code>가 목표 주기와 다르면 <code class="inline">chrome.alarms.create</code>로 재생성한다. MV3 worker는 수시로 종료되므로 실패 카운터는 모듈 변수가 아니라 <code class="inline">chrome.storage.session</code>의 <code class="inline">daouBridgeBackoff</code>에 보관한다(상한 99, 오버레이 서버의 <code class="inline">_consecutiveFailures</code>와 별개). <code class="inline">postResult</code> 전송 실패는 이 카운터에 반영하지 않는다(§29).</p><h3>10.2 중복 방지</h3><p>fetch 발행 시 GUID <code class="inline">requestId</code>와 45초 lease를 만든다. <code class="inline">postResult</code>는 받은 <code class="inline">requestId</code>가 현재 활성 요청과 같은지만 확인하고 <strong>즉시 ok로 응답</strong>하며, 실제 DaouOffice HTTP 조회는 백그라운드 Task에서 수행한다. 결과를 받아들인 시점에 lease를 60초로 갱신하고 <code class="inline">_activeRequestId</code>는 그대로 두므로, 조회가 끝나기 전에는 새 fetch가 발행되지 않는다. lease와 <code class="inline">_activeRequestId</code>는 HTTP가 끝난 시점(성공·실패·취소 모두)에 그 사이 다른 요청으로 교체되지 않았을 때만 해제된다. 종료가 진행 중이면(<code class="inline">_cts.IsCancellationRequested</code>) 늦게 도착한 <code class="inline">postResult</code>는 조회 없이 요청을 해제(<code class="inline">ReleaseActiveRequest</code>)하고 ok로 응답한다. 같은 <code class="inline">requestId</code>로 <code class="inline">postResult</code>가 두 번 들어와도 HTTP 조회는 한 번만 나간다. 파이프 서버 인스턴스는 4개이고 accept 루프가 요청 처리와 분리돼 있어, 조회가 오래 걸려도 <code class="inline">getConfig</code>/<code class="inline">ping</code>은 native host의 2.5초 connect timeout 안에 응답한다. <code class="inline">shouldFetch</code>가 false인 모든 응답에는 사유(<code class="inline">noFetchReason</code>: <code class="inline">not_configured</code>, <code class="inline">invalid_base_url</code>, <code class="inline">range_not_ready</code>, <code class="inline">lease_active</code>, <code class="inline">backoff</code>, <code class="inline">not_due</code>)가 함께 내려가고(§26), 설정 문제(<code class="inline">not_configured</code>/<code class="inline">invalid_base_url</code>)는 상태 표시에 <code class="inline">설정 오류: …</code>로 노출된다. BaseUrl 정책은 <code class="inline">Services/BaseUrlPolicy</code>(https + <code class="inline">*.daouoffice.com</code>, apex 제외) 한 곳에서만 판정하며 확장 <code class="inline">host_permissions</code>(<code class="inline">https://*.daouoffice.com/*</code>)와 일치한다. 아래 발췌는 <code class="inline">Services/CalendarBridgeServer.cs</code>에서 <code class="inline">BuildConfig</code>부터 <code class="inline">AcceptResult</code>, <code class="inline">RunResultFetchAsync</code>, <code class="inline">ReleaseActiveRequest</code>까지 이어지는 구간이다.</p><pre><code>    private BridgeConfigResponse BuildConfig()
+    }</code></pre><pre><code>    private BridgeConfigResponse BuildConfig()
     {
         lock (_gate)
         {
@@ -575,7 +633,7 @@ public sealed class NativeMessagingRegistrationService
                 return BridgeConfigResponse.NoFetch(_consecutiveFailures &gt; 0 ? NoFetchReasons.Backoff : NoFetchReasons.NotDue);
 
             _activeRequestId = Guid.NewGuid().ToString(&quot;N&quot;);
-            _leaseUntil = now.AddSeconds(45);
+            _leaseUntil = now.AddSeconds(FetchLeaseSeconds);
             _forceRefresh = false;
 
             return new BridgeConfigResponse
@@ -593,8 +651,8 @@ public sealed class NativeMessagingRegistrationService
     }
 
     /// &lt;summary&gt;
-    /// 확장이 보낸 결과를 받아들이고 &lt;b&gt;즉시&lt;/b&gt; 응답한다. 실제 DaouOffice 조회는 백그라운드 Task에서 수행한다.
-    /// lease는 여기서 갱신만 하고 &lt;c&gt;_activeRequestId&lt;/c&gt;는 유지하므로 조회 중에는 새 fetch가 발행되지 않는다.
+    /// 확장이 보낸 결과를 받아들이고 &lt;b&gt;즉시&lt;/b&gt; 응답한다. 결과 처리(판정과 반영)는 백그라운드 Task에서 수행한다.
+    /// lease는 여기서 갱신만 하고 &lt;c&gt;_activeRequestId&lt;/c&gt;는 유지하므로 결과 처리 중에는 새 fetch가 발행되지 않는다.
     /// &lt;/summary&gt;
     private NativeBridgeResponse AcceptResult(BridgeResultPayload result)
     {
@@ -608,7 +666,7 @@ public sealed class NativeMessagingRegistrationService
             if (string.IsNullOrWhiteSpace(result.RequestId) ||
                 !string.Equals(result.RequestId, _activeRequestId, StringComparison.Ordinal))
             {
-                LogService.Warn(&quot;bridge&quot;, $&quot;postResult 무시: requestId 불일치 (cookies={result.CookieCount}, source={result.CookieSource ?? &quot;none&quot;})&quot;);
+                LogService.Warn(&quot;bridge&quot;, $&quot;postResult 무시: requestId 불일치 (outcome={BridgeLogSummary.Token(result.Outcome)})&quot;);
                 return NativeBridgeResponse.Success();
             }
 
@@ -636,24 +694,42 @@ public sealed class NativeMessagingRegistrationService
 
         var token = _cts.Token;
         var task = Task.Run(
-            () =&gt; RunResultFetchAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
+            () =&gt; RunResultProcessingAsync(result, requestId, settingsSnapshot, fromSnapshot, toSnapshot, token),
             CancellationToken.None);
         Track(task);
 
         return NativeBridgeResponse.Success();
     }
 
-    /// &lt;summary&gt;백그라운드 조회 래퍼. 성공/실패/취소 어느 쪽이든 마지막에 lease와 활성 요청을 해제한다.&lt;/summary&gt;
-    private async Task RunResultFetchAsync(BridgeResultPayload result, string requestId, AppSettings settingsSnapshot,
+    /// &lt;summary&gt;
+    /// 백그라운드 결과 처리 래퍼. 성공/실패/취소 어느 쪽이든 마지막에 lease와 활성 요청을 해제한다.
+    /// 종료 취소는 로그만 남기고, 그 밖의 예외는 일반 실패로 알린다(예외 메시지 원문은 문구에 넣지 않는다).
+    /// &lt;/summary&gt;
+    private async Task RunResultProcessingAsync(BridgeResultPayload result, string requestId, AppSettings settingsSnapshot,
         DateTimeOffset fromSnapshot, DateTimeOffset toSnapshot, CancellationToken cancellationToken)
     {
         try
         {
             await ProcessResultAsync(result, settingsSnapshot, fromSnapshot, toSnapshot, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            LogService.Info(&quot;bridge&quot;, &quot;종료 중 결과 처리 취소&quot;);
+        }
         catch (Exception ex)
         {
             LogService.Error(&quot;bridge&quot;, &quot;postResult 처리 실패&quot;, ex);
+            var retryAt = RecordFailure(authenticationFailure: false);
+            var message = string.Format(CultureInfo.InvariantCulture, BridgeResultClassifier.ProcessingFailedFormat, ex.GetType().Name);
+            try
+            {
+                SyncCompleted?.Invoke(this, BridgeSyncEventArgs.Fail(message, BridgeFailureKind.General, retryAt));
+            }
+            catch (Exception notifyException)
+            {
+                // 실패 알림 구독자가 던져도 백그라운드 Task가 faulted로 끝나지 않게 한다.
+                LogService.Error(&quot;bridge&quot;, &quot;postResult 처리 실패 알림 실패&quot;, notifyException);
+            }
         }
         finally
         {
@@ -662,7 +738,7 @@ public sealed class NativeMessagingRegistrationService
     }
 
     /// &lt;summary&gt;
-    /// 조회가 끝난 요청의 lease를 해제한다.
+    /// 결과 처리가 끝난 요청의 lease를 해제한다.
     /// 그 사이 &lt;c&gt;UpdateRequest&lt;/c&gt;/&lt;c&gt;ForceRefresh&lt;/c&gt;/&lt;c&gt;DiscardIfRangeChanged&lt;/c&gt;가 새 요청을 만들었으면 건드리지 않는다.
     /// &lt;/summary&gt;
     private void ReleaseActiveRequest(string requestId)
@@ -678,7 +754,7 @@ public sealed class NativeMessagingRegistrationService
             _activeRequestId = &quot;&quot;;
             _leaseUntil = DateTimeOffset.MinValue;
         }
-    }</code></pre><h3>10.3 backoff</h3><p>인증 실패는 1분 뒤 재시도한다. 일반 네트워크/API 실패는 30초 → 60초 → 120초 → 240초 → 480초 수준으로 증가한다. 성공하면 실패 카운터를 초기화하고 refresh interval 기준으로 다음 due를 잡는다. 인증 실패도 <code class="inline">_consecutiveFailures</code>를 함께 증가시키며, 일반 실패 지연의 실제 상한은 480초다(코드에 적힌 600초 상한은 지수 계산상 도달하지 않는다).</p><pre><code>    private void RecordSuccess(int refreshMinutes)
+    }</code></pre><h3>10.3 backoff</h3><p>인증 실패는 1분 뒤 재시도한다. 일반 네트워크/API 실패는 30초 → 60초 → 120초 → 240초 → 480초 수준으로 증가한다. 성공하면 실패 카운터를 초기화하고 refresh interval 기준으로 다음 due를 잡는다. 인증 실패도 <code class="inline">_consecutiveFailures</code>를 함께 증가시키며, 일반 실패 지연의 실제 상한은 480초다(코드에 적힌 600초 상한은 지수 계산상 도달하지 않는다).</p><p><strong>재로그인 뒤 회복 시간(계산).</strong> 인증 실패(401/403, 리디렉션, 2xx HTML, ROUTE-0004)가 판정되면 <code class="inline">RecordFailure(authenticationFailure: true)</code>가 다음 시도를 1분 뒤로 잡는다. 그 전에 도착하는 getConfig는 <code class="inline">BuildConfig</code>의 due 판정에서 모두 <code class="inline">backoff</code>로 돌아간다(<code class="inline">_consecutiveFailures</code>가 0보다 크므로). 1분이 지난 뒤 처음 오는 알람(30초 주기)에서 조회가 다시 나가므로, 재로그인 뒤 다음 성공 조회까지는 최대 약 90초(1분 backoff + 알람 30초)다. 트레이 “새로고침”(<code class="inline">App.RefreshAsync(true)</code> → <code class="inline">UpdateRequest(force: true)</code>)은 backoff 시각을 비우므로 다음 알람(30초 이내)에서 조회가 나간다. 7.2.0에서 쿠키 변경 트리거를 뺀 것이 이 시간을 늘리지 않는 이유는 §6.1에 있다. 실환경 확인은 아직 없다(미확인, §34).</p><p>아래 첫 발췌는 <code class="inline">Services/CalendarBridgeServer.cs</code>의 <code class="inline">RecordSuccess</code>부터 <code class="inline">FormatDate</code>까지 이어지는 구간이다.</p><pre><code>    private void RecordSuccess(int refreshMinutes)
     {
         lock (_gate)
         {
@@ -700,28 +776,8 @@ public sealed class NativeMessagingRegistrationService
         }
     }
 
-    private static Uri BuildCalendarUri(AppSettings settings, DateTimeOffset from, DateTimeOffset to)
-    {
-        var baseUri = new Uri(settings.BaseUrl.TrimEnd(&#x27;/&#x27;) + &quot;/&quot;, UriKind.Absolute);
-        var endpoint = new Uri(baseUri, &quot;gw/api/calendar/event&quot;);
-        var query = new List&lt;string&gt;
-        {
-            $&quot;timeMin={Uri.EscapeDataString(FormatDate(from))}&quot;,
-            $&quot;timeMax={Uri.EscapeDataString(FormatDate(to))}&quot;,
-            &quot;includingAttendees=true&quot;
-        };
-
-        foreach (var calendarId in settings.CalendarIds)
-            query.Add($&quot;calendarIds%5B%5D={Uri.EscapeDataString(calendarId)}&quot;);
-
-        var builder = new UriBuilder(endpoint)
-        {
-            Query = string.Join(&quot;&amp;&quot;, query)
-        };
-        return builder.Uri;
-    }
-
-    private static bool IsSuccessCode(JsonElement code)
+    private static string FormatDate(DateTimeOffset value) =&gt;
+        value.ToString(&quot;yyyy-MM-dd&#x27;T&#x27;HH:mm:ss.fffzzz&quot;, CultureInfo.InvariantCulture);</code></pre><p><code class="inline">IsSuccessCode</code>는 7.2.0에서 <code class="inline">Services/BridgeResultClassifier.cs</code>로 옮겨 private static 메서드가 됐다. 아래 발췌가 그 전체다.</p><pre><code>    private static bool IsSuccessCode(JsonElement code)
     {
         return code.ValueKind switch
         {
@@ -729,10 +785,7 @@ public sealed class NativeMessagingRegistrationService
             JsonValueKind.Number =&gt; code.TryGetInt32(out var value) &amp;&amp; value == 200,
             _ =&gt; false
         };
-    }
-
-    private static string FormatDate(DateTimeOffset value) =&gt;
-        value.ToString(&quot;yyyy-MM-dd&#x27;T&#x27;HH:mm:ss.fffzzz&quot;, CultureInfo.InvariantCulture);</code></pre><h3>10.4 상태 표시</h3><p>health timer는 20초마다 평가하고 heartbeat가 95초 넘게 없으면(기동 후 한 번도 받지 못했으면 첫 평가에서) “Chrome 확장 연결 대기”로 바꾼다.</p><div class="table-wrap"><table><thead><tr><th>상태</th><th>표시 문구</th><th>isError</th></tr></thead><tbody><tr><td><code>Starting</code></td><td>시작 중…</td><td>false</td></tr><tr><td><code>WaitingForChrome</code></td><td>Chrome 백그라운드 대기, Chrome 확장 연결 대기[ · 마지막 HH:mm][ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm][ · 확장 파일 설치 실패][ · Native host 등록 실패]</td><td>false</td></tr><tr><td><code>Connected</code></td><td>Chrome 브리지 연결됨 · 동기화 대기[ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm][ · 확장 파일 설치 실패][ · Native host 등록 실패]</td><td>false</td></tr><tr><td><code>SyncRequested</code></td><td>동기화 요청 중…</td><td>false</td></tr><tr><td><code>Syncing</code></td><td>동기화 중…</td><td>false</td></tr><tr><td><code>Synced</code></td><td>정상 · 동기화 HH:mm</td><td>false</td></tr><tr><td><code>AuthenticationRequired</code></td><td>{인증 실패 메시지}(재시도 접미 없음). 메시지는 쿠키가 없을 때 확장이 보낸 error 문자열(예: Chrome의 DaouOffice 로그인 세션을 찾지 못했습니다. Chrome에서 DaouOffice에 다시 로그인해 주세요., 확장이 error를 싣지 않았으면 Chrome에서 DaouOffice 로그인 쿠키를 찾지 못했습니다.) 또는 HTTP 응답으로 판정한 §32.4의 인증 문구 3종이다. 메시지가 비었을 때만 DaouOffice 재로그인 필요로 대체하며, 서버는 항상 비어 있지 않은 메시지를 넘기므로 현재 코드 경로에서는 보이지 않는다(§27.2)</td><td>true</td></tr><tr><td><code>NetworkError</code></td><td>네트워크 오류: {예외 메시지} · 재시도 HH:mm<br>DaouOffice 응답 시간 초과 · 재시도 HH:mm<br>네트워크 요청이 취소되었습니다. · 재시도 HH:mm<br>(조건은 표 아래 목록)</td><td>true</td></tr><tr><td><code>ExtensionError</code></td><td>Chrome 확장 새로고침 필요 ({보고 버전} → {기대 버전}). 기대 버전은 7.1.0이고, 버전을 보내지 않는 7.0.0 확장이면 보고 버전 자리에 7.0.0 이하가 들어간다. Decorate 접미는 붙지 않는다 (T2.2)</td><td>true</td></tr><tr><td><code>ConfigurationInvalid</code></td><td>설정 오류: {사유} (T1.3)</td><td>true</td></tr><tr><td><code>GeneralError</code></td><td>대표: DaouOffice HTTP {코드} · 재시도 HH:mm<br>설정 저장 실패 · 로그 확인<br>Native host 등록 실패: {사유} · 로그 확인<br>(전량은 표 아래 목록)</td><td>true</td></tr></tbody></table></div><p><code class="inline">NetworkError</code>·<code class="inline">GeneralError</code> 문구 전량(원천 문자열 그대로, <code class="inline">HH:mm</code>은 다음 재시도 시각):</p><ul><li><code class="inline">NetworkError</code>(<code class="inline">CalendarBridgeServer.ProcessResultAsync</code> → <code class="inline">MarkNetworkError</code>): <code class="inline">HttpRequestException</code>이면 <code class="inline">네트워크 오류: {예외 메시지} · 재시도 HH:mm</code>, HTTP 요청이 <code class="inline">TaskCanceledException</code>으로 끝나고 내부 예외가 <code class="inline">TimeoutException</code>이면(HttpClient 제한 시간 30초 초과로 보는 분기) <code class="inline">DaouOffice 응답 시간 초과 · 재시도 HH:mm</code>, 그 밖의 취소면 <code class="inline">네트워크 요청이 취소되었습니다. · 재시도 HH:mm</code>이다. 종료 중 취소는 상태를 바꾸지 않는다. 메시지가 비면 <code class="inline">네트워크 오류</code>로 대체한다.</li><li>동기화 결과 실패(<code class="inline">BridgeFailureKind.Api</code>·<code class="inline">General</code> → <code class="inline">App.BridgeServer_SyncCompleted</code> → <code class="inline">MarkGeneralError</code>): 2xx가 아닌 HTTP 응답은 <code class="inline">DaouOffice HTTP {코드} · 재시도 HH:mm</code>(401·403·3xx·HTML 응답은 먼저 재로그인 필요로 분류된다), API 응답 <code class="inline">code</code>가 200이 아니면 <code class="inline">{API message} · 재시도 HH:mm</code>(message가 비면 <code class="inline">DaouOffice API 오류 · 재시도 HH:mm</code>), 그 밖의 예외는 <code class="inline">DaouOffice 세션 브리지 실패: {예외 메시지} · 재시도 HH:mm</code>, 쿠키는 있는데 확장이 <code class="inline">postResult</code>에 오류를 실어 보냈으면 <code class="inline">{확장 오류} · 재시도 HH:mm</code>이다. 오류 메시지가 없으면 <code class="inline">동기화 실패</code>로 대체한다.</li><li>저장 실패(<code class="inline">MarkPersistenceError</code>, 재시도 접미 없음): <code class="inline">설정 저장 실패 · 로그 확인</code>(<code class="inline">settings.json</code>), <code class="inline">캐시 저장 실패 · 로그 확인</code>(<code class="inline">calendar-cache.json</code>).</li><li>시작 구성 요소 실패(<code class="inline">MarkStartupComponentError</code>): <code class="inline">확장 파일 설치 실패: {사유} · 로그 확인</code>, <code class="inline">Native host 등록 실패: {사유} · 로그 확인</code>. 사유는 <code class="inline">StartupFailureReasons.Describe</code>가 만든다(최대 120자).</li><li>App·MainWindow가 조립해 <code class="inline">MarkGeneralError</code>로 넘기는 문구(재시도 접미 없음): <code class="inline">시작 실패: {사유}</code>(<code class="inline">OnStartup</code>의 바깥 <code class="inline">try</code>가 잡은 예외), <code class="inline">오류: {예외 메시지}</code>(처리되지 않은 UI 예외), <code class="inline">로그 폴더 열기 실패: {예외 메시지}</code>, <code class="inline">확장 폴더 열기 실패: {예외 메시지}</code>, <code class="inline">DaouOffice 페이지를 열지 못했습니다.</code>, 그리고 <code class="inline">App.ReportError</code>의 <code class="inline">{메시지}: {예외 메시지}</code>. <code class="inline">ReportError</code>의 메시지는 <code class="inline">동기화 결과 처리 실패</code>, <code class="inline">새로고침 실패</code>, <code class="inline">설정 열기 실패</code>, <code class="inline">제거 처리 실패</code>, <code class="inline">UI 동작 실패</code>(MainWindow 이벤트 처리기)다.</li></ul><p>health timer는 <code class="inline">AuthenticationRequired</code>/<code class="inline">ConfigurationInvalid</code> 상태를 덮어쓰지 않는다. <code class="inline">ExtensionError</code>는 heartbeat가 살아 있는 동안만 유지하고, 불일치 표시 중 Chrome이 꺼져 heartbeat가 95초 넘게 끊기면 “Chrome 확장 연결 대기”로 바꾼다. 기동 시 불러온 캐시의 조회 범위가 오늘(KST)을 포함하지 않으면 <code class="inline">MarkCacheOutOfRange()</code>가 호출되어 위 <code>WaitingForChrome</code>/<code>Connected</code> 문구 뒤에 <strong>· 캐시(범위 밖)</strong> 접미가 붙는다(T1.6). 접미 합성은 <code class="inline">Decorate</code> 한 곳에서만 하며, 정상 동기화가 한 번 성공하면 범위 밖 접미는 사라진다. 접미 합성 순서는 범위 밖 → 캐시 시각 → 시작 이슈다. 시작 이슈 접미(<code class="inline"> · 확장 파일 설치 실패</code>, <code class="inline"> · Native host 등록 실패</code>)는 <code class="inline">MarkStartupComponentError</code>가 기록한 순서대로 붙고(기동 시에는 확장 파일 추출을 native host 등록보다 먼저 시도한다), 동기화 성공으로는 사라지지 않으며, 같은 구성 요소가 나중에 성공하면(설정 창 저장 후 재시도 등) <code class="inline">MarkStartupComponentResolved</code>로 빠진다(새 상태를 게시하지 않으므로 다음 대기/연결 문구부터 반영된다). 상태 문구 대부분은 <code class="inline">SyncStatusService</code>가 만들지만 예외가 둘 있다. 캐시를 표시할 때의 <code class="inline">캐시 {HH:mm}</code>(<code class="inline">App.OnStartup</code>)와 동기화 성공 시의 <code class="inline">동기화 {HH:mm}</code>(<code class="inline">App.BridgeServer_SyncCompleted</code>)는 <code class="inline">MainWindow.SetEvents</code> → 뷰모델 <code class="inline">SetStatus</code>로 직접 설정된다. 또 GeneralError 메시지 일부(위 목록의 App·MainWindow 조립 문구)는 App·MainWindow가 조립해 <code class="inline">MarkGeneralError</code>로 넘긴다. 캐시를 읽고 기동한 경우 <code class="inline">MarkCacheLoaded(DateTimeOffset)</code>가 호출되어 “Chrome 백그라운드 대기”, “Chrome 브리지 연결됨 · 동기화 대기”, “Chrome 확장 연결 대기” 문구에 “ · 캐시 MM-dd HH:mm” 접미가 붙고(범위 밖 접미가 함께 있으면 “ · 캐시(범위 밖) · 캐시 MM-dd HH:mm” 순서), 동기화가 한 번 성공하면(<code class="inline">MarkSuccess</code>) 접미가 사라진다. 마지막 갱신 시각은 상태 텍스트의 ToolTip(“마지막 갱신 yyyy-MM-dd HH:mm”)에도 표시된다. 오류 상태(<code class="inline">StatusIsError</code>)에서는 말줄임(<code class="inline">CharacterEllipsis</code>)으로 잘린 상태 문구 전문이 ToolTip 첫 줄에, 마지막 갱신 줄이 둘째 줄에 온다(<code class="inline">MainViewModel.UpdateStatusToolTip</code>. 새 문구를 만들지 않고 <code class="inline">SyncStatusService</code>가 만든 문구를 그대로 쓴다).</p><p>기동 직후 전이(코드 분석 기준이며 UI에서 관찰하지 않았다 — 미확인): <code class="inline">App.OnStartup</code>은 마지막에 <code class="inline">MarkWaiting</code>(“Chrome 백그라운드 대기”+접미)을 게시한 직후 <code class="inline">RefreshAsync(true)</code>를 부른다. 이때 <code class="inline">CalendarBridgeServer.UpdateRequest</code>가 <code class="inline">force</code>=true로 호출되어 true를 돌려주므로 <code class="inline">MarkRequested</code>가 곧바로 “동기화 요청 중…”(접미 없음)으로 덮는다. 그래서 대기 문구와 그 캐시 접미는 거의 보이지 않는다. Chrome이 꺼져 있어 heartbeat가 한 번도 오지 않으면 첫 health 평가(기동 약 20초 뒤)에서 캐시 접미가 붙은 “Chrome 확장 연결 대기”로 바뀐다. <code class="inline">MarkHeartbeat</code>는 <code class="inline">Starting</code>/<code class="inline">WaitingForChrome</code>일 때만 <code class="inline">Connected</code>로 바꾸므로 “동기화 요청 중…” 상태에서 받은 heartbeat는 문구를 바꾸지 않는다. 전이 조건 전체는 상태 머신 전이표(§28)에 있다.</p><p>확장 버전 불일치(T2.2): 7.1.0 worker의 <code class="inline">getConfig</code> 요청은 <code class="inline">type</code>, <code class="inline">lastError</code>, <code class="inline">extensionVersion</code>(<code class="inline">chrome.runtime.getManifest().version</code>), <code class="inline">protocolVersion</code>(<code class="inline">1</code>, <code class="inline">NativeBridgeProtocol.ProtocolVersion</code>과 같은 값)을 싣는다. 앱은 <code class="inline">protocolVersion</code>을 <code class="inline">NativeBridgeRequest.ProtocolVersion</code>(nullable)으로 받아 로그 요약(<code class="inline">BridgeLogSummary.DescribeRequest</code>의 <code class="inline">protocolVersion=1</code>)에만 남기고 협상에는 쓰지 않으며, 이 필드가 없는 구버전 확장(7.0.0)도 호환으로 처리한다. 앱은 <code class="inline">getConfig</code> 요청의 <code class="inline">extensionVersion</code>을 <code class="inline">ChromeExtensionInstaller.ExpectedExtensionVersion</code>(EXE에 임베드된 확장 버전)과 비교한다(<code class="inline">Services/ExtensionVersionGuard</code>, 순수 로직). 다르면 <code class="inline">CalendarBridgeServer</code>가 <code class="inline">BridgeSyncEventArgs.ExtensionFailure</code>(<code class="inline">BridgeFailureKind.Extension</code>)를 올리고 <code class="inline">SyncStatusService.MarkExtensionVersionMismatch</code>가 <code>ExtensionError</code> 상태로 “Chrome 확장 새로고침 필요 ({보고 버전} → {기대 버전})”을 게시한다(Decorate 접미 없음). 확장이 버전을 보고하지 않는 구버전이면 보고 버전 자리에 <code class="inline">7.0.0 이하</code>를 표시하며(7.0.0은 <code class="inline">extensionVersion</code>을 보내지 않은 마지막 버전이다), 확장이 30초마다 같은 조합을 보고해도 재발행은 억제된다. 현재 상태가 <code>AuthenticationRequired</code>이면 재로그인 안내가 더 급하므로 불일치를 게시하지 않고, 불일치 처리(<code class="inline">App.BridgeServer_SyncCompleted</code>의 <code class="inline">BridgeFailureKind.Extension</code> 분기)는 재로그인 배너(<code class="inline">SetLoginRequired</code>)를 건드리지 않는다. 불일치 신호는 <code class="inline">SyncCompleted</code>에 실려 오므로 fetch가 진행되는 동안에는 “동기화 중…”·“정상 · 동기화 HH:mm”과 불일치 문구가 번갈아 보일 수 있다(알려진 동작, 현재 동작 그대로 두고 백로그로 관리한다 — §28.5, §38). 확장을 새로고침해 버전이 일치하는 <code class="inline">getConfig</code>가 오면 <code class="inline">CalendarBridgeServer.ExtensionVersionConfirmed</code> → <code class="inline">SyncStatusService.MarkExtensionVersionConfirmed</code>로 “Chrome 브리지 연결됨 · 동기화 대기”로 해제된다(현재 상태가 <code>ExtensionError</code>일 때만, 다른 상태에서는 아무것도 게시하지 않는다). 동기화가 한 번 성공해 “정상”으로 바뀌어도 버전이 여전히 다르면 다음 <code class="inline">getConfig</code>에서 다시 표시된다. 불일치는 fetch를 막지 않는다(<code class="inline">noFetchReason</code>과 무관하며 동기화는 계속 진행된다).</p><p>아래 발췌는 <code class="inline">Services/SyncStatusService.cs</code>의 <code class="inline">namespace</code> 선언부터 파일 끝까지다(첫 줄 <code class="inline">using System.Globalization;</code>만 생략).</p><pre><code>namespace DaouCalendarOverlay.Services;
+    }</code></pre><h3>10.4 상태 표시</h3><p>health timer는 20초마다 평가하고 heartbeat가 95초 넘게 없으면(기동 후 한 번도 받지 못했으면 첫 평가에서) “Chrome 확장 연결 대기”로 바꾼다.</p><div class="table-wrap"><table><thead><tr><th>상태</th><th>표시 문구</th><th>isError</th></tr></thead><tbody><tr><td><code>Starting</code></td><td>시작 중…</td><td>false</td></tr><tr><td><code>WaitingForChrome</code></td><td>Chrome 백그라운드 대기, Chrome 확장 연결 대기[ · 마지막 HH:mm][ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm][ · 확장 파일 설치 실패][ · Native host 등록 실패]</td><td>false</td></tr><tr><td><code>Connected</code></td><td>Chrome 브리지 연결됨 · 동기화 대기[ · 캐시(범위 밖)][ · 캐시 MM-dd HH:mm][ · 확장 파일 설치 실패][ · Native host 등록 실패]</td><td>false</td></tr><tr><td><code>SyncRequested</code></td><td>동기화 요청 중…</td><td>false</td></tr><tr><td><code>Syncing</code></td><td>동기화 중…</td><td>false</td></tr><tr><td><code>Synced</code></td><td>정상 · 동기화 HH:mm</td><td>false</td></tr><tr><td><code>AuthenticationRequired</code></td><td>{인증 실패 메시지}(재시도 접미 없음). 메시지는 <code>BridgeResultClassifier</code>가 판정한 인증 문구 3종이다: <code>Chrome의 DaouOffice 로그인이 필요합니다</code>(401/403, 200 응답 안의 ROUTE-0004), <code>DaouOffice가 로그인 페이지로 리디렉션했습니다.</code>(리디렉션), <code>Chrome의 DaouOffice 세션이 만료되었거나 로그인 페이지로 이동했습니다.</code>(2xx HTML). 판정 순서는 §32.4다. 메시지가 비었을 때만 DaouOffice 재로그인 필요로 대체하며, 판정기는 항상 비어 있지 않은 메시지를 넘기므로 현재 코드 경로에서는 보이지 않는다(§27.3)</td><td>true</td></tr><tr><td><code>NetworkError</code></td><td>네트워크 오류: DaouOffice에 연결하지 못했습니다 · 재시도 HH:mm<br>DaouOffice 응답 시간 초과 · 재시도 HH:mm<br>(조건은 표 아래 목록)</td><td>true</td></tr><tr><td><code>ExtensionError</code></td><td>Chrome 확장 새로고침 필요 ({보고 버전} → {기대 버전}). 기대 버전은 7.2.0이고, 버전을 보내지 않는 7.0.0 확장이면 보고 버전 자리에 7.0.0 이하가 들어간다. Decorate 접미는 붙지 않는다 (T2.2)</td><td>true</td></tr><tr><td><code>ConfigurationInvalid</code></td><td>설정 오류: {사유} (T1.3)</td><td>true</td></tr><tr><td><code>GeneralError</code></td><td>대표: DaouOffice HTTP {코드} · 재시도 HH:mm<br>설정 저장 실패 · 로그 확인<br>Native host 등록 실패: {사유} · 로그 확인<br>(전량은 표 아래 목록)</td><td>true</td></tr></tbody></table></div><p>판정 결과별 문구는 모두 <code class="inline">BridgeResultClassifier</code>의 public const다(원천 문자열 그대로, <code class="inline">HH:mm</code>은 다음 재시도 시각). 판정 조건은 §32.4이고 상태 전이는 §28이다.</p><div class="table-wrap"><table><thead><tr><th>상황</th><th>문구</th><th>App 경로 (<code>App.xaml.cs</code>)</th></tr></thead><tbody><tr><td>401/403, 200 응답 안의 ROUTE-0004</td><td><code>Chrome의 DaouOffice 로그인이 필요합니다</code></td><td>AuthRequired: 재로그인 배너를 켜고 <code>MarkAuthenticationRequired</code></td></tr><tr><td>리디렉션</td><td><code>DaouOffice가 로그인 페이지로 리디렉션했습니다.</code></td><td>AuthRequired</td></tr><tr><td>2xx + HTML</td><td><code>Chrome의 DaouOffice 세션이 만료되었거나 로그인 페이지로 이동했습니다.</code></td><td>AuthRequired</td></tr><tr><td>시간 초과</td><td><code>DaouOffice 응답 시간 초과</code> + <code> · 재시도 HH:mm</code></td><td>Network: <code>MarkNetworkError</code></td></tr><tr><td>네트워크 실패</td><td><code>네트워크 오류: DaouOffice에 연결하지 못했습니다</code> + 재시도 접미</td><td>Network: <code>MarkNetworkError</code></td></tr><tr><td>HTTP 비2xx</td><td><code>DaouOffice HTTP {status}</code> + 재시도 접미</td><td>GeneralError: <code>MarkGeneralError</code></td></tr><tr><td>API code가 200이 아님</td><td>envelope.message 또는 <code>DaouOffice API 오류</code> + 재시도 접미</td><td>GeneralError</td></tr><tr><td>빈 본문, JSON 오류, 크기 초과, 확장 오류, 형식 불명, 처리 예외</td><td><code>DaouOffice 응답이 비어 있습니다</code><br><code>DaouOffice 응답을 해석하지 못했습니다</code><br><code>DaouOffice 응답이 너무 큽니다 ({길이}자)</code><br><code>Chrome 확장 조회 오류: {errorName}</code><br><code>Chrome 확장 결과 형식을 알 수 없습니다</code><br><code>동기화 결과 처리 실패: {예외 형식 이름}</code> + 재시도 접미</td><td>GeneralError</td></tr></tbody></table></div><p><code class="inline">NetworkError</code>·<code class="inline">GeneralError</code> 문구 전량(원천 문자열 그대로, <code class="inline">HH:mm</code>은 다음 재시도 시각):</p><ul><li><code class="inline">NetworkError</code>(<code class="inline">BridgeResultClassifier.Classify</code>가 <code class="inline">BridgeFailureKind.Network</code>로 판정 → <code class="inline">CalendarBridgeServer.ProcessResultAsync</code> → <code class="inline">App.BridgeServer_SyncCompleted</code> → <code class="inline">MarkNetworkError</code>): worker가 <code class="inline">outcome: "timeout"</code>(fetch 시간 초과 25초, 본문 읽기 포함)을 보고하면 <code class="inline">DaouOffice 응답 시간 초과 · 재시도 HH:mm</code>, <code class="inline">outcome: "network"</code>(fetch가 <code class="inline">TypeError</code>로 실패)이면 <code class="inline">네트워크 오류: DaouOffice에 연결하지 못했습니다 · 재시도 HH:mm</code>이다. 예외 메시지 원문은 문구에 넣지 않는다. 종료 중 결과 처리 취소는 상태를 바꾸지 않는다. 메시지가 비면 <code class="inline">네트워크 오류</code>로 대체한다.</li><li>동기화 결과 실패(<code class="inline">BridgeFailureKind.Api</code>·<code class="inline">General</code> → <code class="inline">App.BridgeServer_SyncCompleted</code>의 default 분기 → <code class="inline">MarkGeneralError</code>): 2xx가 아닌 HTTP 응답은 <code class="inline">DaouOffice HTTP {코드} · 재시도 HH:mm</code>(401·403·3xx는 먼저 재로그인 필요로 분류되고, 2xx가 아닌 HTML 응답은 HTML 규칙보다 먼저 HTTP 오류로 표시된다), API 응답 <code class="inline">code</code>가 200이 아니면 <code class="inline">{API message} · 재시도 HH:mm</code>(message가 비면 <code class="inline">DaouOffice API 오류 · 재시도 HH:mm</code>이고, code가 <code class="inline">ROUTE-0004</code>나 401이면 먼저 재로그인 필요로 분류된다), 2xx인데 본문이 비었으면 <code class="inline">DaouOffice 응답이 비어 있습니다 · 재시도 HH:mm</code>, JSON 해석에 실패하면 <code class="inline">DaouOffice 응답을 해석하지 못했습니다 · 재시도 HH:mm</code>, 본문이 <code class="inline">MaxBodyChars</code>(1,000,000자)를 넘거나 worker가 <code class="inline">tooLarge</code>를 보고하면 <code class="inline">DaouOffice 응답이 너무 큽니다 ({길이}자) · 재시도 HH:mm</code>(길이는 천 단위 구분 <code class="inline">N0</code> 형식), worker 내부 오류(<code class="inline">outcome: "error"</code>)는 <code class="inline">Chrome 확장 조회 오류: {errorName} · 재시도 HH:mm</code>, 알 수 없는 outcome은 <code class="inline">Chrome 확장 결과 형식을 알 수 없습니다 · 재시도 HH:mm</code>, 결과 처리 중 예외는 <code class="inline">동기화 결과 처리 실패: {예외 형식 이름} · 재시도 HH:mm</code>이다. 오류 메시지가 없으면 <code class="inline">동기화 실패</code>로 대체한다.</li><li>저장 실패(<code class="inline">MarkPersistenceError</code>, 재시도 접미 없음): <code class="inline">설정 저장 실패 · 로그 확인</code>(<code class="inline">settings.json</code>), <code class="inline">캐시 저장 실패 · 로그 확인</code>(<code class="inline">calendar-cache.json</code>).</li><li>시작 구성 요소 실패(<code class="inline">MarkStartupComponentError</code>): <code class="inline">확장 파일 설치 실패: {사유} · 로그 확인</code>, <code class="inline">Native host 등록 실패: {사유} · 로그 확인</code>. 사유는 <code class="inline">StartupFailureReasons.Describe</code>가 만든다(최대 120자).</li><li>App·MainWindow가 조립해 <code class="inline">MarkGeneralError</code>로 넘기는 문구(재시도 접미 없음): <code class="inline">시작 실패: {사유}</code>(<code class="inline">OnStartup</code>의 바깥 <code class="inline">try</code>가 잡은 예외), <code class="inline">오류: {예외 메시지}</code>(처리되지 않은 UI 예외), <code class="inline">로그 폴더 열기 실패: {예외 메시지}</code>, <code class="inline">확장 폴더 열기 실패: {예외 메시지}</code>, <code class="inline">DaouOffice 페이지를 열지 못했습니다.</code>, 그리고 <code class="inline">App.ReportError</code>의 <code class="inline">{메시지}: {예외 메시지}</code>. <code class="inline">ReportError</code>의 메시지는 <code class="inline">동기화 결과 처리 실패</code>, <code class="inline">새로고침 실패</code>, <code class="inline">설정 열기 실패</code>, <code class="inline">제거 처리 실패</code>, <code class="inline">UI 동작 실패</code>(MainWindow 이벤트 처리기)다.</li></ul><p>health timer는 <code class="inline">AuthenticationRequired</code>/<code class="inline">ConfigurationInvalid</code> 상태를 덮어쓰지 않는다. <code class="inline">ExtensionError</code>는 heartbeat가 살아 있는 동안만 유지하고, 불일치 표시 중 Chrome이 꺼져 heartbeat가 95초 넘게 끊기면 “Chrome 확장 연결 대기”로 바꾼다. 기동 시 불러온 캐시의 조회 범위가 오늘(KST)을 포함하지 않으면 <code class="inline">MarkCacheOutOfRange()</code>가 호출되어 위 <code>WaitingForChrome</code>/<code>Connected</code> 문구 뒤에 <strong>· 캐시(범위 밖)</strong> 접미가 붙는다(T1.6). 접미 합성은 <code class="inline">Decorate</code> 한 곳에서만 하며, 정상 동기화가 한 번 성공하면 범위 밖 접미는 사라진다. 접미 합성 순서는 범위 밖 → 캐시 시각 → 시작 이슈다. 시작 이슈 접미(<code class="inline"> · 확장 파일 설치 실패</code>, <code class="inline"> · Native host 등록 실패</code>)는 <code class="inline">MarkStartupComponentError</code>가 기록한 순서대로 붙고(기동 시에는 확장 파일 추출을 native host 등록보다 먼저 시도한다), 동기화 성공으로는 사라지지 않으며, 같은 구성 요소가 나중에 성공하면(설정 창 저장 후 재시도 등) <code class="inline">MarkStartupComponentResolved</code>로 빠진다(새 상태를 게시하지 않으므로 다음 대기/연결 문구부터 반영된다). 상태 문구 대부분은 <code class="inline">SyncStatusService</code>가 만들지만 예외가 둘 있다. 캐시를 표시할 때의 <code class="inline">캐시 {HH:mm}</code>(<code class="inline">App.OnStartup</code>)와 동기화 성공 시의 <code class="inline">동기화 {HH:mm}</code>(<code class="inline">App.BridgeServer_SyncCompleted</code>)는 <code class="inline">MainWindow.SetEvents</code> → 뷰모델 <code class="inline">SetStatus</code>로 직접 설정된다. 또 GeneralError 메시지 일부(위 목록의 App·MainWindow 조립 문구)는 App·MainWindow가 조립해 <code class="inline">MarkGeneralError</code>로 넘긴다. 캐시를 읽고 기동한 경우 <code class="inline">MarkCacheLoaded(DateTimeOffset)</code>가 호출되어 “Chrome 백그라운드 대기”, “Chrome 브리지 연결됨 · 동기화 대기”, “Chrome 확장 연결 대기” 문구에 “ · 캐시 MM-dd HH:mm” 접미가 붙고(범위 밖 접미가 함께 있으면 “ · 캐시(범위 밖) · 캐시 MM-dd HH:mm” 순서), 동기화가 한 번 성공하면(<code class="inline">MarkSuccess</code>) 접미가 사라진다. 마지막 갱신 시각은 상태 텍스트의 ToolTip(“마지막 갱신 yyyy-MM-dd HH:mm”)에도 표시된다. 오류 상태(<code class="inline">StatusIsError</code>)에서는 말줄임(<code class="inline">CharacterEllipsis</code>)으로 잘린 상태 문구 전문이 ToolTip 첫 줄에, 마지막 갱신 줄이 둘째 줄에 온다(<code class="inline">MainViewModel.UpdateStatusToolTip</code>. 새 문구를 만들지 않고 <code class="inline">SyncStatusService</code>가 만든 문구를 그대로 쓴다).</p><p>기동 직후 전이(코드 분석 기준이며 UI에서 관찰하지 않았다 — 미확인): <code class="inline">App.OnStartup</code>은 마지막에 <code class="inline">MarkWaiting</code>(“Chrome 백그라운드 대기”+접미)을 게시한 직후 <code class="inline">RefreshAsync(true)</code>를 부른다. 이때 <code class="inline">CalendarBridgeServer.UpdateRequest</code>가 <code class="inline">force</code>=true로 호출되어 true를 돌려주므로 <code class="inline">MarkRequested</code>가 곧바로 “동기화 요청 중…”(접미 없음)으로 덮는다. 그래서 대기 문구와 그 캐시 접미는 거의 보이지 않는다. Chrome이 꺼져 있어 heartbeat가 한 번도 오지 않으면 첫 health 평가(기동 약 20초 뒤)에서 캐시 접미가 붙은 “Chrome 확장 연결 대기”로 바뀐다. <code class="inline">MarkHeartbeat</code>는 <code class="inline">Starting</code>/<code class="inline">WaitingForChrome</code>일 때만 <code class="inline">Connected</code>로 바꾸므로 “동기화 요청 중…” 상태에서 받은 heartbeat는 문구를 바꾸지 않는다. 전이 조건 전체는 상태 머신 전이표(§28)에 있다.</p><p>확장 버전 불일치(T2.2): 7.2.0 worker의 <code class="inline">getConfig</code> 요청은 <code class="inline">type</code>, <code class="inline">lastError</code>, <code class="inline">extensionVersion</code>(<code class="inline">chrome.runtime.getManifest().version</code>), <code class="inline">protocolVersion</code>(<code class="inline">2</code>, <code class="inline">NativeBridgeProtocol.ProtocolVersion</code>과 같은 값)을 싣는다. 앱은 <code class="inline">protocolVersion</code>을 <code class="inline">NativeBridgeRequest.ProtocolVersion</code>(nullable)으로 받아 로그 요약(<code class="inline">BridgeLogSummary.DescribeRequest</code>의 <code class="inline">protocolVersion=2</code>)에 남기고, 7.2.0부터는 조회 지시의 게이트로도 쓴다. 값이 2가 아니거나 없으면(7.1.0 이하 확장) 조회를 지시하지 않는다(§10.2). 이 게이트는 아래 버전 불일치 표시와 별개다. 앱은 <code class="inline">getConfig</code> 요청의 <code class="inline">extensionVersion</code>을 <code class="inline">ChromeExtensionInstaller.ExpectedExtensionVersion</code>(EXE에 임베드된 확장 버전)과 비교한다(<code class="inline">Services/ExtensionVersionGuard</code>, 순수 로직). 다르면 <code class="inline">CalendarBridgeServer</code>가 <code class="inline">BridgeSyncEventArgs.ExtensionFailure</code>(<code class="inline">BridgeFailureKind.Extension</code>)를 올리고 <code class="inline">SyncStatusService.MarkExtensionVersionMismatch</code>가 <code>ExtensionError</code> 상태로 “Chrome 확장 새로고침 필요 ({보고 버전} → {기대 버전})”을 게시한다(Decorate 접미 없음). 확장이 버전을 보고하지 않는 구버전이면 보고 버전 자리에 <code class="inline">7.0.0 이하</code>를 표시하며(7.0.0은 <code class="inline">extensionVersion</code>을 보내지 않은 마지막 버전이다), 확장이 30초마다 같은 조합을 보고해도 재발행은 억제된다. 현재 상태가 <code>AuthenticationRequired</code>이면 재로그인 안내가 더 급하므로 불일치를 게시하지 않고, 불일치 처리(<code class="inline">App.BridgeServer_SyncCompleted</code>의 <code class="inline">BridgeFailureKind.Extension</code> 분기)는 재로그인 배너(<code class="inline">SetLoginRequired</code>)를 건드리지 않는다. 불일치 신호는 <code class="inline">SyncCompleted</code>에 실려 오므로 protocolVersion이 2이면서 버전만 다른 확장(개발 빌드 등)에서는 fetch가 진행되는 동안 “동기화 중…”·“정상 · 동기화 HH:mm”과 불일치 문구가 번갈아 보일 수 있다(알려진 동작, 현재 동작 그대로 두고 백로그로 관리한다 — §28.5, §38). 7.1.0 이하 확장은 protocol 게이트로 조회가 지시되지 않아 <code class="inline">FetchIssued</code>가 발생하지 않으므로 불일치 문구가 그대로 유지된다(코드 분석, 실환경 미확인). 확장을 새로고침해 버전이 일치하는 <code class="inline">getConfig</code>가 오면 <code class="inline">CalendarBridgeServer.ExtensionVersionConfirmed</code> → <code class="inline">SyncStatusService.MarkExtensionVersionConfirmed</code>로 “Chrome 브리지 연결됨 · 동기화 대기”로 해제된다(현재 상태가 <code>ExtensionError</code>일 때만, 다른 상태에서는 아무것도 게시하지 않는다). 동기화가 한 번 성공해 “정상”으로 바뀌어도 버전이 여전히 다르면 다음 <code class="inline">getConfig</code>에서 다시 표시된다. 버전 불일치 자체는 fetch를 막지 않는다(<code class="inline">noFetchReason</code>과 무관하며 동기화는 계속 진행된다). 조회를 막는 것은 protocol 게이트(<code class="inline">protocol_mismatch</code>)뿐이다.</p><p>아래 발췌는 <code class="inline">Services/SyncStatusService.cs</code>의 <code class="inline">namespace</code> 선언부터 파일 끝까지다(첫 줄 <code class="inline">using System.Globalization;</code>만 생략).</p><pre><code>namespace DaouCalendarOverlay.Services;
 
 public enum OverlaySyncState
 {
