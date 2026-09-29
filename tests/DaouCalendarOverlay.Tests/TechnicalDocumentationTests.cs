@@ -163,7 +163,9 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("public sealed class DaouCalendarEvent", html, StringComparison.Ordinal);
         Assert.Contains("ResultLeaseSeconds", html, StringComparison.Ordinal);
         Assert.Contains("PipeServerInstances", html, StringComparison.Ordinal);
-        Assert.Contains("COOKIE_DEBOUNCE_MS", html, StringComparison.Ordinal);
+        Assert.Contains("FETCH_TIMEOUT_MS", html, StringComparison.Ordinal);
+        Assert.Contains("MAX_BODY_CHARS", html, StringComparison.Ordinal);
+        Assert.Contains("FetchLeaseSeconds", html, StringComparison.Ordinal);
         Assert.Contains("TrayTextMaxLength", html, StringComparison.Ordinal);
         Assert.Contains("OverlayRunningExitCode", html, StringComparison.Ordinal);
         // §15: BaseUrl 규칙
@@ -234,7 +236,9 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("protocolVersion", section, StringComparison.Ordinal);
         Assert.Contains("extensionVersion", section, StringComparison.Ordinal);
         Assert.Contains("lastError", section, StringComparison.Ordinal);
-        Assert.Contains("cookieSource", section, StringComparison.Ordinal);
+        Assert.Contains("outcome", section, StringComparison.Ordinal);
+        Assert.Contains("bodyLength", section, StringComparison.Ordinal);
+        Assert.Contains("protocol_mismatch", section, StringComparison.Ordinal);
         Assert.Contains("noFetchReason", section, StringComparison.Ordinal);
         Assert.Contains("lease_active", section, StringComparison.Ordinal);
     }
@@ -284,7 +288,7 @@ public sealed class TechnicalDocumentationTests
         var section = GetSectionHtml(html, "extension-triggers");
         Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
         Assert.Contains("daouBridgeBackoff", section, StringComparison.Ordinal);
-        Assert.Contains("cookies.onChanged", section, StringComparison.Ordinal);
+        Assert.Contains("fetchCalendar", section, StringComparison.Ordinal);
         Assert.Contains("ensureAlarm", section, StringComparison.Ordinal);
         Assert.Contains("inFlight", section, StringComparison.Ordinal);
     }
@@ -341,6 +345,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("/gw/api/calendar/event", section, StringComparison.Ordinal);
         Assert.Contains("includingAttendees=true", section, StringComparison.Ordinal);
         Assert.Contains("UNTIL=20261231", section, StringComparison.Ordinal);
+        Assert.Contains("ROUTE-0004", section, StringComparison.Ordinal);
     }
 
     [Fact]
