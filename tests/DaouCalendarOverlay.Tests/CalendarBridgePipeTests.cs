@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using DaouCalendarOverlay.Models;
@@ -10,8 +9,9 @@ namespace DaouCalendarOverlay.Tests;
 
 /// <summary>
 /// accept 루프가 요청 처리와 분리돼 있는지를 실제 Named Pipe 왕복으로 검증한다.
-/// DaouOffice 조회가 끝나지 않은 동안에도 새 연결(<c>getConfig</c>/<c>ping</c>)이 native host의
-/// 2.5초 connect timeout 안에 응답을 받아야 하고, 종료는 조회에 묶이지 않아야 한다.
+/// 결과 처리가 끝나지 않은 동안에도 새 연결(<c>getConfig</c>/<c>ping</c>)이 native host의
+/// 2.5초 connect timeout 안에 응답을 받아야 하고, 종료는 결과 처리에 묶이지 않아야 한다.
+/// 결과 처리 시작은 <see cref="CalendarBridgeServer.ResultProcessingHook"/>(<see cref="ResultProcessingProbe"/>)으로 붙잡는다.
 /// </summary>
 public sealed class CalendarBridgePipeTests
 {
@@ -22,16 +22,8 @@ public sealed class CalendarBridgePipeTests
 
     private const string TestBaseUrl = "https://test.daouoffice.com";
 
-    /// <summary>테스트가 붙잡아 두는 가짜 HTTP 전송. 취소되면 붙잡고 있던 응답도 함께 풀린다.</summary>
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
-
-        public StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder) => _responder = responder;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            _responder(request, cancellationToken);
-    }
+    private const string OkBody =
+        "{\"code\":200,\"data\":[{\"id\":\"1\",\"calendarId\":\"12345\",\"calendarName\":\"내 캘린더\",\"summary\":\"테스트\",\"timeType\":\"timed\",\"startTime\":\"2026-09-22T10:00:00+09:00\",\"endTime\":\"2026-09-22T11:00:00+09:00\"}]}";
 
     private static AppSettings Settings() => new()
     {
@@ -43,33 +35,31 @@ public sealed class CalendarBridgePipeTests
     /// <summary>운영 파이프 이름(실행 중인 앱)과 충돌하지 않도록 테스트마다 다른 이름을 쓴다.</summary>
     private static string NewPipeName() => "DaouCalendarOverlay.Tests." + Guid.NewGuid().ToString("N");
 
-    private static TaskCompletionSource<HttpResponseMessage> NewGate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private static StubHandler BlockingHandler(TaskCompletionSource<HttpResponseMessage> gate, TaskCompletionSource started) =>
-        new((_, ct) =>
-        {
-            ct.Register(() => gate.TrySetCanceled());
-            started.TrySetResult();
-            return gate.Task;
-        });
-
     private static NativeBridgeRequest GetConfigRequest() => new()
     {
         Type = "getConfig",
-        ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+        ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion,
+        ProtocolVersion = NativeBridgeProtocol.ProtocolVersion
+    };
+
+    /// <summary>7.2.0 worker가 보내는 성공 결과(설계 8.2 OkPayload).</summary>
+    private static BridgeResultPayload OkPayload(string requestId) => new()
+    {
+        RequestId = requestId,
+        Outcome = BridgeFetchOutcomes.Response,
+        Status = 200,
+        ResponseType = "basic",
+        ContentType = "application/json;charset=UTF-8",
+        Body = OkBody,
+        BodyLength = OkBody.Length,
+        ElapsedMs = 10
     };
 
     private static NativeBridgeRequest PostResultRequest(string requestId) => new()
     {
         Type = "postResult",
-        Result = new BridgeResultPayload
-        {
-            RequestId = requestId,
-            CookieHeader = "SESSION=abc",
-            CookieCount = 1
-        }
+        ProtocolVersion = NativeBridgeProtocol.ProtocolVersion,
+        Result = OkPayload(requestId)
     };
 
     private static async Task<NativeBridgeResponse> CallAsync(string pipeName, NativeBridgeRequest request, CancellationToken ct)
@@ -86,14 +76,15 @@ public sealed class CalendarBridgePipeTests
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await client.ConnectAsync(2500, ct);
         await NativeBridgeProtocol.WriteFrameAsync(client, utf8Json, ct);
-        var bytes = await NativeBridgeProtocol.ReadFrameAsync(client, 8 * 1024 * 1024, ct);
+        var bytes = await NativeBridgeProtocol.ReadFrameAsync(client, NativeHostRelay.PipeMessageLimit, ct);
         Assert.NotNull(bytes);
         return JsonSerializer.Deserialize<NativeBridgeResponse>(bytes!, options)!;
     }
 
-    private static CalendarBridgeServer StartServer(StubHandler handler, string pipeName)
+    private static CalendarBridgeServer StartServer(ResultProcessingProbe probe, string pipeName)
     {
-        var server = new CalendarBridgeServer(() => handler, pipeName: pipeName);
+        var server = new CalendarBridgeServer(pipeName: pipeName);
+        server.ResultProcessingHook = probe.Hook;
         server.Start();
         server.UpdateRequest(Settings(), RangeFrom, RangeTo, force: true);
         return server;
@@ -104,10 +95,9 @@ public sealed class CalendarBridgePipeTests
     public async Task Pipe_GetConfig_RoundTripsOverNamedPipe()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
 
         try
         {
@@ -121,60 +111,104 @@ public sealed class CalendarBridgePipeTests
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             await server.DisposeAsync();
         }
     }
 
     /// <summary>
-    /// 7.1.0 worker가 보내는 protocolVersion 포함 getConfig와, 이 필드가 없는 구버전 형식의 getConfig가
-    /// 파이프 서버의 역직렬화를 거쳐 모두 정상 응답(ok + config)을 받는다.
+    /// 파이프 서버의 역직렬화를 거친 getConfig 원문에서 protocolVersion 2만 조회 지시(ShouldFetch)를 받는다.
+    /// 7.1.0 worker 형식(protocolVersion 1)과 필드가 없는 구버전 형식은 ok + config를 받지만 protocol_mismatch이고,
+    /// requestId·lease를 발급하지 않았으므로 뒤이은 protocolVersion 2 요청이 곧바로 조회 지시를 받는다.
     /// </summary>
     [Fact]
-    public async Task Pipe_GetConfig_AcceptsRequestsWithAndWithoutProtocolVersion()
+    public async Task Pipe_GetConfig_IssuesFetchOnlyForProtocolVersion2()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
         var version = ChromeExtensionInstaller.ExpectedExtensionVersion;
 
         try
         {
-            var withProtocol = await CallRawAsync(
+            var legacyRequests = new[]
+            {
+                $"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\",\"protocolVersion\":1}}",
+                $"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\"}}"
+            };
+
+            foreach (var raw in legacyRequests)
+            {
+                var legacy = await CallRawAsync(pipeName, Encoding.UTF8.GetBytes(raw), cts.Token).WaitAsync(WaitLimit);
+
+                Assert.True(legacy.Ok, legacy.Error);
+                Assert.NotNull(legacy.Config);
+                Assert.False(legacy.Config!.ShouldFetch);
+                Assert.Equal(NoFetchReasons.ProtocolMismatch, legacy.Config!.NoFetchReason);
+                Assert.Equal("", legacy.Config!.RequestId);
+            }
+
+            var current = await CallRawAsync(
                 pipeName,
-                Encoding.UTF8.GetBytes($"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\",\"protocolVersion\":1}}"),
+                Encoding.UTF8.GetBytes($"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\",\"protocolVersion\":2}}"),
                 cts.Token).WaitAsync(WaitLimit);
 
-            Assert.True(withProtocol.Ok, withProtocol.Error);
-            Assert.NotNull(withProtocol.Config);
-            Assert.True(withProtocol.Config!.ShouldFetch);
-
-            var withoutProtocol = await CallRawAsync(
-                pipeName,
-                Encoding.UTF8.GetBytes($"{{\"type\":\"getConfig\",\"lastError\":\"\",\"extensionVersion\":\"{version}\"}}"),
-                cts.Token).WaitAsync(WaitLimit);
-
-            Assert.True(withoutProtocol.Ok, withoutProtocol.Error);
-            Assert.NotNull(withoutProtocol.Config);
+            Assert.True(current.Ok, current.Error);
+            Assert.NotNull(current.Config);
+            Assert.True(current.Config!.ShouldFetch);
+            Assert.False(string.IsNullOrWhiteSpace(current.Config!.RequestId));
+            Assert.Equal(NativeBridgeProtocol.ProtocolVersion, current.Config!.ProtocolVersion);
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             await server.DisposeAsync();
         }
     }
 
-    /// <summary>조회가 끝나지 않아도 새 연결의 getConfig는 native host의 2.5초 timeout 안에 응답한다.</summary>
+    /// <summary>
+    /// 7.1.0 형식(최상위 protocolVersion 없음, 쿠키 필드)의 postResult 원문은 활성 requestId를 들고 와도 ok:false로 거부되고
+    /// 결과 처리가 시작되지 않는다.
+    /// </summary>
     [Fact]
-    public async Task Pipe_GetConfigWhileResultFetchInFlight_RespondsWithinTwoSeconds()
+    public async Task Pipe_PostResult_LegacyCookiePayload_IsRejected()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
+
+        try
+        {
+            var issued = await CallAsync(pipeName, GetConfigRequest(), cts.Token).WaitAsync(WaitLimit);
+            Assert.NotNull(issued.Config);
+            Assert.True(issued.Config!.ShouldFetch);
+
+            var legacy = $"{{\"type\":\"postResult\",\"result\":{{\"requestId\":\"{issued.Config!.RequestId}\",\"cookieHeader\":\"SESSION=SUPERSECRET\",\"cookieCount\":1}}}}";
+            var response = await CallRawAsync(pipeName, Encoding.UTF8.GetBytes(legacy), cts.Token).WaitAsync(WaitLimit);
+
+            Assert.False(response.Ok);
+            Assert.Equal("Unsupported protocolVersion.", response.Error);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            Assert.Equal(0, probe.Calls);
+        }
+        finally
+        {
+            probe.Gate.TrySetCanceled();
+            await server.DisposeAsync();
+        }
+    }
+
+    /// <summary>결과 처리가 끝나지 않아도 새 연결의 getConfig는 native host의 2.5초 timeout 안에 응답한다.</summary>
+    [Fact]
+    public async Task Pipe_GetConfigWhileResultProcessing_RespondsWithinTwoSeconds()
+    {
+        using var cts = new CancellationTokenSource(WaitLimit);
+        var probe = new ResultProcessingProbe();
+        var pipeName = NewPipeName();
+        var server = StartServer(probe, pipeName);
 
         try
         {
@@ -185,13 +219,13 @@ public sealed class CalendarBridgePipeTests
             var ack = await CallAsync(pipeName, PostResultRequest(issued.Config!.RequestId), cts.Token).WaitAsync(WaitLimit);
             Assert.True(ack.Ok);
 
-            await started.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
             var stopwatch = Stopwatch.StartNew();
             var during = await CallAsync(pipeName, GetConfigRequest(), cts.Token).WaitAsync(WaitLimit);
             stopwatch.Stop();
 
-            Assert.True(stopwatch.ElapsedMilliseconds < 2000, $"조회 중 getConfig 응답이 {stopwatch.ElapsedMilliseconds}ms 걸렸습니다.");
+            Assert.True(stopwatch.ElapsedMilliseconds < 2000, $"결과 처리 중 getConfig 응답이 {stopwatch.ElapsedMilliseconds}ms 걸렸습니다.");
             Assert.True(during.Ok);
             Assert.NotNull(during.Config);
             Assert.False(during.Config!.ShouldFetch);
@@ -199,7 +233,7 @@ public sealed class CalendarBridgePipeTests
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             await server.DisposeAsync();
         }
     }
@@ -209,10 +243,9 @@ public sealed class CalendarBridgePipeTests
     public async Task Pipe_ThreeConcurrentPingClients_AllReceiveOk()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
 
         try
         {
@@ -230,7 +263,7 @@ public sealed class CalendarBridgePipeTests
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             await server.DisposeAsync();
         }
     }
@@ -243,10 +276,9 @@ public sealed class CalendarBridgePipeTests
     public async Task Pipe_StalledClientConnection_DoesNotBlockNextClient()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
 
         using var stalled = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
@@ -264,20 +296,19 @@ public sealed class CalendarBridgePipeTests
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             await server.DisposeAsync();
         }
     }
 
-    /// <summary>조회가 진행 중이어도 종료는 1초 안에 끝난다(트레이 종료 지연 제거).</summary>
+    /// <summary>결과 처리가 진행 중이어도 종료는 1초 안에 끝난다(트레이 종료 지연 제거).</summary>
     [Fact]
-    public async Task Pipe_DisposeAsyncWhileFetchInFlight_CompletesWithinOneSecond()
+    public async Task Pipe_DisposeAsyncWhileResultProcessing_CompletesWithinOneSecond()
     {
         using var cts = new CancellationTokenSource(WaitLimit);
-        var gate = NewGate();
-        var started = NewSignal();
+        var probe = new ResultProcessingProbe();
         var pipeName = NewPipeName();
-        var server = StartServer(BlockingHandler(gate, started), pipeName);
+        var server = StartServer(probe, pipeName);
         var disposed = false;
 
         try
@@ -288,7 +319,7 @@ public sealed class CalendarBridgePipeTests
             var ack = await CallAsync(pipeName, PostResultRequest(issued.Config!.RequestId), cts.Token).WaitAsync(WaitLimit);
             Assert.True(ack.Ok);
 
-            await started.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
             var stopwatch = Stopwatch.StartNew();
             await server.DisposeAsync();
@@ -299,7 +330,7 @@ public sealed class CalendarBridgePipeTests
         }
         finally
         {
-            gate.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
             if (!disposed)
                 await server.DisposeAsync();
         }

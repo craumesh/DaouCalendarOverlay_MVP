@@ -5,7 +5,7 @@ using Microsoft.Win32;
 namespace DaouCalendarOverlay.Services;
 
 /// <summary>
-/// DaouOffice "열기"를 기본 브라우저 대신 Chrome으로 직접 띄운다. 확장이 쿠키를 얻는 브라우저는 확장이 설치된
+/// DaouOffice "열기"를 기본 브라우저 대신 Chrome으로 직접 띄운다. 확장이 로그인 세션으로 DaouOffice를 조회하는 브라우저는 확장이 설치된
 /// Chrome이므로, 기본 브라우저가 다른 경우에도 Chrome을 띄워야 재로그인이 동기화로 이어진다.
 /// 실패하면 false를 돌려주고 기본 브라우저 fallback은 호출자가 맡는다.
 /// 레지스트리 값 해석과 후보 선택은 순수 함수로 두어 단위 테스트한다. 실제 레지스트리·파일시스템·프로세스를

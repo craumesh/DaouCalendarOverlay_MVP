@@ -75,13 +75,13 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Null(legacy.ExtensionVersion);
     }
 
-    /// <summary>worker의 getConfig 요청에 protocolVersion: 1이 실리고, 그 값이 앱의 프로토콜 상수와 같은지 확인한다.</summary>
+    /// <summary>W1~W2 사이 임시: 7.1.0 worker는 protocolVersion 1을 보내며 앱은 조회를 지시하지 않는다. W2가 교체한다.</summary>
     [Fact]
     public void EmbeddedServiceWorker_SendsProtocolVersionInGetConfig()
     {
         var worker = ReadResource(WorkerResource);
 
-        Assert.Contains($"protocolVersion: {NativeBridgeProtocol.ProtocolVersion}", worker);
+        Assert.NotEqual(1, NativeBridgeProtocol.ProtocolVersion);
         Assert.Contains("protocolVersion: 1", worker);
 
         // getConfig 메시지 리터럴 안에 있어야 한다(type: "getConfig" 뒤, 메시지를 닫는 "});" 앞).

@@ -1,15 +1,14 @@
-using System.Net;
-using System.Net.Http;
-using System.Text;
 using DaouCalendarOverlay.Models;
 using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.Tests;
 
 /// <summary>
-/// HTTP 왕복 중 표시 범위가 바뀌면 이전 범위의 결과가 UI/캐시로 올라가지 않아야 한다.
-/// 파이프를 열지 않고(<c>Start()</c> 미호출) 요청을 직접 주입하며, HTTP는 스텁 핸들러로 대체한다.
-/// <c>postResult</c>는 즉시 ok로 응답하고 조회는 백그라운드에서 끝나므로, 결과 반영 여부는
+/// 결과 처리 중 표시 범위가 바뀌면 이전 범위의 결과가 UI/캐시로 올라가지 않아야 한다.
+/// 파이프를 열지 않고(<c>Start()</c> 미호출) 요청을 직접 주입하며, 결과 처리 시작은
+/// <see cref="CalendarBridgeServer.ResultProcessingHook"/>(<see cref="ResultProcessingProbe"/>)으로 붙잡는다.
+/// hook이 붙잡은 동안 범위나 캘린더 ID를 바꾸면 <c>DiscardIfRangeChanged</c> 경로가 결과를 버린다.
+/// <c>postResult</c>는 즉시 ok로 응답하고 처리는 백그라운드에서 끝나므로, 결과 반영 여부는
 /// 재발행된 fetch(<see cref="WaitForNewFetchConfigAsync"/>)와 SyncCompleted 신호로 관찰한다.
 /// </summary>
 public sealed class CalendarBridgeServerStaleResultTests
@@ -22,13 +21,6 @@ public sealed class CalendarBridgeServerStaleResultTests
     private const string OkBody =
         "{\"code\":200,\"message\":\"OK\",\"data\":[{\"id\":\"38262\",\"calendarId\":\"12345\",\"calendarName\":\"내 캘린더\",\"timeType\":\"allday\",\"startTime\":\"2026-09-10T00:00:00.000+09:00\",\"endTime\":\"2026-09-10T23:59:59.999+09:00\",\"summary\":\"테스트\"}]}";
 
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _send;
-        public StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) => _send = send;
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => _send(request, cancellationToken);
-    }
-
     private static AppSettings CreateSettings() => new()
     {
         BaseUrl = "https://company.daouoffice.com",
@@ -36,28 +28,36 @@ public sealed class CalendarBridgeServerStaleResultTests
         RefreshMinutes = 10
     };
 
-    private static HttpResponseMessage CreateOkResponse() => new(HttpStatusCode.OK)
+    /// <summary>7.2.0 worker가 보내는 성공 결과(설계 8.2 OkPayload).</summary>
+    private static BridgeResultPayload OkPayload(string requestId) => new()
     {
-        Content = new StringContent(OkBody, Encoding.UTF8, "application/json")
+        RequestId = requestId,
+        Outcome = BridgeFetchOutcomes.Response,
+        Status = 200,
+        ResponseType = "basic",
+        ContentType = "application/json;charset=UTF-8",
+        Body = OkBody,
+        BodyLength = OkBody.Length,
+        ElapsedMs = 10
     };
 
     /// <summary>운영 파이프 이름과 충돌하지 않도록 테스트마다 다른 이름을 쓴다.</summary>
     private static string NewPipeName() => "DaouCalendarOverlay.Tests." + Guid.NewGuid().ToString("N");
 
-    private static StubHandler CreateBlockingHandler(TaskCompletionSource sendStarted, TaskCompletionSource<HttpResponseMessage> release) =>
-        new((_, ct) =>
-        {
-            ct.Register(() => release.TrySetCanceled());
-            sendStarted.TrySetResult();
-            return release.Task;
-        });
+    private static CalendarBridgeServer CreateServer(ResultProcessingProbe probe)
+    {
+        var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        server.ResultProcessingHook = probe.Hook;
+        return server;
+    }
 
     private static async Task<BridgeConfigResponse> RequestConfigAsync(CalendarBridgeServer server)
     {
         var response = await server.HandleRequestAsync(new NativeBridgeRequest
         {
             Type = "getConfig",
-            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+            ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion,
+            ProtocolVersion = NativeBridgeProtocol.ProtocolVersion
         });
         Assert.NotNull(response.Config);
         return response.Config!;
@@ -67,12 +67,8 @@ public sealed class CalendarBridgeServerStaleResultTests
         server.HandleRequestAsync(new NativeBridgeRequest
         {
             Type = "postResult",
-            Result = new BridgeResultPayload
-            {
-                RequestId = requestId,
-                CookieHeader = "SESSION=dummy",
-                CookieCount = 1
-            }
+            ProtocolVersion = NativeBridgeProtocol.ProtocolVersion,
+            Result = OkPayload(requestId)
         });
 
     /// <summary>이전 requestId와 다른 새 fetch가 발행될 때까지 getConfig를 폴링한다.</summary>
@@ -84,7 +80,8 @@ public sealed class CalendarBridgeServerStaleResultTests
             var config = (await server.HandleRequestAsync(new NativeBridgeRequest
             {
                 Type = "getConfig",
-                ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion
+                ExtensionVersion = ChromeExtensionInstaller.ExpectedExtensionVersion,
+                ProtocolVersion = NativeBridgeProtocol.ProtocolVersion
             })).Config;
             if (config is not null && config.ShouldFetch && !string.Equals(config.RequestId, previousRequestId, StringComparison.Ordinal))
                 return config;
@@ -103,14 +100,12 @@ public sealed class CalendarBridgeServerStaleResultTests
         Assert.False(syncCompleted.IsCompleted, "표시 범위가 바뀐 결과가 SyncCompleted로 올라왔습니다.");
     }
 
-    /// <summary>HTTP 진행 중 월을 이동하면 이전 범위 결과는 SyncCompleted로 올라가지 않는다.</summary>
+    /// <summary>결과 처리 중 월을 이동하면 이전 범위 결과는 SyncCompleted로 올라가지 않는다.</summary>
     [Fact]
-    public async Task ProcessResult_WhenRangeChangedDuringHttp_DoesNotRaiseSyncCompleted()
+    public async Task ProcessResult_WhenRangeChangedDuringProcessing_DoesNotRaiseSyncCompleted()
     {
-        var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = CreateBlockingHandler(sendStarted, release);
-        await using var server = new CalendarBridgeServer(() => handler, pipeName: NewPipeName());
+        var probe = new ResultProcessingProbe();
+        await using var server = CreateServer(probe);
 
         try
         {
@@ -131,12 +126,12 @@ public sealed class CalendarBridgeServerStaleResultTests
 
             var postResponse = await PostResultAsync(server, config.RequestId).WaitAsync(WaitLimit);
             Assert.True(postResponse.Ok);
-            await sendStarted.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
             var (from2, to2) = CalendarGrid.GetVisibleRange(new DateTime(2026, 10, 1));
             server.UpdateRequest(settings, from2, to2, force: false);
 
-            release.SetResult(CreateOkResponse());
+            probe.Gate.SetResult();
             await WaitForNewFetchConfigAsync(server, config.RequestId);
 
             await AssertNoSyncCompletedAsync(raised.Task);
@@ -144,7 +139,7 @@ public sealed class CalendarBridgeServerStaleResultTests
         }
         finally
         {
-            release.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
         }
     }
 
@@ -152,10 +147,8 @@ public sealed class CalendarBridgeServerStaleResultTests
     [Fact]
     public async Task ProcessResult_WhenRangeUnchanged_RaisesSyncCompletedWithRequestedRange()
     {
-        var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = CreateBlockingHandler(sendStarted, release);
-        await using var server = new CalendarBridgeServer(() => handler, pipeName: NewPipeName());
+        var probe = new ResultProcessingProbe();
+        await using var server = CreateServer(probe);
 
         try
         {
@@ -176,9 +169,9 @@ public sealed class CalendarBridgeServerStaleResultTests
 
             var postResponse = await PostResultAsync(server, config.RequestId).WaitAsync(WaitLimit);
             Assert.True(postResponse.Ok);
-            await sendStarted.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
-            release.SetResult(CreateOkResponse());
+            probe.Gate.SetResult();
             await completed.Task.WaitAsync(WaitLimit);
 
             Assert.NotNull(captured);
@@ -189,21 +182,19 @@ public sealed class CalendarBridgeServerStaleResultTests
         }
         finally
         {
-            release.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
         }
     }
 
     /// <summary>
-    /// HTTP 진행 중 표시 범위는 그대로인데 설정창 저장으로 캘린더 ID만 바뀌면, 이전 캘린더 집합으로
+    /// 결과 처리 중 표시 범위는 그대로인데 설정창 저장으로 캘린더 ID만 바뀌면, 이전 캘린더 집합으로
     /// 받은 결과는 SyncCompleted로 올라가지 않아야 한다(범위 비교만으로는 이 경우를 잡지 못했다).
     /// </summary>
     [Fact]
-    public async Task ProcessResult_WhenCalendarIdsChangedDuringHttp_DoesNotRaiseSyncCompleted()
+    public async Task ProcessResult_WhenCalendarIdsChangedDuringProcessing_DoesNotRaiseSyncCompleted()
     {
-        var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = CreateBlockingHandler(sendStarted, release);
-        await using var server = new CalendarBridgeServer(() => handler, pipeName: NewPipeName());
+        var probe = new ResultProcessingProbe();
+        await using var server = CreateServer(probe);
 
         try
         {
@@ -224,7 +215,7 @@ public sealed class CalendarBridgeServerStaleResultTests
 
             var postResponse = await PostResultAsync(server, config.RequestId).WaitAsync(WaitLimit);
             Assert.True(postResponse.Ok);
-            await sendStarted.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
             // 범위는 그대로 두고 캘린더 ID만 바꾼다(설정창 저장 시나리오).
             var changedSettings = CreateSettings();
@@ -232,7 +223,7 @@ public sealed class CalendarBridgeServerStaleResultTests
             changedSettings.CalendarIds.Add("99999");
             server.UpdateRequest(changedSettings, from1, to1, force: false);
 
-            release.SetResult(CreateOkResponse());
+            probe.Gate.SetResult();
             await WaitForNewFetchConfigAsync(server, config.RequestId);
 
             await AssertNoSyncCompletedAsync(raised.Task);
@@ -240,18 +231,16 @@ public sealed class CalendarBridgeServerStaleResultTests
         }
         finally
         {
-            release.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
         }
     }
 
     /// <summary>폐기 직후의 getConfig는 새 범위로 새 requestId를 발행한다(즉시 재발행).</summary>
     [Fact]
-    public async Task ProcessResult_WhenRangeChangedDuringHttp_NextGetConfigIssuesNewRange()
+    public async Task ProcessResult_WhenRangeChangedDuringProcessing_NextGetConfigIssuesNewRange()
     {
-        var sendStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var handler = CreateBlockingHandler(sendStarted, release);
-        await using var server = new CalendarBridgeServer(() => handler, pipeName: NewPipeName());
+        var probe = new ResultProcessingProbe();
+        await using var server = CreateServer(probe);
 
         try
         {
@@ -264,12 +253,12 @@ public sealed class CalendarBridgeServerStaleResultTests
 
             var postResponse = await PostResultAsync(server, config.RequestId).WaitAsync(WaitLimit);
             Assert.True(postResponse.Ok);
-            await sendStarted.Task.WaitAsync(WaitLimit);
+            await probe.Started.Task.WaitAsync(WaitLimit);
 
             var (from2, to2) = CalendarGrid.GetVisibleRange(new DateTime(2026, 10, 1));
             server.UpdateRequest(settings, from2, to2, force: false);
 
-            release.SetResult(CreateOkResponse());
+            probe.Gate.SetResult();
             var config2 = await WaitForNewFetchConfigAsync(server, config.RequestId);
 
             Assert.True(config2.ShouldFetch);
@@ -278,7 +267,7 @@ public sealed class CalendarBridgeServerStaleResultTests
         }
         finally
         {
-            release.TrySetCanceled();
+            probe.Gate.TrySetCanceled();
         }
     }
 }

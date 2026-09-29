@@ -8,12 +8,15 @@ namespace DaouCalendarOverlay.Services;
 
 public static class NativeBridgeProtocol
 {
-    public const string PipeName = "DaouCalendarOverlay.NativeBridge.v7";
+    public const string PipeName = "DaouCalendarOverlay.NativeBridge.v8";
     public const string HostName = "com.daou.calendar_overlay";
     public const string ExtensionId = "gkchgbpcbljkgabjcgjelacfkphcmhmi";
     public const string ExtensionOrigin = "chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/";
-    /// <summary>네이티브 브리지 메시지 프로토콜 버전. 호환 불가 변경 시에만 올린다(파이프 이름도 함께 올려야 한다).</summary>
-    public const int ProtocolVersion = 1;
+    /// <summary>
+    /// 네이티브 브리지 메시지 프로토콜 버전. 호환 불가 변경 시에만 올린다(파이프 이름도 함께).
+    /// 7.2.0에서 2로 올렸다(postResult 스키마 교체).
+    /// </summary>
+    public const int ProtocolVersion = 2;
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, int maxBytes, CancellationToken cancellationToken)
     {
@@ -74,8 +77,8 @@ public sealed class NativeBridgeRequest
     public string? ExtensionVersion { get; set; }
 
     /// <summary>
-    /// 확장이 getConfig에 싣는 메시지 프로토콜 버전(7.1.0 worker부터 <see cref="NativeBridgeProtocol.ProtocolVersion"/>과 같은 값).
-    /// 이 필드를 보내지 않는 구버전 확장(null)도 호환으로 취급한다. 현재는 로그 요약에만 남기고 협상에는 쓰지 않는다.
+    /// getConfig·postResult 모두 필수(7.2.0 worker부터 2). 값이 <see cref="NativeBridgeProtocol.ProtocolVersion"/>과 다르거나 없으면
+    /// getConfig는 noFetchReason=protocol_mismatch로 답하고 postResult는 거부한다.
     /// </summary>
     [JsonPropertyName("protocolVersion")]
     public int? ProtocolVersion { get; set; }
