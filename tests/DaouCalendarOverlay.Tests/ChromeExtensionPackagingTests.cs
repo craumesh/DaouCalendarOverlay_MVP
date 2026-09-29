@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.Tests;
@@ -6,7 +8,7 @@ namespace DaouCalendarOverlay.Tests;
 public sealed class ChromeExtensionPackagingTests
 {
     private const string ManifestResource = "DaouCalendarOverlay.ChromeExtension.manifest.json";
-    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v710.js";
+    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v720.js";
 
     private static string ReadResource(string resourceName)
     {
@@ -18,28 +20,51 @@ public sealed class ChromeExtensionPackagingTests
         return reader.ReadToEnd();
     }
 
+    private static string[] WorkerLines() => ReadResource(WorkerResource).Replace("\r\n", "\n").Split('\n');
+
+    /// <summary>worker 소스에서 첫 marker부터 첫 "});"까지의 객체 리터럴을 잘라 낸다.</summary>
+    private static string ExtractLiteral(string worker, string marker)
+    {
+        var start = worker.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"worker에 {marker} 요청이 없습니다.");
+        var end = worker.IndexOf("});", start, StringComparison.Ordinal);
+        Assert.True(end > start, $"{marker} 요청 리터럴의 끝을 찾지 못했습니다.");
+        return worker.Substring(start, end - start);
+    }
+
     [Fact]
-    public void EmbeddedResources_ContainServiceWorkerV710AndNotV700()
+    public void EmbeddedResources_ContainServiceWorkerV720Only()
     {
         var names = typeof(ChromeExtensionInstaller).Assembly.GetManifestResourceNames();
 
         Assert.Contains(WorkerResource, names);
+        Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v710.js", names);
         Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v700.js", names);
     }
 
     [Fact]
-    public void EmbeddedManifest_TargetsVersion710AndRenamedWorker()
+    public void EmbeddedManifest_TargetsV720WorkerWithoutCookiesPermission()
     {
-        var manifest = ReadResource(ManifestResource);
+        var manifestText = ReadResource(ManifestResource);
+        using var manifest = JsonDocument.Parse(manifestText);
+        var root = manifest.RootElement;
 
-        Assert.Contains("7.1.0", manifest);
-        Assert.Contains("service-worker-v710.js", manifest);
-        Assert.DoesNotContain("7.0.0", manifest);
-        Assert.DoesNotContain("service-worker-v700.js", manifest);
+        Assert.Equal(ChromeExtensionInstaller.ExpectedExtensionVersion, root.GetProperty("version").GetString());
 
-        Assert.DoesNotContain("gkchgbpcbljkgabjcgjelacfkphcmhmi", manifest);
-        Assert.Contains("\"key\"", manifest);
-        Assert.Contains("https://*.daouoffice.com/*", manifest);
+        var permissions = root.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
+        Assert.Contains("alarms", permissions);
+        Assert.Contains("background", permissions);
+        Assert.Contains("storage", permissions);
+        Assert.Contains("nativeMessaging", permissions);
+        Assert.DoesNotContain("cookies", permissions);
+
+        var hostPermissions = root.GetProperty("host_permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
+        Assert.Contains("https://*.daouoffice.com/*", hostPermissions);
+
+        Assert.Equal("service-worker-v720.js", root.GetProperty("background").GetProperty("service_worker").GetString());
+
+        Assert.DoesNotContain("gkchgbpcbljkgabjcgjelacfkphcmhmi", manifestText);
+        Assert.Contains("\"key\"", manifestText);
     }
 
     [Fact]
@@ -75,23 +100,24 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Null(legacy.ExtensionVersion);
     }
 
-    /// <summary>W1~W2 사이 임시: 7.1.0 worker는 protocolVersion 1을 보내며 앱은 조회를 지시하지 않는다. W2가 교체한다.</summary>
+    /// <summary>getConfig와 postResult 메시지 리터럴 모두 앱과 같은 protocolVersion 상수를 싣는지 확인한다.</summary>
     [Fact]
-    public void EmbeddedServiceWorker_SendsProtocolVersionInGetConfig()
+    public void EmbeddedServiceWorker_SendsProtocolVersionInGetConfigAndPostResult()
     {
         var worker = ReadResource(WorkerResource);
 
-        Assert.NotEqual(1, NativeBridgeProtocol.ProtocolVersion);
-        Assert.Contains("protocolVersion: 1", worker);
+        Assert.Contains(
+            $"PROTOCOL_VERSION = {NativeBridgeProtocol.ProtocolVersion.ToString(CultureInfo.InvariantCulture)};",
+            worker);
 
-        // getConfig 메시지 리터럴 안에 있어야 한다(type: "getConfig" 뒤, 메시지를 닫는 "});" 앞).
-        var getConfigIndex = worker.IndexOf("type: \"getConfig\"", StringComparison.Ordinal);
-        Assert.True(getConfigIndex >= 0, "worker에 getConfig 요청이 없습니다.");
-        var messageEnd = worker.IndexOf("});", getConfigIndex, StringComparison.Ordinal);
-        Assert.True(messageEnd > getConfigIndex, "getConfig 요청 리터럴의 끝을 찾지 못했습니다.");
-        var message = worker.Substring(getConfigIndex, messageEnd - getConfigIndex);
-        Assert.Contains("protocolVersion: 1", message);
-        Assert.Contains("extensionVersion", message);
+        // 메시지 리터럴 안에 있어야 한다(type: "..." 뒤, 메시지를 닫는 "});" 앞).
+        var getConfig = ExtractLiteral(worker, "type: \"getConfig\"");
+        Assert.Contains("protocolVersion: PROTOCOL_VERSION", getConfig);
+        Assert.Contains("extensionVersion", getConfig);
+
+        var postResult = ExtractLiteral(worker, "type: \"postResult\"");
+        Assert.Contains("protocolVersion: PROTOCOL_VERSION", postResult);
+        Assert.Contains("result", postResult);
     }
 
     /// <summary>
@@ -122,19 +148,115 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Null(legacy.ProtocolVersion);
     }
 
-    /// <summary>worker 최상위의 즉시 동기화 호출이 없고 쿠키 변경은 5초 debounce로 예약되는지 확인한다.</summary>
+    /// <summary>fetch가 브라우저 세션(쿠키)으로 나가고, 타임아웃 signal과 옛 쿠키 캐시 삭제가 있는지 확인한다.</summary>
     [Fact]
-    public void EmbeddedServiceWorker_RemovesTopLevelSyncAndDebouncesCookieChanges()
+    public void EmbeddedServiceWorker_FetchesWithBrowserSession()
     {
         var worker = ReadResource(WorkerResource);
-        var lines = worker.Replace("\r\n", "\n").Split('\n');
 
-        Assert.DoesNotContain(lines, l => l.Trim() == "void syncOnce();" && l == l.TrimStart());
-        Assert.Contains(lines, l => l.Trim() == "void ensureAlarm();");
+        Assert.Contains("credentials: \"include\"", worker);
+        Assert.Contains("redirect: \"manual\"", worker);
+        Assert.Contains("cache: \"no-store\"", worker);
+        Assert.Contains("signal: controller.signal", worker);
+        Assert.Contains("chrome.storage.session.remove(LEGACY_SESSION_COOKIE_KEY)", worker);
+    }
 
-        Assert.Contains("COOKIE_DEBOUNCE_MS = 5000", worker);
-        Assert.Contains("scheduleCookieSync", worker);
-        Assert.Contains("scheduleCookieSync();", worker);
+    /// <summary>worker의 본문 크기·타임아웃 상수가 앱 상수와 파이프 한도 안에서 맞물리는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_LimitsMatchApp()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains(
+            $"MAX_BODY_CHARS = {BridgeResultClassifier.MaxBodyChars.ToString(CultureInfo.InvariantCulture)};",
+            worker);
+
+        var match = Regex.Match(worker, @"FETCH_TIMEOUT_MS = (\d+);");
+        Assert.True(match.Success, "worker에 FETCH_TIMEOUT_MS 상수가 없습니다.");
+        var timeoutMs = long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        Assert.True(timeoutMs < 30000, "fetch 타임아웃은 MV3 종료 기준 30초보다 짧아야 합니다.");
+        Assert.True(
+            CalendarBridgeServer.FetchLeaseSeconds * 1000L >= timeoutMs + 15000,
+            "조회 lease는 fetch 타임아웃에 host 스폰 여유 15초를 더한 값 이상이어야 합니다.");
+
+        // JSON 이스케이프는 UTF-16 한 단위당 최대 6바이트다.
+        Assert.True(
+            6L * BridgeResultClassifier.MaxBodyChars + 64 * 1024 <= NativeHostRelay.PipeMessageLimit,
+            "최대 본문이 파이프 메시지 한도를 넘습니다.");
+    }
+
+    /// <summary>쿠키 API와 쿠키·식별 헤더를 worker가 쓰지 않는지 확인한다(주석 포함 전체 원문 기준).</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_DoesNotUseCookieApisOrIdentityHeaders()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        var forbidden = new[]
+        {
+            "chrome.cookies", "cookies.onChanged", "cookieHeader", "cookiesToHeader",
+            "readCookiesFromAllStores", "DEFAULT_COOKIE_STORE_ID", "COOKIE_DEBOUNCE_MS", "scheduleCookieSync",
+            "navigator.userAgent", "document.cookie", "\"Cookie\"", "User-Agent", "Referer",
+            "console.log(", "console.error(", "console.debug("
+        };
+
+        foreach (var token in forbidden)
+            Assert.DoesNotContain(token, worker);
+    }
+
+    /// <summary>로그는 두 헬퍼로만 남기고, 로그 인자에 본문·쿠키·URL·헤더·텍스트가 들어가지 않는지 줄 단위로 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_LogsOnlyThroughHelpers()
+    {
+        var lines = WorkerLines();
+
+        // (a) 옛 쿠키 캐시 키는 지우기 전용이다.
+        foreach (var line in lines.Where(l => l.Contains("LEGACY_SESSION_COOKIE_KEY", StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain(".set(", line);
+            Assert.DoesNotContain(".get(", line);
+        }
+
+        // (b) console.*은 헬퍼 안에서만 호출한다(헬퍼는 ${tag}로 형식을 만든다).
+        foreach (var line in lines.Where(l => l.Contains("console.", StringComparison.Ordinal)))
+            Assert.Contains("${tag}", line);
+
+        // (c) 로그 호출 줄은 한 줄이며, bodyLength를 뺀 나머지에 민감한 이름이 없다.
+        var logCalls = lines
+            .Where(l => (l.Contains("logInfo(", StringComparison.Ordinal) || l.Contains("logWarn(", StringComparison.Ordinal))
+                && !l.Contains("function log", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(logCalls);
+        foreach (var line in logCalls)
+        {
+            var stripped = line.Replace("bodyLength", string.Empty, StringComparison.Ordinal);
+            foreach (var word in new[] { "body", "cookie", "url", "headers", "text" })
+                Assert.False(stripped.Contains(word, StringComparison.OrdinalIgnoreCase), $"로그 줄에 '{word}'가 있습니다: {line.Trim()}");
+        }
+    }
+
+    /// <summary>한국어 상태 문구는 앱에서만 만든다. 주석 밖의 코드(문자열 포함)에는 한글이 없어야 한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_HasNoKoreanOutsideComments()
+    {
+        foreach (var line in WorkerLines())
+        {
+            var code = Regex.Replace(line, @"/\*.*?\*/", string.Empty);
+            code = Regex.Replace(code, @"//.*$", string.Empty);
+
+            Assert.False(
+                code.Any(c => c >= '가' && c <= '힣'),
+                $"주석 밖에 한글이 있습니다: {line.Trim()}");
+        }
+    }
+
+    /// <summary>worker가 깨어날 때마다 host를 스폰하지 않도록 최상위에서는 알람만 보장한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_TopLevelOnlyEnsuresAlarm()
+    {
+        var lines = WorkerLines();
+
+        Assert.Contains(lines, l => l.TrimEnd() == "void ensureAlarm();");
+        Assert.DoesNotContain(lines, l => l.StartsWith("void syncOnce(", StringComparison.Ordinal));
     }
 
     /// <summary>host 연결 실패 백오프 주기(1→2→5분)와 기본 30초 주기 상수가 선언돼 있는지 확인한다.</summary>
@@ -160,16 +282,6 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Contains("chrome.alarms.get(ALARM_NAME)", worker);
         Assert.Contains("existing.periodInMinutes", worker);
         Assert.Contains("chrome.alarms.create(ALARM_NAME", worker);
-    }
-
-    /// <summary>쿠키 수집이 기본 스토어("0")를 먼저 조회하도록 상수가 선언돼 있는지 확인한다.</summary>
-    [Fact]
-    public void EmbeddedServiceWorker_PrefersDefaultCookieStore()
-    {
-        var worker = ReadResource(WorkerResource);
-
-        Assert.Contains("DEFAULT_COOKIE_STORE_ID", worker);
-        Assert.Contains("\"0\"", worker);
     }
 
     /// <summary>임베드된 manifest.json의 version이 ChromeExtensionInstaller.ExpectedExtensionVersion 상수와 같은지 확인한다.</summary>
