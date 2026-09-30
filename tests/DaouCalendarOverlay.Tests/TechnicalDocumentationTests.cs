@@ -658,6 +658,74 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("cookies 권한은 7.2.0에서 제거했다", html, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 7.3.0: §16.2의 Installer 발췌가 v730 worker를 <c>Files</c>에, v720 worker를 obsolete 목록에 싣고,
+    /// §10이 <c>cookies.onChanged</c> 트리거와 스냅샷 저장소 키를 말하며, §13·§15·§17이 세션 유지 사실을 반영하는지 고정한다.
+    /// 발췌는 HTML 이스케이프를 풀어 실제 소스 형태로 비교한다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_InstallerExcerptListsV730Worker()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var build = System.Net.WebUtility.HtmlDecode(GetSectionHtml(html, "build"));
+        var filesStart = build.IndexOf("private static readonly (string ResourceName, string FileName)[] Files", StringComparison.Ordinal);
+        Assert.True(filesStart >= 0, "§16.2 발췌에서 Files 배열을 찾지 못했다.");
+        var obsoleteStart = build.IndexOf("foreach (var obsolete in new[]", filesStart, StringComparison.Ordinal);
+        Assert.True(obsoleteStart > filesStart, "§16.2 발췌에서 obsolete 목록을 찾지 못했다.");
+        var filesExcerpt = build.Substring(filesStart, obsoleteStart - filesStart);
+        var obsoleteEnd = build.IndexOf("})", obsoleteStart, StringComparison.Ordinal);
+        Assert.True(obsoleteEnd > obsoleteStart, "§16.2 발췌에서 obsolete 목록의 끝을 찾지 못했다.");
+        var obsoleteExcerpt = build.Substring(obsoleteStart, obsoleteEnd - obsoleteStart);
+
+        Assert.Contains(
+            "(\"DaouCalendarOverlay.ChromeExtension.service-worker-v730.js\", \"service-worker-v730.js\")",
+            filesExcerpt,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v720.js", filesExcerpt, StringComparison.Ordinal);
+        Assert.Contains("\"service-worker-v720.js\"", obsoleteExcerpt, StringComparison.Ordinal);
+        Assert.Contains("public const string ExpectedExtensionVersion = \"7.3.0\";", build, StringComparison.Ordinal);
+
+        var sync = GetSectionHtml(html, "sync");
+        Assert.Contains("cookies.onChanged", sync, StringComparison.Ordinal);
+        Assert.Contains("daouSessionSnapshot", sync, StringComparison.Ordinal);
+        Assert.Contains("daouRefreshLast", sync, StringComparison.Ordinal);
+        Assert.Contains("daouRefreshTabWait", sync, StringComparison.Ordinal);
+        Assert.Contains("daouSessionCookieCache", sync, StringComparison.Ordinal);
+
+        // §10.4: 7.3.0 판정 문구(세션 갱신 대기)와 기대 버전이 현재 소스와 같아야 한다.
+        Assert.Contains(BridgeResultClassifier.SessionRefreshPendingMessage, sync, StringComparison.Ordinal);
+        Assert.Contains("session_refresh_pending", sync, StringComparison.Ordinal);
+        Assert.Contains("인증 문구 4종", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("인증 문구 3종", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("기대 버전은 7.2.0", sync, StringComparison.Ordinal);
+        Assert.Contains("기대 버전은 7.3.0", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("7.2.0 worker의", sync, StringComparison.Ordinal);
+        Assert.Contains("SYNC_BUDGET_MS = 40000", sync, StringComparison.Ordinal);
+        // §10.2 버전 불일치 예시는 현재 기대 버전(ExpectedExtensionVersion)을 쓴다.
+        Assert.Contains("Chrome 확장 새로고침 필요 (7.1.0 → " + ChromeExtensionInstaller.ExpectedExtensionVersion + ")", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("(7.1.0 → 7.2.0)", sync, StringComparison.Ordinal);
+        // §6.1은 7.3.0에서 권한 표가 되어 쿠키 변경 트리거를 뺀 이유를 더 싣지 않는다. 이유는 §29에 있다.
+        Assert.DoesNotContain("이유는 §6.1", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("§6.1에 있다", sync, StringComparison.Ordinal);
+
+        var storage = GetSectionHtml(html, "storage");
+        Assert.Contains("daouSessionSnapshot", storage, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay-7.3.0.exe", storage, StringComparison.Ordinal);
+        Assert.DoesNotContain("DaouCalendarOverlay-7.2.0.exe", storage, StringComparison.Ordinal);
+
+        var security = GetSectionHtml(html, "security");
+        Assert.Contains("(§36)", security, StringComparison.Ordinal);
+        Assert.Contains("overwrite", security, StringComparison.Ordinal);
+        Assert.DoesNotContain("확장에 <code class=\"inline\">cookies</code> 권한이 없고", security, StringComparison.Ordinal);
+
+        var files = GetSectionHtml(html, "files");
+        Assert.Contains("service-worker-v730.js", files, StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v720.js", files, StringComparison.Ordinal);
+        Assert.Contains("worker-mock-test.js", files, StringComparison.Ordinal);
+        Assert.Contains("check-html.js", files, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {
