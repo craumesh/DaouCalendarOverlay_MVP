@@ -13,6 +13,12 @@ public static class NoFetchReasons
     public const string Backoff = "backoff";
     public const string NotDue = "not_due";
 
+    /// <summary>
+    /// getConfig의 protocolVersion이 <see cref="NativeBridgeProtocol.ProtocolVersion"/>과 다르거나 없다.
+    /// 조회를 지시하지 않는다(requestId·lease 미발급). 설정 문제가 아니다.
+    /// </summary>
+    public const string ProtocolMismatch = "protocol_mismatch";
+
     /// <summary>사용자가 설정을 고쳐야 풀리는 사유인지(일시적 스케줄링 사유와 구분).</summary>
     public static bool IsConfigurationProblem(string? reason) =>
         reason is NotConfigured or InvalidBaseUrl;
@@ -26,6 +32,7 @@ public static class NoFetchReasons
         LeaseActive => "이전 동기화 요청을 처리하는 중입니다.",
         Backoff => "재시도 대기 중입니다.",
         NotDue => "다음 동기화 시각까지 대기 중입니다.",
+        ProtocolMismatch => "Chrome 확장과 앱의 브리지 프로토콜 버전이 다릅니다. Chrome 확장을 새로고침해 주세요.",
         _ => string.IsNullOrWhiteSpace(reason) ? "알 수 없는 사유" : reason!
     };
 }

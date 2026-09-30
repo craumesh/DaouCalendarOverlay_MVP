@@ -1,12 +1,19 @@
 {
   "model": "claude-opus-5-5",
+  "effortLevel": "high",
+  "availableModels": ["claude-opus-5-5", "claude-sonnet-5-5"],
   "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-sonnet-5-5",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5",
+    "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"
   },
   "permissions": {
     "allow": [
-      "Workflow(feature)"
+      "Workflow(feature)",
+      "Bash(bash .claude/scripts/gate.sh*)"
     ]
   },
   "hooks": {
@@ -23,6 +30,16 @@
       }
     ],
     "SubagentStop": [
+      {
+        "matcher": "implementer|senior-implementer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/scripts/gate-hook.sh\"",
+            "timeout": 1800
+          }
+        ]
+      },
       {
         "hooks": [
           {

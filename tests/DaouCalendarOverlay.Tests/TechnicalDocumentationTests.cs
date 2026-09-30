@@ -96,7 +96,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("StartupModeParser.IsUninstallInvocation(args)", html, StringComparison.Ordinal);
         Assert.Contains("UninstallFlow.RunInteractive()", html, StringComparison.Ordinal);
         // §7.1: NativeBridgeProtocol 발췌에 ProtocolVersion 포함
-        Assert.Contains("public const int ProtocolVersion = 1;", html, StringComparison.Ordinal);
+        Assert.Contains("public const int ProtocolVersion = 2;", html, StringComparison.Ordinal);
         // §9.1: 일요일 시작 42칸 그리드 기준 예시 날짜와 메서드 경계 발췌
         Assert.Contains("2026-08-30T00:00:00.000+09:00", html, StringComparison.Ordinal);
         Assert.Contains("2026-10-10T23:59:59.999+09:00", html, StringComparison.Ordinal);
@@ -128,7 +128,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("Native host 등록 실패", html, StringComparison.Ordinal);
         Assert.Contains("확장 파일 설치 실패", html, StringComparison.Ordinal);
         Assert.Contains("DaouOffice 응답 시간 초과", html, StringComparison.Ordinal);
-        Assert.Contains("네트워크 요청이 취소되었습니다.", html, StringComparison.Ordinal);
+        Assert.Contains("네트워크 오류: DaouOffice에 연결하지 못했습니다", html, StringComparison.Ordinal);
         Assert.Contains("저장 실패 · 로그 확인", html, StringComparison.Ordinal);
         // §14.3: 트레이 메뉴 전체
         Assert.Contains("로그 폴더 열기", html, StringComparison.Ordinal);
@@ -163,7 +163,9 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("public sealed class DaouCalendarEvent", html, StringComparison.Ordinal);
         Assert.Contains("ResultLeaseSeconds", html, StringComparison.Ordinal);
         Assert.Contains("PipeServerInstances", html, StringComparison.Ordinal);
-        Assert.Contains("COOKIE_DEBOUNCE_MS", html, StringComparison.Ordinal);
+        Assert.Contains("FETCH_TIMEOUT_MS", html, StringComparison.Ordinal);
+        Assert.Contains("MAX_BODY_CHARS", html, StringComparison.Ordinal);
+        Assert.Contains("FetchLeaseSeconds", html, StringComparison.Ordinal);
         Assert.Contains("TrayTextMaxLength", html, StringComparison.Ordinal);
         Assert.Contains("OverlayRunningExitCode", html, StringComparison.Ordinal);
         // §15: BaseUrl 규칙
@@ -234,7 +236,9 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("protocolVersion", section, StringComparison.Ordinal);
         Assert.Contains("extensionVersion", section, StringComparison.Ordinal);
         Assert.Contains("lastError", section, StringComparison.Ordinal);
-        Assert.Contains("cookieSource", section, StringComparison.Ordinal);
+        Assert.Contains("outcome", section, StringComparison.Ordinal);
+        Assert.Contains("bodyLength", section, StringComparison.Ordinal);
+        Assert.Contains("protocol_mismatch", section, StringComparison.Ordinal);
         Assert.Contains("noFetchReason", section, StringComparison.Ordinal);
         Assert.Contains("lease_active", section, StringComparison.Ordinal);
     }
@@ -284,7 +288,7 @@ public sealed class TechnicalDocumentationTests
         var section = GetSectionHtml(html, "extension-triggers");
         Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
         Assert.Contains("daouBridgeBackoff", section, StringComparison.Ordinal);
-        Assert.Contains("cookies.onChanged", section, StringComparison.Ordinal);
+        Assert.Contains("fetchCalendar", section, StringComparison.Ordinal);
         Assert.Contains("ensureAlarm", section, StringComparison.Ordinal);
         Assert.Contains("inFlight", section, StringComparison.Ordinal);
     }
@@ -341,6 +345,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("/gw/api/calendar/event", section, StringComparison.Ordinal);
         Assert.Contains("includingAttendees=true", section, StringComparison.Ordinal);
         Assert.Contains("UNTIL=20261231", section, StringComparison.Ordinal);
+        Assert.Contains("ROUTE-0004", section, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -358,6 +363,8 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
         Assert.Contains("host-", section, StringComparison.Ordinal);
         Assert.Contains("overlay-", section, StringComparison.Ordinal);
+        Assert.Contains("[FETCH]", section, StringComparison.Ordinal);
+        Assert.Contains("verdict=", section, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -389,7 +396,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("calendar-cache.json", section, StringComparison.Ordinal);
         Assert.Contains("settings.json", section, StringComparison.Ordinal);
         Assert.Contains("--uninstall", section, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", section, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", section, StringComparison.Ordinal);
         Assert.Contains(@"%TEMP%\.net\DaouCalendarOverlay", section, StringComparison.Ordinal);
     }
 
@@ -440,7 +447,7 @@ public sealed class TechnicalDocumentationTests
 
         // 버저닝 정책(§37): 파이프 이름은 EXE·확장 버전이 아니라 프로토콜 호환 단위로 바뀐다.
         var versioning = GetSectionHtml(html, "versioning");
-        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", versioning, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", versioning, StringComparison.Ordinal);
 
         Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
     }
@@ -609,6 +616,25 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("### 1. 작업 상태", afterSummary);
         Assert.Contains("### 2. 측정치", afterSummary);
         Assert.Contains("### 4. 남은 결정", afterSummary);
+    }
+
+    /// <summary>§1 요약(문서 표지 뒤 첫 section)이 7.2.0 구조(확장이 직접 조회, 앱은 판정·파싱·표시)를 설명하는지 고정한다.</summary>
+    [Fact]
+    public void TechnicalDoc_SummaryDescribesDirectFetch()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var start = html.IndexOf("<section", StringComparison.Ordinal);
+        Assert.True(start >= 0, "기술 문서에서 첫 <section을 찾지 못했다.");
+        const string closing = "</section>";
+        var end = html.IndexOf(closing, start, StringComparison.Ordinal);
+        Assert.True(end > start, "기술 문서의 첫 section 닫는 태그를 찾지 못했다.");
+        var summary = html.Substring(start, end + closing.Length - start);
+
+        Assert.Contains("<h2>1. ", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("API 조회·파싱·표시는 Windows 오버레이 앱", summary, StringComparison.Ordinal);
+        Assert.Contains("확장", summary, StringComparison.Ordinal);
+        Assert.Contains("직접 조회", summary, StringComparison.Ordinal);
     }
 
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>

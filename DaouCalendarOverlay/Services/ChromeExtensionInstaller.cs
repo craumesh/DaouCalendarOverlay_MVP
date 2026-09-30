@@ -7,12 +7,12 @@ namespace DaouCalendarOverlay.Services;
 public sealed class ChromeExtensionInstaller
 {
     /// <summary>EXE에 임베드된 확장의 버전. ChromeExtension/manifest.json의 "version"과 항상 같아야 한다.</summary>
-    public const string ExpectedExtensionVersion = "7.1.0";
+    public const string ExpectedExtensionVersion = "7.2.0";
 
     private static readonly (string ResourceName, string FileName)[] Files =
     {
         ("DaouCalendarOverlay.ChromeExtension.manifest.json", "manifest.json"),
-        ("DaouCalendarOverlay.ChromeExtension.service-worker-v710.js", "service-worker-v710.js"),
+        ("DaouCalendarOverlay.ChromeExtension.service-worker-v720.js", "service-worker-v720.js"),
         ("DaouCalendarOverlay.ChromeExtension.icon16.png", "icon16.png"),
         ("DaouCalendarOverlay.ChromeExtension.icon32.png", "icon32.png"),
         ("DaouCalendarOverlay.ChromeExtension.icon48.png", "icon48.png"),
@@ -47,7 +47,7 @@ public sealed class ChromeExtensionInstaller
         {
             "content.js", "main-world.js", "bridge-config.js", "bridge-config.json",
             "service-worker.js", "service-worker-v602.js", "service-worker-v610.js",
-            "service-worker-v620.js", "service-worker-v630.js", "service-worker-v700.js",
+            "service-worker-v620.js", "service-worker-v630.js", "service-worker-v700.js", "service-worker-v710.js",
             "setup.html", "setup.js"
         })
         {

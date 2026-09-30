@@ -179,7 +179,7 @@ public sealed class PublishScriptTests
     }
 
     /// <summary>
-    /// publish.ps1의 Get-ProjectVersion과 같은 규칙: Version → FileVersion → "7.1.0".
+    /// publish.ps1의 Get-ProjectVersion과 같은 규칙: Version → FileVersion → "7.2.0".
     /// MSBuild SDK 스타일 프로젝트는 XML 네임스페이스가 없으므로 LocalName으로 찾는다.
     /// </summary>
     private static string ReadProjectVersion()
@@ -200,6 +200,6 @@ public sealed class PublishScriptTests
             }
         }
 
-        return "7.1.0";
+        return "7.2.0";
     }
 }

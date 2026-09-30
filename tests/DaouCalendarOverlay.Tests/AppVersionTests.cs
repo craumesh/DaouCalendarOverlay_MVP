@@ -9,7 +9,7 @@ public sealed class AppVersionTests
     [Fact]
     public void Display_MatchesProductVersion()
     {
-        Assert.Equal("7.1.0", AppVersion.Display);
+        Assert.Equal("7.2.0", AppVersion.Display);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class AppVersionTests
     public void AssemblyFileVersion_MatchesAppManifestIdentity()
     {
         var fileVersion = FileVersionInfo.GetVersionInfo(typeof(AppVersion).Assembly.Location).FileVersion;
-        Assert.Equal("7.1.0.0", fileVersion);
+        Assert.Equal("7.2.0.0", fileVersion);
 
         var manifestPath = RepositoryPaths.Combine("DaouCalendarOverlay", "app.manifest");
         var document = XDocument.Load(manifestPath);
@@ -64,7 +64,7 @@ public sealed class AppVersionTests
         Assert.NotNull(identity);
 
         var manifestVersion = (string?)identity.Attribute("version");
-        Assert.Equal("7.1.0.0", manifestVersion);
+        Assert.Equal("7.2.0.0", manifestVersion);
         Assert.Equal(fileVersion, manifestVersion);
     }
 

@@ -99,30 +99,25 @@ DaouCalendarOverlay_MVP/
 │  DaouOffice 로그인   │
 └──────────┬───────────┘
            │
-           │ 로그인 세션 / Cookie
+           │ 브라우저 세션으로 직접 조회
            ▼
-┌──────────────────────┐
-│   Chrome Extension   │
-└──────────┬───────────┘
+┌──────────────────────┐   fetch   ┌──────────────────────┐
+│   Chrome Extension   │ ────────▶ │     DaouOffice       │
+│                      │ ◀──────── │      Calendar        │
+└──────────┬───────────┘   응답    └──────────────────────┘
            │
-           │ Native Messaging
+           │ Native Messaging(응답 원문과 전송 정보)
            ▼
 ┌──────────────────────┐
 │ DaouCalendarOverlay  │
 │      (WPF/.NET)      │
-└──────────┬───────────┘
-           │
-           │ 일정 데이터 요청/동기화
-           ▼
-┌──────────────────────┐
-│     DaouOffice       │
-│      Calendar        │
+│ 결과 판정·일정 표시  │
 └──────────────────────┘
 ```
 
-이 구조에서는 WPF 애플리케이션이 다우오피스의 로그인 페이지를 직접 구현하거나 사용자의 비밀번호를 별도로 보관하는 대신, 사용자가 Chrome에서 이미 인증한 세션을 활용합니다.
+이 구조에서는 WPF 애플리케이션이 다우오피스의 로그인 페이지를 직접 구현하거나 사용자의 비밀번호를 별도로 보관하는 대신, 사용자가 Chrome에서 이미 인증한 세션을 활용합니다. Chrome 확장이 그 로그인 세션으로 다우오피스를 직접 조회(`fetch`)하고, 응답 원문과 전송 정보를 Native Messaging으로 앱에 넘기면 앱이 성공·재로그인 필요·오류를 판정합니다. 쿠키는 Chrome 밖으로 나가지 않습니다. host는 쿠키 없이 확장의 요청(`getConfig`, `postResult`)과 앱의 응답을 중계합니다.
 
-동기화 주기는 앱의 타이머가 아니라 `CalendarBridgeServer`가 결정합니다. Chrome 확장이 30초마다 `getConfig`를 물어보고, 앱이 가져올 때가 됐다고 답한 회차에만 일정을 가져옵니다(성공 후 다음 시도 시각은 설정의 새로고침 주기, 실패 시 backoff로 정해집니다). 확장 알람은 기본 30초 주기이며, 앱이 꺼져 있는 등의 이유로 native host 연결이 연속 3회 실패하면 1분 → 2분 → 5분으로 늘어났다가 연결에 성공하면 30초로 복귀합니다. DaouOffice 페이지에서 일어나는 쿠키 변경은 5초 debounce로 묶여 한 번의 동기화만 일으킵니다.
+동기화 주기는 앱의 타이머가 아니라 `CalendarBridgeServer`가 결정합니다. Chrome 확장이 30초마다 `getConfig`를 물어보고, 앱이 가져올 때가 됐다고 답한 회차에만 일정을 가져옵니다(성공 후 다음 시도 시각은 설정의 새로고침 주기, 실패 시 backoff로 정해집니다). 확장 알람은 기본 30초 주기이며, 앱이 꺼져 있는 등의 이유로 native host 연결이 연속 3회 실패하면 1분 → 2분 → 5분으로 늘어났다가 연결에 성공하면 30초로 복귀합니다.
 
 달력의 '오늘' 표시 기준은 Windows 로컬 날짜입니다. 자정이 지나면 1초 시계 틱에서 오늘 배지가 이동하고(이전 오늘이 속한 달을 보고 있었고 달이 바뀌었으면 새 달로 이동), 날짜가 바뀔 때마다 한 번 강제 동기화를 요청합니다. (일정이 어느 날짜에 속하는지 판정할 때는 KST +09:00을 사용합니다.)
 
@@ -197,14 +192,14 @@ powershell -ExecutionPolicy Bypass -File .\publish.ps1
 
 ```powershell
 .\publish.ps1 -DryRun
-.\publish.ps1 -Version 7.1.0
+.\publish.ps1 -Version 7.2.0
 .\publish.ps1 -CertificateThumbprint <인증서 SHA1 지문>
 ```
 
 산출물:
 
 ```text
-publish\DaouCalendarOverlay-<버전>.exe   (배포할 단일 EXE, 예: DaouCalendarOverlay-7.1.0.exe)
+publish\DaouCalendarOverlay-<버전>.exe   (배포할 단일 EXE, 예: DaouCalendarOverlay-7.2.0.exe)
 publish\symbols\*.pdb                    (크래시 분석용 PDB, 배포하지 않고 EXE 버전별로 보관)
 ```
 
@@ -244,7 +239,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 
 ### 설치
 
-1. `publish.ps1`이 만든 `DaouCalendarOverlay-<버전>.exe`(현재 `DaouCalendarOverlay-7.1.0.exe`)를 둘 폴더에 복사한 뒤 실행합니다.
+1. `publish.ps1`이 만든 `DaouCalendarOverlay-<버전>.exe`(현재 `DaouCalendarOverlay-7.2.0.exe`)를 둘 폴더에 복사한 뒤 실행합니다.
 2. 처음 실행하면 설정창이 열립니다. DaouOffice 주소(`https://회사이름.daouoffice.com`)와 캘린더 ID를 입력하고 저장합니다.
 3. Chrome에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램을 로드합니다**로 `%LOCALAPPDATA%\DaouCalendarOverlay\ChromeExtension` 폴더를 선택합니다. 트레이 메뉴의 **"Chrome 확장 폴더 열기"** 로 이 폴더를 바로 열 수 있습니다.
 
@@ -255,7 +250,9 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 1. 트레이 아이콘 우클릭 → **종료**로 앱을 끕니다. 실행 중이면 EXE 파일이 잠겨 있어 교체가 실패합니다.
 2. EXE 파일을 새 버전으로 교체합니다.
 3. 새 EXE를 실행합니다. 이때 확장 파일이 새 버전으로 추출되고 Native Messaging manifest의 `path`가 새 EXE 경로로 갱신됩니다.
-4. `chrome://extensions`에서 확장을 **새로고침**합니다. 새로고침하지 않으면 이전 Service Worker가 계속 동작하며, 확장 버전이 바뀐 업그레이드라면 상태 표시줄에 `Chrome 확장 새로고침 필요 (이전 버전 → 새 버전)`이 표시됩니다. 7.0.0 확장은 버전을 앱에 보내지 않으므로 7.0.0에서 올린 경우에는 `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.1.0)`으로 표시됩니다.
+4. `chrome://extensions`에서 확장을 **새로고침**합니다. 새로고침하지 않으면 이전 Service Worker가 계속 동작하며, 확장 버전이 바뀐 업그레이드라면 상태 표시줄에 `Chrome 확장 새로고침 필요 (이전 버전 → 새 버전)`이 표시됩니다. 7.0.0 확장은 버전을 앱에 보내지 않으므로 7.0.0에서 올린 경우에는 `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.2.0)`으로 표시됩니다.
+
+7.2.0: EXE 실행 후 chrome://extensions에서 확장 새로고침 필수. 7.2.0은 네이티브 브리지 프로토콜을 v2로 올렸기 때문에, 새로고침하기 전의 7.1.0 확장에는 앱이 조회를 지시하지 않습니다. 이때는 `Chrome 확장 새로고침 필요 (7.1.0 → 7.2.0)`가 표시되고 캐시 표시만 유지될 것으로 예상합니다(실환경 미확인).
 
 설정·캐시·로그는 `%LOCALAPPDATA%\DaouCalendarOverlay`에 있으므로 EXE를 교체해도 유지됩니다.
 
@@ -264,7 +261,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 제거 방법은 두 가지입니다. 어느 쪽이든 확인 창 2단계(등록 해제 확인 → 사용자 데이터 폴더 삭제 여부)를 거친 뒤 결과 창에 실제로 지운 항목과 실패한 항목을 보여 줍니다(명령줄은 그 전에 오버레이 실행 여부를 먼저 확인합니다). 이미 없는 항목은 건너뜁니다.
 
 - 트레이 아이콘 우클릭 → **완전 제거…**: 결과 창을 닫으면 앱이 종료됩니다. 사용자 데이터 삭제를 선택했다면 폴더는 앱이 종료된 직후 삭제됩니다.
-- 명령줄: `DaouCalendarOverlay-<버전>.exe --uninstall` (예: `DaouCalendarOverlay-7.1.0.exe --uninstall`. `/uninstall`, `-uninstall`도 인식). 시작하자마자 오버레이가 실행 중인지 확인합니다. 실행 중이면 확인 창을 띄우지 않고 **아무것도 지우지 않은 채** "오버레이를 먼저 종료하거나 트레이의 **완전 제거…** 를 사용하라"는 안내 창을 보여 주고 종료 코드 2로 끝납니다(실행 중인 오버레이는 제거 뒤에도 동기화·창 위치·설정 저장 때 `settings.json`을 다시 만들고, 설정 저장 때 Native Messaging Host 등록을 되살리기 때문입니다). 이 경우 트레이 아이콘 우클릭 → **종료**로 오버레이를 끈 뒤 다시 실행하거나 트레이의 **완전 제거…** 를 쓰세요. 종료 코드는 완료·취소 0, 실패한 항목이 있으면 1, 오버레이 실행 중이라 중단하면 2입니다.
+- 명령줄: `DaouCalendarOverlay-<버전>.exe --uninstall` (예: `DaouCalendarOverlay-7.2.0.exe --uninstall`. `/uninstall`, `-uninstall`도 인식). 시작하자마자 오버레이가 실행 중인지 확인합니다. 실행 중이면 확인 창을 띄우지 않고 **아무것도 지우지 않은 채** "오버레이를 먼저 종료하거나 트레이의 **완전 제거…** 를 사용하라"는 안내 창을 보여 주고 종료 코드 2로 끝납니다(실행 중인 오버레이는 제거 뒤에도 동기화·창 위치·설정 저장 때 `settings.json`을 다시 만들고, 설정 저장 때 Native Messaging Host 등록을 되살리기 때문입니다). 이 경우 트레이 아이콘 우클릭 → **종료**로 오버레이를 끈 뒤 다시 실행하거나 트레이의 **완전 제거…** 를 쓰세요. 종료 코드는 완료·취소 0, 실패한 항목이 있으면 1, 오버레이 실행 중이라 중단하면 2입니다.
 
 | 항목 | 위치 |
 |---|---|
@@ -298,7 +295,7 @@ Chrome 백그라운드 대기 → 동기화 요청 중… → 동기화 중… �
 
 저장이 실패하면(예: 파일이 읽기 전용이거나 다른 프로그램이 파일을 잠근 경우) 앱은 종료되지 않고 상태 표시줄에 `설정 저장 실패 · 로그 확인`(캐시는 `캐시 저장 실패 · 로그 확인`)을 표시하며, 실패한 경로와 예외를 아래 로그 파일에 남깁니다.
 
-개발 과정에서 사용하는 계정 정보, 세션 Cookie, 토큰, 비밀번호 등의 민감한 값은 Git 저장소에 저장하지 않는 것을 원칙으로 합니다.
+개발 과정에서 사용하는 계정 정보, 세션 Cookie, 토큰, 비밀번호 등의 민감한 값은 Git 저장소에 저장하지 않는 것을 원칙으로 합니다. 앱은 쿠키를 받지 않으며 쿠키는 Chrome 밖으로 나가지 않습니다.
 
 다음과 같은 파일이나 값은 저장소에 커밋하지 마세요.
 
@@ -327,7 +324,7 @@ API Key
 
 - 날짜별 파일로 기록하며, 파일 하나가 1MB를 넘으면 롤링하여 최대 5개(`overlay-yyyyMMdd.log`, `.1` ~ `.4`)까지 보관합니다.
 - 트레이 아이콘 우클릭 메뉴의 **"로그 폴더 열기"** 로 위 폴더를 바로 열 수 있습니다.
-- 로그에는 인증 Cookie 값이나 토큰이 기록되지 않습니다. 쿠키는 개수(`cookieCount`)와 출처(`cookieSource`)만 남습니다.
+- 로그에 응답 본문과 쿠키가 남지 않습니다. 결과 줄에는 status·contentType·bodyLength 같은 전송 정보와 판정 코드만 남습니다. 다만 API 오류 응답의 `message` 필드는 상태 문구로 쓰이므로 로그에 남을 수 있습니다.
 
 ### Chrome Extension의 고정 Key
 
@@ -345,8 +342,8 @@ Extension의 고정 ID를 유지하기 위해 Extension manifest에 공개용 `k
 
 - 신뢰할 수 없는 Chrome Extension을 설치하지 않습니다.
 - Extension의 권한 범위를 불필요하게 확대하지 않습니다.
-- Native Messaging host는 Named Pipe 서버가 같은 Windows 계정이 실행한 동일 EXE일 때만 세션 쿠키를 전달합니다(다르면 전송하지 않고 오류를 반환).
-- 인증 Cookie나 토큰을 로그에 출력하지 않습니다.
+- Native Messaging host는 Named Pipe 서버가 같은 Windows 계정이 실행한 동일 EXE일 때만 요청과 조회 결과를 전달합니다(다르면 전송하지 않고 오류를 반환). 쿠키는 Chrome 밖으로 나가지 않으며, host가 중계하는 요청과 조회 결과에는 쿠키가 없습니다.
+- 응답 본문, 쿠키, 토큰을 로그에 출력하지 않습니다(로그에 응답 본문과 쿠키가 남지 않습니다).
 - 디버깅 로그에 개인정보가 남지 않도록 합니다.
 - GitHub 저장소를 Public으로 변경하기 전에 전체 소스와 Git history를 확인합니다.
 - 과거 커밋에 비밀번호나 토큰이 들어갔다면 현재 파일에서 삭제하는 것만으로 충분하지 않을 수 있으므로 해당 자격 증명을 폐기/재발급하고 Git history도 정리해야 합니다.
@@ -411,7 +408,7 @@ git push
 4. Native Messaging Host가 가리키는 실행 파일 경로가 실제 파일과 일치하는지 확인
 5. Chrome을 완전히 재시작한 후 다시 시도
 6. WPF 애플리케이션의 로그 확인 (`%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`, Native Messaging Host 쪽은 같은 폴더의 `host-yyyyMMdd.log`)
-7. 실행 중인 오버레이 EXE와 Native Messaging Host manifest의 `path`가 **같은 파일**인지 확인(다르면 host가 쿠키 전송을 거부합니다. 오버레이를 재시작하면 manifest가 현재 EXE 경로로 갱신됩니다)
+7. 실행 중인 오버레이 EXE와 Native Messaging Host manifest의 `path`가 **같은 파일**인지 확인(다르면 host가 전송을 거부합니다. 오버레이를 재시작하면 manifest가 현재 EXE 경로로 갱신됩니다)
 
 ### 일정이 동기화되지 않는 경우
 
@@ -421,9 +418,9 @@ git push
 4. Native Messaging 연결 상태 확인
 5. 네트워크 및 다우오피스 서비스 상태 확인
 6. 설정창의 DaouOffice 주소가 `https://회사이름.daouoffice.com` 형식인지 확인
-7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
+7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회는 Chrome 확장 worker가 하고 최대 25초(`FETCH_TIMEOUT_MS`)이므로 95초 연결 대기 임계를 넘지 않는다. 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
 8. 상태 문구에 `· 캐시 MM-dd HH:mm`만 계속 보이면 아직 한 번도 동기화에 성공하지 못한 상태입니다. Chrome 확장과 Native Messaging 등록을 먼저 확인하세요.
-9. 상태에 `Chrome 확장 새로고침 필요 (…)`가 보이면 Chrome에 로드된 확장 버전이 EXE에 포함된 버전과 다른 것입니다(예: `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.1.0)`. 버전을 보내지 않는 7.0.0 확장은 `7.0.0 이하`로 표시). `chrome://extensions`에서 확장을 새로고침하세요. 새로고침하면 확장이 즉시 `getConfig`를 보내므로 늦어도 30초 안에 문구가 `Chrome 브리지 연결됨 · 동기화 대기`로 바뀝니다. 재로그인이 필요한 상태(`DaouOffice 재로그인 필요`, 세션 만료 안내 등)에서는 재로그인 안내가 우선이라 이 문구가 나오지 않고, 재로그인해 동기화가 성공한 뒤에 표시됩니다.
+9. 상태에 `Chrome 확장 새로고침 필요 (…)`가 보이면 Chrome에 로드된 확장 버전이 EXE에 포함된 버전과 다른 것입니다(예: `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.2.0)`. 버전을 보내지 않는 7.0.0 확장은 `7.0.0 이하`로 표시). `chrome://extensions`에서 확장을 새로고침하세요. 새로고침하면 확장이 곧바로 `getConfig`를 보내고(`onInstalled` 트리거. 새로고침 때 이 이벤트가 오는지는 실환경 미확인) 그 뒤로는 30초 알람마다 보내므로, 문구가 `Chrome 브리지 연결됨 · 동기화 대기`로 바뀝니다. 재로그인이 필요한 상태(`DaouOffice 재로그인 필요`, 세션 만료 안내 등)에서는 재로그인 안내가 우선이라 이 문구가 나오지 않고, 재로그인해 동기화가 성공한 뒤에 표시됩니다.
 
 ### "열기"가 Chrome이 아닌 브라우저로 열리는 경우
 
@@ -443,21 +440,21 @@ DaouOffice "열기" 버튼(트레이 "DaouOffice 열기" 포함)은 기본 브�
 
 | 구성 요소 | 버전 |
 |---|---|
-| EXE (`DaouCalendarOverlay.exe`) | 7.1.0 (파일 버전 7.1.0.0) |
-| Chrome 확장 | 7.1.0 |
-| 네이티브 브리지 프로토콜 | v1 (파이프 이름은 `DaouCalendarOverlay.NativeBridge.v7` 유지) |
+| EXE (`DaouCalendarOverlay.exe`) | 7.2.0 (파일 버전 7.2.0.0) |
+| Chrome 확장 | 7.2.0 |
+| 네이티브 브리지 프로토콜 | v2 (파이프 이름은 `DaouCalendarOverlay.NativeBridge.v8`) |
 
-EXE와 Chrome 확장은 같은 버전 번호를 쓰고, 네이티브 브리지 프로토콜 버전은 `NativeBridgeProtocol.ProtocolVersion`으로 따로 관리합니다.
+EXE와 Chrome 확장은 같은 버전 번호를 쓰고, 네이티브 브리지 프로토콜 버전은 `NativeBridgeProtocol.ProtocolVersion`으로 따로 관리합니다. 7.2.0에서 호환 불가 변경(postResult 형식 교체)으로 프로토콜을 v2로, 파이프 이름을 `.v8`로 올렸습니다.
 
 실행 중인 버전은 다음 네 곳에서 확인할 수 있으며, 네 곳이 항상 같은 버전을 가리켜야 합니다.
 
-1. 트레이 아이콘 툴팁: `Daou Calendar Overlay 7.1.0`
-2. 설정 창 하단: `버전 7.1.0 · 프로토콜 v1`
-3. 로그 파일 첫 줄: `DaouCalendarOverlay 7.1.0 (7.1.0+<커밋 SHA>) mode=overlay pid=…` (Native Messaging Host 모드는 `host-yyyyMMdd.log`에 `mode=host`)
-4. EXE 속성 창 > 자세히: 파일 버전 7.1.0.0
+1. 트레이 아이콘 툴팁: `Daou Calendar Overlay 7.2.0`
+2. 설정 창 하단: `버전 7.2.0 · 프로토콜 v2`
+3. 로그 파일 첫 줄: `DaouCalendarOverlay 7.2.0 (7.2.0+<커밋 SHA>) mode=overlay pid=…` (Native Messaging Host 모드는 `host-yyyyMMdd.log`에 `mode=host`)
+4. EXE 속성 창 > 자세히: 파일 버전 7.2.0.0
 
 - 확장을 새 버전으로 교체했다면 `chrome://extensions`에서 해당 확장을 **새로고침**해야 새 Service Worker가 적용됩니다. 새로고침하지 않으면 상태 표시줄에 `Chrome 확장 새로고침 필요 (…)`가 표시됩니다.
-- 빌드 커밋 해시: git 저장소에서 빌드하면 .NET SDK(Source Link)가 `InformationalVersion`에 커밋 SHA를 자동으로 붙여 `7.1.0+<커밋 SHA>`가 됩니다. 이 값은 로그 첫 줄과 EXE 속성 창의 제품 버전에서 보입니다. 트레이 툴팁과 설정 창에 표시하는 버전은 `7.1.0`으로 유지됩니다. 별도의 빌드 옵션은 필요 없으며, git 저장소 밖(소스 압축본 등)에서 빌드하면 해시 없이 `7.1.0`입니다.
+- 빌드 커밋 해시: git 저장소에서 빌드하면 .NET SDK(Source Link)가 `InformationalVersion`에 커밋 SHA를 자동으로 붙여 `7.2.0+<커밋 SHA>`가 됩니다. 이 값은 로그 첫 줄과 EXE 속성 창의 제품 버전에서 보입니다. 트레이 툴팁과 설정 창에 표시하는 버전은 `7.2.0`으로 유지됩니다. 별도의 빌드 옵션은 필요 없으며, git 저장소 밖(소스 압축본 등)에서 빌드하면 해시 없이 `7.2.0`입니다.
 - 버전별 변경 이력은 [`CHANGELOG.md`](CHANGELOG.md)를 참고하세요.
 
 ## 라이선스

@@ -1,8 +1,32 @@
 # Changelog
 
 이 파일은 Keep a Changelog 형식을 따르고 버전은 유의적 버전(SemVer)을 따릅니다.
-WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브 브리지 프로토콜 버전은 별도로 `NativeBridgeProtocol.ProtocolVersion` 으로 관리합니다(현재 v1, 파이프 이름 `DaouCalendarOverlay.NativeBridge.v7`).
+WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브 브리지 프로토콜 버전은 별도로 `NativeBridgeProtocol.ProtocolVersion` 으로 관리합니다(현재 v2, 파이프 이름 `DaouCalendarOverlay.NativeBridge.v8`).
 릴리스 이후에는 Chrome 확장 서비스 워커를 바꾸면 확장 버전을 반드시 올립니다(worker 파일명 `service-worker-v<버전>.js`, `ChromeExtensionInstaller` obsolete 목록, 패키징 테스트를 함께 갱신).
+
+## 7.2.0 - 2026-09-29
+
+### Added
+- Chrome 확장 서비스 워커 콘솔 진단 로그(`[SYNC]`/`[FETCH]`)
+- 7.1.0이 남긴 세션 쿠키 캐시 키(`daouSessionCookieCache`)를 서비스 워커 시작 때 삭제
+
+### Changed
+- Chrome 확장이 DaouOffice 캘린더 API를 직접 조회(`fetch`, `credentials: "include"`, `redirect: "manual"`, 25초 시간 초과)하고 응답 원문과 전송 정보만 앱에 전달합니다.
+- 인증·API 판정은 앱 `BridgeResultClassifier`가 합니다. 401 + `ROUTE-0004`는 재로그인 필요로 판정합니다.
+- 네이티브 브리지 프로토콜 2, 파이프 `.v8`. 앱은 `protocolVersion`이 2가 아닌 확장에 조회를 지시하지 않습니다.
+- 상태 문구가 바뀝니다(재로그인·네트워크).
+- 200이 아닌 HTML 응답은 HTTP 오류로 표시합니다.
+
+### Removed
+- 쿠키 읽기(`chrome.cookies`), 세션 쿠키 캐시(`daouSessionCookieCache`), Cookie 헤더 전달, 앱의 `HttpClient` 조회
+- `cookies` 권한과 쿠키 변경 트리거
+
+### Fixed
+- Chrome에서 로그아웃한 뒤에도 캐시된 옛 쿠키로 동기화가 계속되던 문제
+- 확장을 새로고침한 뒤 수동 동기화까지 실패하던 문제
+
+### Security
+- 쿠키 값이 Chrome 밖(Native Messaging, host, 파이프, 앱, 로그)으로 나가지 않습니다.
 
 ## 7.1.0 - 2026-09-23
 

@@ -18,6 +18,7 @@ public sealed class NoFetchReasonsTests
         Assert.Equal("lease_active", NoFetchReasons.LeaseActive);
         Assert.Equal("backoff", NoFetchReasons.Backoff);
         Assert.Equal("not_due", NoFetchReasons.NotDue);
+        Assert.Equal("protocol_mismatch", NoFetchReasons.ProtocolMismatch);
     }
 
     /// <summary>설정을 고쳐야 풀리는 사유만 설정 문제로 분류된다.</summary>
@@ -34,6 +35,7 @@ public sealed class NoFetchReasonsTests
     [InlineData("backoff")]
     [InlineData("not_due")]
     [InlineData("range_not_ready")]
+    [InlineData("protocol_mismatch")]
     [InlineData(null)]
     [InlineData("")]
     public void IsConfigurationProblem_FalseForSchedulingReasonsAndNull(string? reason)
@@ -48,6 +50,8 @@ public sealed class NoFetchReasonsTests
         Assert.False(string.IsNullOrWhiteSpace(NoFetchReasons.Describe(NoFetchReasons.NotConfigured)));
         Assert.False(string.IsNullOrWhiteSpace(NoFetchReasons.Describe(NoFetchReasons.InvalidBaseUrl)));
         Assert.Contains("daouoffice.com", NoFetchReasons.Describe(NoFetchReasons.InvalidBaseUrl));
+        Assert.False(string.IsNullOrWhiteSpace(NoFetchReasons.Describe(NoFetchReasons.ProtocolMismatch)));
+        Assert.Contains("프로토콜", NoFetchReasons.Describe(NoFetchReasons.ProtocolMismatch));
     }
 
     /// <summary>모르는 코드는 그대로, 빈 값은 안전한 기본 문구로 변환된다.</summary>
