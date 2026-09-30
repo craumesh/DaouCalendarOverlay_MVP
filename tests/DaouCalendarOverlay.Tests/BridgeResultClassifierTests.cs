@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.Json;
 using DaouCalendarOverlay.Services;
 
 namespace DaouCalendarOverlay.Tests;
@@ -317,5 +319,303 @@ public sealed class BridgeResultClassifierTests
         Assert.Equal("network", BridgeFetchOutcomes.Network);
         Assert.Equal("tooLarge", BridgeFetchOutcomes.TooLarge);
         Assert.Equal("error", BridgeFetchOutcomes.Error);
+    }
+
+    // ---- 7.3.0: postResult 선택 필드 refreshState/refreshStatus와 '세션 갱신 대기' 판정 ----
+
+    /// <summary>만료 응답 본문(401 + ROUTE-0006).</summary>
+    private const string ExpiredBody = "{\"code\":\"ROUTE-0006\"}";
+
+    /// <summary>로그아웃 응답 본문(401 + ROUTE-0004).</summary>
+    private const string LoggedOutBody = "{\"code\":\"ROUTE-0004\"}";
+
+    private static BridgeResultPayload WithRefresh(int status, string body, string? refreshState, int? refreshStatus = null)
+    {
+        var payload = Response(status, body, contentType: "application/json");
+        payload.RefreshState = refreshState;
+        payload.RefreshStatus = refreshStatus;
+        return payload;
+    }
+
+    /// <summary>공개 쓰기 가능 속성을 모두 복사한다. 공유 표 케이스(<see cref="Cases"/>)를 바꾸지 않기 위함이다.</summary>
+    private static BridgeResultPayload Clone(BridgeResultPayload source)
+    {
+        var copy = new BridgeResultPayload();
+        foreach (var property in typeof(BridgeResultPayload).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.CanRead && property.CanWrite)
+                property.SetValue(copy, property.GetValue(source));
+        }
+
+        return copy;
+    }
+
+    private static string[] AllRefreshStates() => typeof(BridgeRefreshStates)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+        .Select(f => (string)f.GetRawConstantValue()!)
+        .ToArray();
+
+    /// <summary>①② 만료 401 + 확장이 갱신을 미룬 상태(waiting_tab, budget)면 '세션 갱신 대기'로 판정한다.</summary>
+    [Theory]
+    [InlineData(BridgeRefreshStates.WaitingTab)]
+    [InlineData(BridgeRefreshStates.Budget)]
+    public void Classify_Expired401WithPendingRefresh_ReportsSessionRefreshPending(string refreshState)
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, ExpiredBody, refreshState));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.False(verdict.IsSuccess);
+        Assert.Equal("session_refresh_pending", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.SessionRefreshPendingMessage, verdict.Message);
+        Assert.Equal("ROUTE-0006", verdict.ApiCode);
+        Assert.Empty(verdict.Events);
+    }
+
+    /// <summary>③⑧ 만료 401이어도 갱신 대기가 아닌 상태(refreshed·rejected·failed·no_token·cooldown·cooldown_rejected·unavailable)면 기존 인증 필요 판정이다.</summary>
+    [Theory]
+    [InlineData(BridgeRefreshStates.Rejected, 401)]
+    [InlineData(BridgeRefreshStates.Rejected, 403)]
+    [InlineData(BridgeRefreshStates.Refreshed, 200)]
+    [InlineData(BridgeRefreshStates.Failed, 500)]
+    [InlineData(BridgeRefreshStates.Failed, 0)]
+    [InlineData(BridgeRefreshStates.NoToken, null)]
+    [InlineData(BridgeRefreshStates.Cooldown, null)]
+    [InlineData(BridgeRefreshStates.CooldownRejected, null)]
+    [InlineData(BridgeRefreshStates.Unavailable, null)]
+    public void Classify_Expired401WithNonPendingRefresh_ReportsAuthRequired(string refreshState, int? refreshStatus)
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, ExpiredBody, refreshState, refreshStatus));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal("ROUTE-0006", verdict.ApiCode);
+    }
+
+    /// <summary>④ refreshState가 없는 만료 401(7.2.0 확장)은 7.2.0과 같은 인증 필요 판정이다.</summary>
+    [Fact]
+    public void Classify_Expired401WithoutRefreshState_MatchesLegacyVerdict()
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, ExpiredBody, refreshState: null));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal("ROUTE-0006", verdict.ApiCode);
+    }
+
+    /// <summary>⑤ 로그아웃 401(ROUTE-0004)은 확장이 waiting_tab을 실어도 인증 필요다.</summary>
+    [Fact]
+    public void Classify_LoggedOut401WithWaitingTab_ReportsAuthRequired()
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, LoggedOutBody, BridgeRefreshStates.WaitingTab));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal("ROUTE-0004", verdict.ApiCode);
+    }
+
+    /// <summary>⑥ 403은 본문이 ROUTE-0006이고 waiting_tab이어도 갱신 대기가 아니다(401만 대상).</summary>
+    [Fact]
+    public void Classify_Expired403WithWaitingTab_ReportsAuthRequired()
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(403, ExpiredBody, BridgeRefreshStates.WaitingTab));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_403", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal("ROUTE-0006", verdict.ApiCode);
+    }
+
+    /// <summary>⑦ refreshState 비교는 대소문자·공백을 구분한다(Ordinal). 계약 밖 값은 기존 판정이다.</summary>
+    [Theory]
+    [InlineData("WAITING_TAB")]
+    [InlineData("Waiting_Tab")]
+    [InlineData("BUDGET")]
+    [InlineData(" waiting_tab")]
+    [InlineData("budget ")]
+    [InlineData("")]
+    [InlineData("disabled")]
+    public void Classify_Expired401WithOutOfContractRefreshState_ReportsAuthRequired(string refreshState)
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, ExpiredBody, refreshState));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal("ROUTE-0006", verdict.ApiCode);
+    }
+
+    /// <summary>
+    /// 만료 판정은 본문 최상위 code가 정확히 ROUTE-0006일 때만이다. 소문자 코드, 코드 없음, 중첩 code,
+    /// 해석 불가·과대 본문은 waiting_tab이 있어도 기존 판정(ApiCode도 기존 추출 규칙 그대로)이다.
+    /// </summary>
+    [Theory]
+    [InlineData("{\"code\":\"route-0006\"}", "route-0006")]
+    [InlineData("{\"code\":\"ROUTE-00060\"}", "ROUTE-00060")]
+    [InlineData("{\"data\":{\"code\":\"ROUTE-0006\"}}", null)]
+    [InlineData("[{\"code\":\"ROUTE-0006\"}]", null)]
+    [InlineData("{not json ROUTE-0006", null)]
+    [InlineData("", null)]
+    public void Classify_401WithWaitingTabButNotExpiredCode_ReportsAuthRequired(string body, string? expectedApiCode)
+    {
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, body, BridgeRefreshStates.WaitingTab));
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Equal(expectedApiCode, verdict.ApiCode);
+    }
+
+    /// <summary>
+    /// 과대 본문(MaxBodyChars 초과)은 code를 읽지 않으므로 ROUTE-0006이어도 갱신 대기가 아니다.
+    /// </summary>
+    [Fact]
+    public void Classify_Expired401WithTooLongBody_ReportsAuthRequired()
+    {
+        var body = "{\"code\":\"ROUTE-0006\",\"pad\":\"" + new string('x', BridgeResultClassifier.MaxBodyChars) + "\"}";
+
+        var verdict = BridgeResultClassifier.Classify(WithRefresh(401, body, BridgeRefreshStates.WaitingTab));
+
+        Assert.Equal("http_401", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, verdict.Message);
+        Assert.Null(verdict.ApiCode);
+    }
+
+    /// <summary>
+    /// 리디렉션은 7단계보다 먼저다. 만료 본문과 waiting_tab이 있어도 redirect 판정이다.
+    /// </summary>
+    [Fact]
+    public void Classify_RedirectedExpired401WithWaitingTab_StaysRedirect()
+    {
+        var payload = WithRefresh(401, ExpiredBody, BridgeRefreshStates.WaitingTab);
+        payload.Redirected = true;
+
+        var verdict = BridgeResultClassifier.Classify(payload);
+
+        Assert.Equal(BridgeFailureKind.Authentication, verdict.Kind);
+        Assert.Equal("redirect", verdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.RedirectMessage, verdict.Message);
+        Assert.Null(verdict.ApiCode);
+    }
+
+    /// <summary>
+    /// I-13: 판정표의 모든 기존 행은 refreshState·refreshStatus를 어떤 값으로 실어도 결과(Kind, ReasonCode, Message, ApiCode)가 그대로다.
+    /// 기존 행에는 401 + ROUTE-0006이 없으므로 새 판정이 끼어들 자리가 없어야 한다.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CaseNames))]
+    public void Classify_RefreshFieldsOnExistingRows_DoNotChangeVerdict(string name)
+    {
+        var expected = Cases[name];
+        if (expected.Payload is null)
+            return;
+
+        var states = AllRefreshStates().Cast<string?>().Append(null).Append("WAITING_TAB").Append("");
+        foreach (var state in states)
+        {
+            foreach (var status in new int?[] { null, 0, 200, 401 })
+            {
+                var payload = Clone(expected.Payload);
+                payload.RefreshState = state;
+                payload.RefreshStatus = status;
+
+                var verdict = BridgeResultClassifier.Classify(payload);
+
+                Assert.Equal(expected.Kind, verdict.Kind);
+                Assert.Equal(expected.ReasonCode, verdict.ReasonCode);
+                Assert.Equal(expected.Message, verdict.Message);
+                Assert.Equal(expected.ApiCode, verdict.ApiCode);
+            }
+        }
+
+        // 복사본만 바꿨는지 확인한다(공유 표 케이스 오염 방지).
+        Assert.Null(expected.Payload.RefreshState);
+        Assert.Null(expected.Payload.RefreshStatus);
+    }
+
+    /// <summary>
+    /// postResult JSON을 앱 파이프 서버와 같은 Web 기본 옵션으로 역직렬화한다.
+    /// 두 필드가 있으면 값(0 포함)을 읽고, 7.2.0 확장처럼 없으면 null이며, 읽은 결과로 판정이 이어진다.
+    /// </summary>
+    [Fact]
+    public void PostResultJson_ReadsRefreshFieldsWhenPresentAndNullWhenAbsent()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        var pending = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            """
+            {"type":"postResult","protocolVersion":2,"result":{"requestId":"r1","outcome":"response","status":401,"responseType":"basic","redirected":false,"contentType":"application/json","body":"{\"code\":\"ROUTE-0006\"}","bodyLength":21,"elapsedMs":120,"refreshState":"waiting_tab"}}
+            """,
+            options);
+
+        Assert.NotNull(pending?.Result);
+        Assert.Equal(BridgeRefreshStates.WaitingTab, pending!.Result!.RefreshState);
+        Assert.Null(pending.Result.RefreshStatus);
+        var pendingVerdict = BridgeResultClassifier.Classify(pending.Result);
+        Assert.Equal("session_refresh_pending", pendingVerdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.SessionRefreshPendingMessage, pendingVerdict.Message);
+
+        var failedNoResponse = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            """
+            {"type":"postResult","protocolVersion":2,"result":{"requestId":"r2","outcome":"response","status":401,"responseType":"basic","redirected":false,"contentType":"application/json","body":"{\"code\":\"ROUTE-0006\"}","bodyLength":21,"elapsedMs":120,"refreshState":"failed","refreshStatus":0}}
+            """,
+            options);
+
+        Assert.NotNull(failedNoResponse?.Result);
+        Assert.Equal(BridgeRefreshStates.Failed, failedNoResponse!.Result!.RefreshState);
+        Assert.Equal(0, failedNoResponse.Result.RefreshStatus);
+
+        var refreshed = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            """
+            {"type":"postResult","protocolVersion":2,"result":{"requestId":"r3","outcome":"response","status":200,"refreshState":"refreshed","refreshStatus":200}}
+            """,
+            options);
+
+        Assert.Equal(BridgeRefreshStates.Refreshed, refreshed!.Result!.RefreshState);
+        Assert.Equal(200, refreshed.Result.RefreshStatus);
+
+        var legacy = JsonSerializer.Deserialize<NativeBridgeRequest>(
+            """
+            {"type":"postResult","protocolVersion":2,"result":{"requestId":"r4","outcome":"response","status":401,"responseType":"basic","redirected":false,"contentType":"application/json","body":"{\"code\":\"ROUTE-0006\"}","bodyLength":21,"elapsedMs":120}}
+            """,
+            options);
+
+        Assert.NotNull(legacy?.Result);
+        Assert.Null(legacy!.Result!.RefreshState);
+        Assert.Null(legacy.Result.RefreshStatus);
+        var legacyVerdict = BridgeResultClassifier.Classify(legacy.Result);
+        Assert.Equal("http_401", legacyVerdict.ReasonCode);
+        Assert.Equal(BridgeResultClassifier.AuthRequiredMessage, legacyVerdict.Message);
+        Assert.Equal("ROUTE-0006", legacyVerdict.ApiCode);
+    }
+
+    /// <summary>refreshState 리터럴 9개는 worker 계약과 글자 단위로 같고, 그 밖의 값(disabled 등)은 없다.</summary>
+    [Fact]
+    public void RefreshStates_MatchWorkerContract()
+    {
+        Assert.Equal("refreshed", BridgeRefreshStates.Refreshed);
+        Assert.Equal("rejected", BridgeRefreshStates.Rejected);
+        Assert.Equal("failed", BridgeRefreshStates.Failed);
+        Assert.Equal("no_token", BridgeRefreshStates.NoToken);
+        Assert.Equal("cooldown", BridgeRefreshStates.Cooldown);
+        Assert.Equal("cooldown_rejected", BridgeRefreshStates.CooldownRejected);
+        Assert.Equal("waiting_tab", BridgeRefreshStates.WaitingTab);
+        Assert.Equal("budget", BridgeRefreshStates.Budget);
+        Assert.Equal("unavailable", BridgeRefreshStates.Unavailable);
+
+        Assert.Equal(
+            new[] { "budget", "cooldown", "cooldown_rejected", "failed", "no_token", "refreshed", "rejected", "unavailable", "waiting_tab" },
+            AllRefreshStates().OrderBy(v => v, StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>만료 코드와 갱신 대기 문구는 설계 문구와 글자 단위로 같다.</summary>
+    [Fact]
+    public void SessionRefreshConstants_MatchDesignedWording()
+    {
+        Assert.Equal("ROUTE-0006", BridgeResultClassifier.ExpiredApiCode);
+        Assert.Equal("DaouOffice 세션 갱신을 기다리는 중입니다", BridgeResultClassifier.SessionRefreshPendingMessage);
     }
 }

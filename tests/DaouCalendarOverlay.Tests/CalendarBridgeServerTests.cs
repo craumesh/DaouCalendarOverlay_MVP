@@ -443,6 +443,54 @@ public sealed class CalendarBridgeServerTests
         Assert.InRange(captured!.RetryAt!.Value, before.AddSeconds(55), after.AddSeconds(65));
     }
 
+    /// <summary>
+    /// 만료 응답(401 + ROUTE-0006)에 확장이 갱신을 미뤘다고(refreshState=waiting_tab) 실어 보내면
+    /// 인증 필요 경로(1분 재시도)는 그대로 쓰고 문구만 '세션 갱신 대기'로 올라온다.
+    /// </summary>
+    [Fact]
+    public async Task PostResult_ExpiredWhileRefreshPending_RaisesAuthRequiredWithPendingMessage()
+    {
+        await using var server = new CalendarBridgeServer(pipeName: NewPipeName());
+        var completed = NewSignal();
+        BridgeSyncEventArgs? captured = null;
+        server.SyncCompleted += (_, e) =>
+        {
+            captured = e;
+            completed.TrySetResult();
+        };
+
+        server.UpdateRequest(Settings(), RangeFrom, RangeTo, force: true);
+        var config = await GetConfigAsync(server);
+        Assert.True(config.ShouldFetch);
+
+        const string body = "{\"code\":\"ROUTE-0006\",\"message\":\"x\"}";
+        var before = DateTimeOffset.Now;
+        var ack = await PostPayloadAsync(server, new BridgeResultPayload
+        {
+            RequestId = config.RequestId,
+            Outcome = BridgeFetchOutcomes.Response,
+            Status = 401,
+            ResponseType = "basic",
+            ContentType = "application/json",
+            Body = body,
+            BodyLength = body.Length,
+            ElapsedMs = 120,
+            RefreshState = BridgeRefreshStates.WaitingTab
+        }).WaitAsync(WaitLimit);
+        Assert.True(ack.Ok);
+
+        await completed.Task.WaitAsync(WaitLimit);
+        var after = DateTimeOffset.Now;
+
+        Assert.NotNull(captured);
+        Assert.False(captured!.Success);
+        Assert.True(captured!.AuthenticationRequired);
+        Assert.Equal(BridgeFailureKind.Authentication, captured!.FailureKind);
+        Assert.Equal(BridgeResultClassifier.SessionRefreshPendingMessage, captured!.Error);
+        Assert.NotNull(captured!.RetryAt);
+        Assert.InRange(captured!.RetryAt!.Value, before.AddSeconds(55), after.AddSeconds(65));
+    }
+
     /// <summary>worker의 fetch 시간 초과는 네트워크 실패로 올라온다(재로그인 배너 아님).</summary>
     [Fact]
     public async Task PostResult_Timeout_RaisesNetworkFailure()
