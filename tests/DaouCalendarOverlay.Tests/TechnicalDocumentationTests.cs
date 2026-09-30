@@ -766,6 +766,54 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("-Version 7.2.0", release, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 7.3.0: 동작 계약의 정본 절(§26 스키마, §27 시퀀스, §28 상태, §29 트리거, §32 API 계약, §33 진단)이 세션 갱신을 서술하는지 고정한다.
+    /// refreshState 값 9개와 만료 코드는 리터럴이 아니라 앱 상수(<see cref="BridgeRefreshStates"/>, <see cref="BridgeResultClassifier.ExpiredApiCode"/>)에서 읽는다.
+    /// 옛 "cookies 권한 없이" 서술은 문서 어디에도 남지 않아야 한다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_CanonicalSectionsDescribeSessionRefresh()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var schema = GetSectionHtml(html, "bridge-schema");
+        Assert.Contains("refreshState", schema, StringComparison.Ordinal);
+        Assert.Contains("refreshStatus", schema, StringComparison.Ordinal);
+        var refreshStates = typeof(BridgeRefreshStates)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => (string)field.GetRawConstantValue()!)
+            .ToList();
+        Assert.Equal(9, refreshStates.Count);
+        foreach (var state in refreshStates)
+            Assert.Contains($"<code>{state}</code>", schema, StringComparison.Ordinal);
+        Assert.Contains("ProtocolVersion", schema, StringComparison.Ordinal);
+
+        var sequence = GetSectionHtml(html, "sequence");
+        Assert.Contains("refreshSession", sequence, StringComparison.Ordinal);
+        Assert.Contains("restoreBeforeFetch", sequence, StringComparison.Ordinal);
+        Assert.Contains(BridgeResultClassifier.ExpiredApiCode, sequence, StringComparison.Ordinal);
+
+        var stateMachine = GetSectionHtml(html, "state-machine");
+        Assert.Contains("DaouOffice 세션 갱신을 기다리는 중입니다", stateMachine, StringComparison.Ordinal);
+
+        var triggers = GetSectionHtml(html, "extension-triggers");
+        Assert.Contains("cookies.onChanged", triggers, StringComparison.Ordinal);
+        Assert.DoesNotContain("chrome.cookies.onChanged</code> 리스너와 5초 debounce", triggers, StringComparison.Ordinal);
+
+        var api = GetSectionHtml(html, "api-contract");
+        Assert.Contains("ROUTE-0006", api, StringComparison.Ordinal);
+        Assert.Contains("ROUTE-0004", api, StringComparison.Ordinal);
+        Assert.Contains("/api/portal/public/auth/refresh/login", api, StringComparison.Ordinal);
+
+        var diagnostics = GetSectionHtml(html, "diagnostics");
+        Assert.Contains("[REFRESH]", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("refreshState=", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("[SESSION]", diagnostics, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("cookies 권한 없이", html, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {
