@@ -111,6 +111,78 @@ public sealed class BridgeLogSummaryTests
         Assert.Equal("type=postResult protocolVersion=2", BridgeLogSummary.DescribeRequest(Utf8(json)));
     }
 
+    /// <summary>선택 필드 refreshState·refreshStatus는 요약 끝에 붙고, 본문 문자열은 남지 않는다.</summary>
+    [Fact]
+    public void DescribeRequest_PostResultWithRefreshFields_AppendsThemAtEnd()
+    {
+        const string json = """
+            {"type":"postResult","protocolVersion":2,"result":{"outcome":"response","status":401,"errorName":"E","body":"SECRET-BODY","refreshState":"waiting_tab","refreshStatus":200}}
+            """;
+
+        var summary = BridgeLogSummary.DescribeRequest(Utf8(json));
+
+        Assert.EndsWith(" refreshState=waiting_tab refreshStatus=200", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET-BODY", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeRequest_RefreshStateIsSanitizedAsToken()
+    {
+        const string json = """
+            {"type":"postResult","result":{"refreshState":"a b<script>"}}
+            """;
+
+        Assert.Equal("type=postResult refreshState=abscript", BridgeLogSummary.DescribeRequest(Utf8(json)));
+    }
+
+    [Fact]
+    public void DescribeRequest_StringRefreshStatus_IsOmitted()
+    {
+        const string json = """
+            {"type":"postResult","result":{"refreshState":"refreshed","refreshStatus":"200"}}
+            """;
+
+        var summary = BridgeLogSummary.DescribeRequest(Utf8(json));
+
+        Assert.Equal("type=postResult refreshState=refreshed", summary);
+        Assert.DoesNotContain("refreshStatus", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResult_WithRefreshFields_AppendsThemAtEnd()
+    {
+        var payload = new BridgeResultPayload
+        {
+            RequestId = "r1",
+            Outcome = "response",
+            Status = 401,
+            RefreshState = "refreshed",
+            RefreshStatus = 200
+        };
+
+        Assert.EndsWith(" errorName=none refreshState=refreshed refreshStatus=200",
+            BridgeLogSummary.DescribeResult(payload), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeResult_WithoutRefreshFields_KeepsLegacyString()
+    {
+        var payload = new BridgeResultPayload
+        {
+            RequestId = "",
+            Outcome = "timeout",
+            Redirected = true,
+            ElapsedMs = 25003,
+            ErrorName = "Abort Error!",
+            RefreshState = null,
+            RefreshStatus = null
+        };
+
+        Assert.Equal(
+            "requestId=none outcome=timeout status=none contentType=none bodyLength=none redirected=true elapsedMs=25003 errorName=AbortError",
+            BridgeLogSummary.DescribeResult(payload));
+    }
+
     [Fact]
     public void DescribeRequest_InvalidJson_ReturnsUnknownType()
     {

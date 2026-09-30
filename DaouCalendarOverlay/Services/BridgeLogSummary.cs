@@ -7,7 +7,7 @@ namespace DaouCalendarOverlay.Services;
 /// <summary>
 /// 브리지 요청/결과를 로그 한 줄로 요약한다.
 /// 응답 본문과 쿠키는 요약에 넣지 않는다. 허용한 전송 필드(outcome, status, contentType, bodyLength,
-/// redirected, elapsedMs, errorName)만 JSON 종류가 맞을 때 정제해서 붙인다.
+/// redirected, elapsedMs, errorName, refreshState, refreshStatus)만 JSON 종류가 맞을 때 정제해서 붙인다.
 /// 이 요약은 host 프로세스(NativeMessagingHost)도 쓰므로 host 로그 파일에도 같은 규칙이 적용된다.
 /// 어떤 입력에도 예외를 던지지 않는다.
 /// </summary>
@@ -67,6 +67,13 @@ public static class BridgeLogSummary
 
                 if (TryGetString(result, "errorName", out var errorName))
                     builder.Append(" errorName=").Append(Token(errorName));
+
+                // 7.3.0 확장이 만료 401에서 토큰 갱신을 시도했을 때만 붙는 선택 필드.
+                if (TryGetString(result, "refreshState", out var refreshState))
+                    builder.Append(" refreshState=").Append(Token(refreshState));
+
+                if (TryGetInt32(result, "refreshStatus", out var refreshStatus))
+                    builder.Append(" refreshStatus=").Append(refreshStatus.ToString(CultureInfo.InvariantCulture));
             }
 
             return builder.ToString();
@@ -95,6 +102,13 @@ public static class BridgeLogSummary
             builder.Append(" redirected=").Append(result.Redirected ? "true" : "false");
             builder.Append(" elapsedMs=").Append(IntOrNone(result.ElapsedMs));
             builder.Append(" errorName=").Append(Token(result.ErrorName));
+
+            if (result.RefreshState is not null)
+                builder.Append(" refreshState=").Append(Token(result.RefreshState));
+
+            if (result.RefreshStatus is int refreshStatus)
+                builder.Append(" refreshStatus=").Append(refreshStatus.ToString(CultureInfo.InvariantCulture));
+
             return builder.ToString();
         }
         catch
