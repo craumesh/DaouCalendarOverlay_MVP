@@ -46,7 +46,7 @@ public sealed class BuildConfigurationTests
         var logicalNames = resources
             .Select(resource => (string?)resource.Attribute("LogicalName"))
             .ToArray();
-        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v720.js", logicalNames);
+        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v730.js", logicalNames);
     }
 
     [Fact]

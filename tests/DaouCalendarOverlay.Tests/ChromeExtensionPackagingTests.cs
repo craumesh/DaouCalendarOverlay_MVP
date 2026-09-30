@@ -10,7 +10,7 @@ namespace DaouCalendarOverlay.Tests;
 public sealed class ChromeExtensionPackagingTests
 {
     private const string ManifestResource = "DaouCalendarOverlay.ChromeExtension.manifest.json";
-    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v720.js";
+    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v730.js";
 
     private static string ReadResource(string resourceName)
     {
@@ -35,17 +35,18 @@ public sealed class ChromeExtensionPackagingTests
     }
 
     [Fact]
-    public void EmbeddedResources_ContainServiceWorkerV720Only()
+    public void EmbeddedResources_ContainServiceWorkerV730Only()
     {
         var names = typeof(ChromeExtensionInstaller).Assembly.GetManifestResourceNames();
 
         Assert.Contains(WorkerResource, names);
+        Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v720.js", names);
         Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v710.js", names);
         Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v700.js", names);
     }
 
     [Fact]
-    public void EmbeddedManifest_TargetsV720WorkerWithoutCookiesPermission()
+    public void EmbeddedManifest_TargetsV730WorkerWithoutCookiesPermission()
     {
         var manifestText = ReadResource(ManifestResource);
         using var manifest = JsonDocument.Parse(manifestText);
@@ -63,7 +64,7 @@ public sealed class ChromeExtensionPackagingTests
         var hostPermissions = root.GetProperty("host_permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
         Assert.Contains("https://*.daouoffice.com/*", hostPermissions);
 
-        Assert.Equal("service-worker-v720.js", root.GetProperty("background").GetProperty("service_worker").GetString());
+        Assert.Equal("service-worker-v730.js", root.GetProperty("background").GetProperty("service_worker").GetString());
 
         Assert.DoesNotContain("gkchgbpcbljkgabjcgjelacfkphcmhmi", manifestText);
         Assert.Contains("\"key\"", manifestText);

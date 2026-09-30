@@ -24,7 +24,7 @@ public sealed class BridgeLogSummaryTests
     public void DescribeRequest_GetConfigWithProtocolVersion_IncludesProtocolVersion()
     {
         var summary = BridgeLogSummary.DescribeRequest(Utf8(
-            "{\"type\":\"getConfig\",\"lastError\":\"getConfig: boom\",\"extensionVersion\":\"7.2.0\",\"protocolVersion\":2}"));
+            "{\"type\":\"getConfig\",\"lastError\":\"getConfig: boom\",\"extensionVersion\":\"7.3.0\",\"protocolVersion\":2}"));
 
         Assert.Equal("type=getConfig protocolVersion=2", summary);
     }

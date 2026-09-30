@@ -11,7 +11,7 @@ const PROTOCOL_VERSION = 2;
 const FETCH_TIMEOUT_MS = 25000;
 // 앱 BridgeResultClassifier.MaxBodyChars와 같은 값. 파이프 한도(8MiB) 안에 들도록 정했다.
 const MAX_BODY_CHARS = 1000000;
-// 7.1.0까지 세션 쿠키 헤더를 담던 키. 7.2.0은 읽거나 쓰지 않고 시작할 때 지우기만 한다.
+// 7.1.0까지 세션 쿠키 헤더를 담던 키. 지금은 읽거나 쓰지 않고 시작할 때 지우기만 한다.
 const LEGACY_SESSION_COOKIE_KEY = "daouSessionCookieCache";
 
 let inFlight = false;
