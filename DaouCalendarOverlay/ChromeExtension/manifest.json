@@ -9,7 +9,8 @@
     "alarms",
     "background",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "cookies"
   ],
   "host_permissions": [
     "https://*.daouoffice.com/*"

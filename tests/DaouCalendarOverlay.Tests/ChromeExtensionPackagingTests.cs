@@ -46,7 +46,7 @@ public sealed class ChromeExtensionPackagingTests
     }
 
     [Fact]
-    public void EmbeddedManifest_TargetsV730WorkerWithoutCookiesPermission()
+    public void EmbeddedManifest_TargetsV730WorkerWithCookiesPermission()
     {
         var manifestText = ReadResource(ManifestResource);
         using var manifest = JsonDocument.Parse(manifestText);
@@ -59,7 +59,9 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Contains("background", permissions);
         Assert.Contains("storage", permissions);
         Assert.Contains("nativeMessaging", permissions);
-        Assert.DoesNotContain("cookies", permissions);
+        Assert.Contains("cookies", permissions);
+        Assert.Equal(5, permissions.Length);
+        Assert.DoesNotContain("tabs", permissions);
 
         var hostPermissions = root.GetProperty("host_permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
         Assert.Contains("https://*.daouoffice.com/*", hostPermissions);
@@ -226,22 +228,41 @@ public sealed class ChromeExtensionPackagingTests
             "최대 본문이 파이프 메시지 한도를 넘습니다.");
     }
 
-    /// <summary>쿠키 API와 쿠키·식별 헤더를 worker가 쓰지 않는지 확인한다(주석 포함 전체 원문 기준).</summary>
+    /// <summary>
+    /// 쿠키 API는 복원·스냅샷 용도로 허용하되, 쿠키·식별 헤더를 직접 만들지 않고 디스크 저장소를 쓰지 않는지 확인한다
+    /// (주석 포함 전체 원문 기준).
+    /// </summary>
     [Fact]
-    public void EmbeddedServiceWorker_DoesNotUseCookieApisOrIdentityHeaders()
+    public void EmbeddedServiceWorker_DoesNotBuildCookieOrIdentityHeaders()
     {
         var worker = ReadResource(WorkerResource);
 
         var forbidden = new[]
         {
-            "chrome.cookies", "cookies.onChanged", "cookieHeader", "cookiesToHeader",
+            "cookieHeader", "cookiesToHeader",
             "readCookiesFromAllStores", "DEFAULT_COOKIE_STORE_ID", "COOKIE_DEBOUNCE_MS", "scheduleCookieSync",
             "navigator.userAgent", "document.cookie", "\"Cookie\"", "User-Agent", "Referer",
-            "console.log(", "console.error(", "console.debug("
+            "console.log(", "console.error(", "console.debug(",
+            "storage.local"
         };
 
         foreach (var token in forbidden)
             Assert.DoesNotContain(token, worker);
+
+        Assert.False(
+            worker.Contains("spike", StringComparison.OrdinalIgnoreCase),
+            "정식 worker에 시험 흔적(spike)이 있습니다.");
+    }
+
+    /// <summary>툴바 아이콘으로 즉시 동기화하는 기존 기능(기술 문서 §10·§29)이 worker에 그대로 있는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_KeepsToolbarSyncTrigger()
+    {
+        var lines = WorkerLines();
+
+        Assert.Contains(
+            lines,
+            l => l.TrimEnd() == "chrome.action.onClicked.addListener(() => { void syncOnce(\"action\"); });");
     }
 
     /// <summary>로그는 두 헬퍼로만 남기고, 로그 인자에 본문·쿠키·URL·헤더·텍스트가 들어가지 않는지 줄 단위로 확인한다.</summary>
