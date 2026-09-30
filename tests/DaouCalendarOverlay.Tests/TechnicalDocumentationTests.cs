@@ -363,6 +363,8 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("daou-calendar-overlay-sync", section, StringComparison.Ordinal);
         Assert.Contains("host-", section, StringComparison.Ordinal);
         Assert.Contains("overlay-", section, StringComparison.Ordinal);
+        Assert.Contains("[FETCH]", section, StringComparison.Ordinal);
+        Assert.Contains("verdict=", section, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -394,7 +396,7 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("calendar-cache.json", section, StringComparison.Ordinal);
         Assert.Contains("settings.json", section, StringComparison.Ordinal);
         Assert.Contains("--uninstall", section, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", section, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", section, StringComparison.Ordinal);
         Assert.Contains(@"%TEMP%\.net\DaouCalendarOverlay", section, StringComparison.Ordinal);
     }
 
@@ -445,7 +447,7 @@ public sealed class TechnicalDocumentationTests
 
         // 버저닝 정책(§37): 파이프 이름은 EXE·확장 버전이 아니라 프로토콜 호환 단위로 바뀐다.
         var versioning = GetSectionHtml(html, "versioning");
-        Assert.Contains("DaouCalendarOverlay.NativeBridge.v7", versioning, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", versioning, StringComparison.Ordinal);
 
         Assert.DoesNotContain("v7.0.0", html, StringComparison.Ordinal);
     }
