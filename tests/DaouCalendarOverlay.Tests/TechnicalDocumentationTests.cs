@@ -637,6 +637,27 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("직접 조회", summary, StringComparison.Ordinal);
     }
 
+    /// <summary>7.3.0: §1 요약이 세션 유지(storage.session, cookies 권한 복귀)를 말하고, §6이 새 worker 발췌를 싣고 옛 "cookies 권한 제거" 서술을 남기지 않는지 고정한다.</summary>
+    [Fact]
+    public void TechnicalDoc_SummaryAndWorkerSectionDescribeSessionKeepAlive()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var start = html.IndexOf("<section", StringComparison.Ordinal);
+        Assert.True(start >= 0, "기술 문서에서 첫 <section을 찾지 못했다.");
+        const string closing = "</section>";
+        var end = html.IndexOf(closing, start, StringComparison.Ordinal);
+        Assert.True(end > start, "기술 문서의 첫 section 닫는 태그를 찾지 못했다.");
+        var summary = html.Substring(start, end + closing.Length - start);
+
+        Assert.Contains("storage.session", summary, StringComparison.Ordinal);
+        Assert.Contains("cookies", summary, StringComparison.Ordinal);
+
+        Assert.Contains("function fetchCalendar(config, timeoutMs = FETCH_TIMEOUT_MS)", html, StringComparison.Ordinal);
+        Assert.Contains("async function onCookieChanged(changeInfo)", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("cookies 권한은 7.2.0에서 제거했다", html, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {
