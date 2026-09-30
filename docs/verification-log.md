@@ -246,7 +246,7 @@
 ### 수동 확인 대기 (7.2.0)
 
 - R1: cookies 권한을 뺀 7.2.0에서 로그인 상태로 조회했을 때 200과 이벤트가 표시되는지 확인(401이면 권한 제거가 원인인지 먼저 가름) — 로그 관찰 2026-09-29 20:22~20:26: cookies 권한 없는 7.2.0에서 로그아웃 시 verdict=auth reason=http_401 apiCode=ROUTE-0004, 로그인 후 verdict=success, 동기화 성공 events=48 — 사용자 절차 확인 전
-- R2: Chrome 창을 모두 닫고 백그라운드로 살아 있는 상태에서 RefreshMinutes=1로 2분 이상 자동 동기화가 되는지 확인(앱 로그 verdict=success와 상태 시각 갱신, DevTools를 닫고) — 미확인
+- R2: Chrome 창을 모두 닫고 백그라운드로 살아 있는 상태에서 RefreshMinutes=1로 2분 이상 자동 동기화가 되는지 확인(앱 로그 verdict=success와 상태 시각 갱신, DevTools를 닫고) — 미확인 (7.3.0 R-A가 다룸)
 - R3: 확장을 새로고침한 직후 수동 동기화가 성공하는지 확인(콘솔에 [SYNC] worker started와 trigger=installed) — 미확인
 - R4: 로그아웃하면 다음 조회에서 "Chrome의 DaouOffice 로그인이 필요합니다"와 배너가 나오고 앱 로그에 reason=http_401 apiCode=ROUTE-0004가 남는지, 재로그인 후 회복 시간(1분 backoff + 알람 30초 이내, 트레이 새로고침은 30초 이내)을 확인 — 로그 관찰: 로그상 인증 실패 조회가 약 1.5분 간격(backoff 1분 + 알람)으로 반복되다 로그인 뒤 조회에서 성공 — 트레이 새로고침 경로는 미확인 — 사용자 절차 확인 전
 - R5: 조회 도중 워커가 종료되는 경우(네트워크를 제한해 조회를 20초 이상 늘림): 다음 알람이 skipped reason=in_flight이고, postResult가 오지 않아도 45초 lease가 끝난 뒤 새 requestId로 회복되는지 확인 — 미확인
@@ -254,3 +254,29 @@
 - R7: 7.1.0 → 7.2.0 업그레이드: EXE 교체 뒤 확장 새로고침 전 표시가 기술 문서 §22의 표와 일치하는지, 새로고침 후 정상이고 chrome.storage.session에 daouSessionCookieCache가 없는지 확인 — 미확인
 - R8: 네트워크를 끊었을 때 "네트워크 오류: … · 재시도 HH:mm"이 나오는지, 조회가 25초를 넘을 때 "DaouOffice 응답 시간 초과"가 나오는지 확인 — 미확인
 - 부팅 후 7.2.0 자동 시작(2026-09-30 부팅 후 9분까지 자동 실행 안 됨, 수동 실행은 정상) — 미확인
+
+## 7.3.0 (창 닫기 후 세션 유지·만료 갱신, 브랜치 ext-session-refresh)
+
+| 날짜 | 작업 | 검증 방법 | 결과 |
+|---|---|---|---|
+| 2026-09-30 | T1 a73ec4f~T7 0c8d77a: 버전 7.3.0 상향과 worker 파일 이름 변경(v720→v730), manifest `cookies` 권한 복귀와 포장 테스트 가드 개정, worker 핵심(세션 스냅샷·쿠키 복원·토큰 갱신·시간 예산), JS 동작 시험 `tools/worker-mock-test.js`와 게이트 연결, C# 결과 필드 `refreshState`·`refreshStatus`와 "세션 갱신 대기" 판정, 로그 요약, 포장 테스트(시간 예산·갱신 상태 리터럴·만료 코드) | `/feature` 워크플로: 0단계 게이트와 검증 단계를 통과해야 커밋한다. 태스크별 검증 결과 원문은 이 로그에 옮기지 않았다 | 통과(커밋됨) |
+| 2026-09-30 | T8 f209029~T12 096f88b: 기술 문서 개정(§1~§6, §10~§17, §20~§24, §25~§33, §34~§39, 문서 기준일) | `/feature` 워크플로: 0단계 게이트와 검증 단계를 통과해야 커밋한다. 태스크별 검증 결과 원문은 이 로그에 옮기지 않았다 | 통과(커밋됨) |
+| 2026-09-30 | T13: verification-log 7.3.0 절, README, CHANGELOG 7.3.0 본문 | 자동 검증(아래) 실행. 문서 검증 단계는 별도 | 자동 검증 통과(아래 수치). 수동 확인 R-A~R-G 7건 미확인 |
+
+### 자동 검증 (7.3.0, T13에서 실제 실행한 값)
+
+- `dotnet test DaouCalendarOverlay.sln -c Release -nologo`: 통과 800, 실패 0, 건너뜀 0(전체 800).
+- `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=75 fail=0`.
+- `bash .claude/scripts/gate.sh`: `GATE RESULT: pass`(문서 3개 변경 뒤 실행, `[ALWAYS] pass : bash .claude/scripts/gate-extra.sh`). `gate-extra.sh`를 따로 실행해 보면 기술 문서 HTML 점검과 위 하네스를 돈 뒤, `.md` 변경을 보고 `dotnet build -c Release -warnaserror`(경고 0개, 오류 0개)와 `dotnet test`(통과 800, 실패 0, 건너뜀 0)를 다시 돈다.
+
+### 수동 확인 대기 (7.3.0)
+
+기술 문서 §34.5 표와 같은 항목이다. 자동 시험은 가짜 chrome 위의 판정 순서만 고정하므로, 아래는 실제 Chrome·DaouOffice에서만 확인할 수 있다. 판단은 앱 로그의 `bridge.result` 줄과 확장 콘솔의 `[SESSION]`·`[REFRESH]` 줄로 한다.
+
+- R-A: 창 0개로 오래 유지되고 만료 시점에 자동 갱신 — DaouOffice에 로그인한 상태로 조회가 한 번 성공한 것을 확인한 뒤 Chrome 창을 모두 닫아 백그라운드로만 두고 34분 이상 둔다. 창을 닫고 1초쯤 뒤 확장 콘솔에 `[SESSION] restore reason=timer restored=2 skipped=0`이 남고 동기화가 이어지는지, 만료 시점 조회 뒤 앱 로그에 `refreshState=refreshed refreshStatus=200`이 남고 이어서 `verdict=success`인지, 창 닫기 정리 이벤트의 창 개수가 0으로 관찰되는지 확인(7.2.0 R2가 이 항목으로 이어짐) — 미확인
+- R-B: 로그아웃 뒤 창 닫기에서 복원 없음 — Chrome에서 로그아웃한 뒤 창을 모두 닫아 `[SESSION] snapshot discarded reason=removed`가 남고 복원이 없으며 다음 조회가 401 `ROUTE-0004`("Chrome의 DaouOffice 로그인이 필요합니다")인지 확인. 변형: 로그아웃 직후 1초 안에 마지막 창을 닫는 경우(복원되면 다음 조회의 `ROUTE-0004`에서 스냅샷이 버려지는지, 서버가 로그아웃 때 세션을 무효화하는지) — 미확인
+- R-C: 로그아웃 후 재로그인하면 정상 조회로 복귀 — R-B 뒤 다시 로그인해 다음 조회가 `verdict=success`이고 첫 200 조회에서 `[SESSION] snapshot saved`가 남으며 이후 창을 닫으면 다시 복원되는지 확인 — 미확인
+- R-D: DaouOffice 탭이 열려 있을 때의 양보 — 탭을 연 채 토큰이 만료될 때까지 기다려 앱 로그에 `refreshState=waiting_tab`이 남고 화면에 "DaouOffice 세션 갱신을 기다리는 중입니다"가 보이는지, 페이지가 갱신하면 다음 조회가 성공하는지, 3분 넘게 이어지면 확장이 넘겨받는지 확인 — 미확인
+- R-E: 확장 새로고침 직후 첫 성공 조회 전 창 닫기(알려진 한계) — 확장을 새로고침한 직후 첫 성공 조회 전에 창을 모두 닫으면 스냅샷이 비어 있어 로그인이 필요한지 확인 — 미확인
+- R-F: RefreshToken 만료 — RefreshToken까지 만료된 세션에서 조회하면 `refreshState=rejected`가 남고 "Chrome의 DaouOffice 로그인이 필요합니다"가 보이며 30분 동안 갱신을 시도하지 않는지, 재로그인하면 회복하는지 확인 — 미확인
+- R-G: 7.3.0 반영 때 권한 재승인 — 7.2.0 확장이 로드된 상태에서 7.3.0으로 확장을 새로고침할 때(manifest에 `cookies` 권한 추가) 재승인 대화상자나 확장 비활성화가 있는지 확인. 압축 해제 로드이고 `key`로 ID가 고정돼 없을 것으로 예상하나 추정임. 발생하면 확장 관리 화면에서 다시 켜야 하는지 기록 — 미확인
