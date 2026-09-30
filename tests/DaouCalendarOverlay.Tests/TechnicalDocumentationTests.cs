@@ -726,6 +726,46 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("check-html.js", files, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 7.3.0: §20 상수표가 worker 시간 상수(예산·갱신·쿨다운·탭 양보·복원)를 싣고, §22·§23이 7.3.0 기준으로 서술하며,
+    /// §24.5 체크리스트의 현재값이 v730 worker인지 고정한다. 프로토콜·lease 상수는 바뀌지 않았다는 서술도 확인한다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_ConstantsAndReleaseChecklistReflectV730()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        Assert.Contains("SYNC_BUDGET_MS", html, StringComparison.Ordinal);
+        Assert.Contains("REFRESH_TIMEOUT_MS", html, StringComparison.Ordinal);
+
+        var appendix = GetSectionHtml(html, "appendix");
+        foreach (var constant in new[]
+                 {
+                     "SYNC_BUDGET_MS", "REFRESH_TIMEOUT_MS", "REFRESH_SETTLE_MS", "RETRY_MIN_MS",
+                     "REFRESH_COOLDOWN_MS", "REFRESH_REJECTED_COOLDOWN_MS", "TAB_IDLE_OVERRIDE_MS",
+                     "RESTORE_DELAY_MS", "RESNAPSHOT_DELAY_MS",
+                 })
+        {
+            Assert.Contains(constant, appendix, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("FetchLeaseSeconds", appendix, StringComparison.Ordinal);
+        Assert.Contains("ResultLeaseSeconds", appendix, StringComparison.Ordinal);
+        Assert.Contains("기대 확장 버전</td><td>7.3.0", appendix, StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v720.js", appendix, StringComparison.Ordinal);
+
+        var browserMatrix = GetSectionHtml(html, "browser-matrix");
+        Assert.Contains("현재 빌드(v7.3.0)", browserMatrix, StringComparison.Ordinal);
+        Assert.DoesNotContain("v7.2.0", browserMatrix, StringComparison.Ordinal);
+        Assert.Contains("R-E", browserMatrix, StringComparison.Ordinal);
+
+        var release = GetSectionHtml(html, "release");
+        Assert.Contains("service-worker-v730.js", release, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v730.js", release, StringComparison.Ordinal);
+        Assert.Contains("worker-mock-test.js", release, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Version 7.2.0", release, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {
