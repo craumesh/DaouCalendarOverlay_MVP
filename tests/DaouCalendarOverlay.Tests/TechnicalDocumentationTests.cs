@@ -578,6 +578,47 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains($"v{AppVersion.Display}", footer.Groups[1].Value, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TechnicalDoc_RetentionThreatAndGlossaryReflectV730()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        // 7.3.0(세션 유지·만료 갱신) 사실을 절마다 고정한다. 정본 서술은 각 절에 있고 여기서는 핵심 문자열만 본다.
+        string Section(string id)
+        {
+            var match = Regex.Match(html, $"<section id=\"{id}\"[^>]*>([\\s\\S]*?)</section>");
+            Assert.True(match.Success, $"기술 문서에서 <section id=\"{id}\">를 찾지 못했다.");
+            return match.Groups[1].Value;
+        }
+
+        // §34: 새 자동 검사와 수동 확인 R-A~R-G
+        var testing = Section("testing");
+        Assert.Contains("worker-mock-test.js", testing, StringComparison.Ordinal);
+        foreach (var item in new[] { "R-A", "R-B", "R-C", "R-D", "R-E", "R-F", "R-G" })
+            Assert.Contains(item, testing, StringComparison.Ordinal);
+
+        // §35: 세션 스냅샷과 갱신 기록은 메모리 저장소다
+        var retention = Section("data-retention");
+        Assert.Contains("daouSessionSnapshot", retention, StringComparison.Ordinal);
+        Assert.Contains("storage.session", retention, StringComparison.Ordinal);
+
+        // §36: 위협 모델
+        var threat = Section("threat-model");
+        Assert.Contains("storage.session", threat, StringComparison.Ordinal);
+        Assert.Contains("CurrentUserOnly", threat, StringComparison.Ordinal);
+        Assert.Contains("GetNamedPipeServerProcessId", threat, StringComparison.Ordinal);
+
+        // §37: 버전 이력과 프로토콜 유지
+        var versioning = Section("versioning");
+        Assert.Contains("7.3.0", versioning, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", versioning, StringComparison.Ordinal);
+
+        // §39: 용어
+        var glossary = Section("glossary");
+        Assert.Contains("daouSessionSnapshot", glossary, StringComparison.Ordinal);
+        Assert.Contains("ROUTE-0006", glossary, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("요구사항과 비목표")]
     [InlineData("상태 머신 전이표")]
