@@ -618,6 +618,25 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("### 4. 남은 결정", afterSummary);
     }
 
+    /// <summary>§1 요약(문서 표지 뒤 첫 section)이 7.2.0 구조(확장이 직접 조회, 앱은 판정·파싱·표시)를 설명하는지 고정한다.</summary>
+    [Fact]
+    public void TechnicalDoc_SummaryDescribesDirectFetch()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        var start = html.IndexOf("<section", StringComparison.Ordinal);
+        Assert.True(start >= 0, "기술 문서에서 첫 <section을 찾지 못했다.");
+        const string closing = "</section>";
+        var end = html.IndexOf(closing, start, StringComparison.Ordinal);
+        Assert.True(end > start, "기술 문서의 첫 section 닫는 태그를 찾지 못했다.");
+        var summary = html.Substring(start, end + closing.Length - start);
+
+        Assert.Contains("<h2>1. ", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("API 조회·파싱·표시는 Windows 오버레이 앱", summary, StringComparison.Ordinal);
+        Assert.Contains("확장", summary, StringComparison.Ordinal);
+        Assert.Contains("직접 조회", summary, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {

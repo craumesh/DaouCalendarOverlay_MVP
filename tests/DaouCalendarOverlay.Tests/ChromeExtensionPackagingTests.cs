@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DaouCalendarOverlay.Services;
 
@@ -159,6 +161,44 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Contains("cache: \"no-store\"", worker);
         Assert.Contains("signal: controller.signal", worker);
         Assert.Contains("chrome.storage.session.remove(LEGACY_SESSION_COOKIE_KEY)", worker);
+    }
+
+    /// <summary>
+    /// <see cref="BridgeResultPayload"/>의 JSON 속성 이름이 worker의 결과 객체 필드(result.{name} 대입 또는 객체 리터럴 키)로 존재하는지 확인한다.
+    /// JS↔C# postResult 계약이 한쪽만 바뀌는 것을 잡는다.
+    /// </summary>
+    [Fact]
+    public void EmbeddedServiceWorker_PostResultFieldsMatchBridgeResultPayload()
+    {
+        var worker = ReadResource(WorkerResource);
+        var names = typeof(BridgeResultPayload)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name)
+            .ToArray();
+
+        Assert.NotEmpty(names);
+        foreach (var name in names)
+        {
+            Assert.False(string.IsNullOrEmpty(name), "BridgeResultPayload 속성에 JsonPropertyName이 없습니다.");
+            var pattern = $@"result\.{Regex.Escape(name!)}\b|[{{,]\s*{Regex.Escape(name!)}\s*:";
+            Assert.True(Regex.IsMatch(worker, pattern), $"worker에 postResult 필드 '{name}'가 없습니다.");
+        }
+    }
+
+    /// <summary><see cref="BridgeFetchOutcomes"/>의 각 const 값이 worker에 문자열 리터럴로 존재하는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_OutcomeLiteralsMatchBridgeFetchOutcomes()
+    {
+        var worker = ReadResource(WorkerResource);
+        var values = typeof(BridgeFetchOutcomes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToArray();
+
+        Assert.NotEmpty(values);
+        foreach (var value in values)
+            Assert.Contains($"\"{value}\"", worker);
     }
 
     /// <summary>worker의 본문 크기·타임아웃 상수가 앱 상수와 파이프 한도 안에서 맞물리는지 확인한다.</summary>

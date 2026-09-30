@@ -418,7 +418,7 @@ git push
 4. Native Messaging 연결 상태 확인
 5. 네트워크 및 다우오피스 서비스 상태 확인
 6. 설정창의 DaouOffice 주소가 `https://회사이름.daouoffice.com` 형식인지 확인
-7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회가 오래 걸리는 동안에도 Chrome 확장 하트비트는 유지되므로, 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
+7. 상태 표시가 `동기화 중…`에서 오래 멈춰 있는지 확인(조회는 Chrome 확장 worker가 하고 최대 25초(`FETCH_TIMEOUT_MS`)이므로 95초 연결 대기 임계를 넘지 않는다. 멈춰 있다면 `%LOCALAPPDATA%\DaouCalendarOverlay\logs\overlay-yyyyMMdd.log`의 `bridge` 항목 확인)
 8. 상태 문구에 `· 캐시 MM-dd HH:mm`만 계속 보이면 아직 한 번도 동기화에 성공하지 못한 상태입니다. Chrome 확장과 Native Messaging 등록을 먼저 확인하세요.
 9. 상태에 `Chrome 확장 새로고침 필요 (…)`가 보이면 Chrome에 로드된 확장 버전이 EXE에 포함된 버전과 다른 것입니다(예: `Chrome 확장 새로고침 필요 (7.0.0 이하 → 7.2.0)`. 버전을 보내지 않는 7.0.0 확장은 `7.0.0 이하`로 표시). `chrome://extensions`에서 확장을 새로고침하세요. 새로고침하면 확장이 곧바로 `getConfig`를 보내고(`onInstalled` 트리거. 새로고침 때 이 이벤트가 오는지는 실환경 미확인) 그 뒤로는 30초 알람마다 보내므로, 문구가 `Chrome 브리지 연결됨 · 동기화 대기`로 바뀝니다. 재로그인이 필요한 상태(`DaouOffice 재로그인 필요`, 세션 만료 안내 등)에서는 재로그인 안내가 우선이라 이 문구가 나오지 않고, 재로그인해 동기화가 성공한 뒤에 표시됩니다.
 
