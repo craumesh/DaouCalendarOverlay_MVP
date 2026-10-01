@@ -5,6 +5,7 @@
 //   Chrome이 마지막 창을 닫으며 쿠키를 지우면(cause=explicit, 창 0개) 스냅샷으로 없어진 쿠키만 되살린다(창 닫기 정리 복원).
 // - 만료(401 ROUTE-0006)면 DaouOffice 페이지와 같은 갱신 요청을 동기화 1회당 최대 1번 보내고, 성공하면 조회를 1번만 다시 한다.
 // - 로그아웃: 인증 쿠키가 창 닫기 정리나 overwrite가 아닌 사유로 지워지면 스냅샷을 바로 버리고 되살리지 않는다.
+//   버리기 전에 읽기 시작한 저장(조회 200·갱신 2xx 뒤 찍기, 다시 찍기)은 폐기 세대를 비교해 저장하지 않는다.
 // - 쿠키·토큰 값은 로그·lastError·앱 메시지에 싣지 않는다. 앱에는 갱신 결과 상태(refreshState, refreshStatus)만 보낸다.
 const NATIVE_HOST = "com.daou.calendar_overlay";
 const ALARM_NAME = "daou-calendar-overlay-sync";
@@ -254,13 +255,25 @@ async function loadSnapshot() {
   }
 }
 
+// 폐기 세대. discardSnapshot이 부를 때마다(스냅샷이 없어도) 1 올린다. overwrite 삭제는 폐기가 아니므로 올리지 않는다.
+// 저장하는 쪽(takeSnapshot, resnapshot)은 쿠키를 읽기 전 세대를 기억했다가 storage.session.set 직전에 비교해,
+// 그사이 폐기(로그아웃 등)가 있었으면 저장하지 않는다. 비교와 set 호출 사이에는 await가 없어야 한다.
+// worker가 다시 시작되면 0부터지만, 진행 중이던 저장도 함께 끝나므로 세대가 이어질 필요는 없다.
+let snapshotGeneration = 0;
+
 // 조회 200(또는 갱신 2xx) 뒤에 찍는다. 읽은 쿠키가 0개면 기존 스냅샷을 그대로 둔다.
+// generation: 기준 세대. syncOnce는 조회 전 세대를 넘겨 조회·갱신 도중의 폐기도 반영한다. 없으면 호출 시점(읽기 전) 세대다.
 // 예외는 여기서 삼킨다(호출부의 갱신 판정·postResult 전송을 막지 않게).
-async function takeSnapshot(config) {
+async function takeSnapshot(config, generation = snapshotGeneration) {
   try {
     const saved = await readSessionCookies(sessionSnapshotUrl(config.baseUrl));
     const count = saved.length;
     if (count === 0) return;
+    // 기준 세대 뒤에 폐기가 있었으면 그 전에 받은 응답·읽은 값으로 스냅샷을 만들거나 되살리지 않는다.
+    if (generation !== snapshotGeneration) {
+      logInfo("SESSION", "snapshot skipped reason=discarded_during_read");
+      return;
+    }
     await chrome.storage.session.set({ [SESSION_SNAPSHOT_KEY]: { baseUrl: config.baseUrl, takenAt: Date.now(), cookies: saved } });
     logInfo("SESSION", `snapshot saved count=${count}`);
   } catch (error) {
@@ -269,7 +282,9 @@ async function takeSnapshot(config) {
 }
 
 // reason은 호출부가 넘기는 [a-z_] 리터럴이다. 스냅샷이 있을 때만 지우고 기록한다.
+// 세대는 첫 await 전에, 스냅샷이 없어 일찍 끝나는 경우에도 올린다(스냅샷 없이 진행 중인 저장도 이 폐기를 알아야 한다).
 async function discardSnapshot(reason) {
+  snapshotGeneration += 1;
   try {
     if (!(await loadSnapshot())) return;
     await chrome.storage.session.remove(SESSION_SNAPSHOT_KEY);
@@ -282,14 +297,19 @@ async function discardSnapshot(reason) {
 // 확장 밖에서 쿠키가 새로 심어지면(페이지의 갱신, 재로그인, 복원) 스냅샷을 새 값으로 다시 찍는다.
 // 스냅샷이 없으면(조회 성공 전이거나 폐기됨) 아무것도 하지 않는다.
 async function resnapshot() {
+  const generation = snapshotGeneration;
   try {
     const snapshot = await loadSnapshot();
     if (!snapshot) return;
     const saved = await readSessionCookies(sessionSnapshotUrl(snapshot.baseUrl));
     const count = saved.length;
     if (count === 0) return;
-    // 읽는 사이에 폐기됐으면(로그아웃 등) 저장하지 않는다.
-    if (!(await loadSnapshot())) return;
+    // 읽기 시작 뒤에 폐기됐으면(로그아웃 등) 저장하지 않는다. 그사이 재로그인으로 새 스냅샷이 생겼어도 덮어쓰지 않는다.
+    // (스냅샷을 지우는 곳은 discardSnapshot뿐이고 지우기 전에 세대를 올리므로, 저장 직전 loadSnapshot 재확인을 대신한다.)
+    if (generation !== snapshotGeneration) {
+      logInfo("SESSION", "snapshot skipped reason=discarded_during_read");
+      return;
+    }
     await chrome.storage.session.set({ [SESSION_SNAPSHOT_KEY]: { baseUrl: snapshot.baseUrl, takenAt: Date.now(), cookies: saved } });
     logInfo("SESSION", `snapshot saved count=${count}`);
   } catch (error) {
@@ -412,7 +432,8 @@ async function restoreBeforeFetch() {
 
 // 만료 401(ROUTE-0006)은 갱신 판정이 유지하라고 한 경우에만 스냅샷을 남긴다. 그 밖의 401(ROUTE-0004, 코드 없음,
 // 재조회 결과의 ROUTE-0004)은 폐기한다. 200이면 탭 대기 기록을 지우고 스냅샷을 새로 찍는다.
-async function afterFetch(config, result, refresh) {
+// generation: syncOnce가 조회 전에 기억한 폐기 세대. 조회·갱신 도중 폐기가 있었으면 takeSnapshot이 저장하지 않는다.
+async function afterFetch(config, result, refresh, generation = snapshotGeneration) {
   try {
     if (result.status === 401) {
       const keep = refresh?.keepSnapshot === true && readApiCode(result.body) === EXPIRED_API_CODE;
@@ -421,7 +442,7 @@ async function afterFetch(config, result, refresh) {
     }
     if (result.outcome === "response" && result.status === 200) {
       await chrome.storage.session.remove(REFRESH_TAB_WAIT_KEY);
-      await takeSnapshot(config);
+      await takeSnapshot(config, generation);
     }
   } catch (error) {
     logWarn("SESSION", `after fetch failed error=${errorName(error)}`);
@@ -484,7 +505,8 @@ function refreshSkipped(state, keepSnapshot) {
 // 실행은 쿨다운 기록(pending)을 POST보다 먼저 남긴다. POST 도중 worker가 죽어도 같은 토큰으로 되풀이하지 않는다.
 // 예산 부족(budget)과 토큰 없음(no_token)은 쿨다운을 기록하지 않는다. 반환의 retry는 refreshed일 때만 true다.
 // 판정·실행 중 예외(storage·쿠키·탭 API 포함)는 unavailable(스냅샷 유지)로 돌려준다.
-async function refreshSession(config, remainingMs) {
+// generation: syncOnce가 조회 전에 기억한 폐기 세대. 2xx 뒤 takeSnapshot에 넘긴다.
+async function refreshSession(config, remainingMs, generation = snapshotGeneration) {
   try {
     const now = Date.now();
     const stored = await chrome.storage.session.get([REFRESH_LAST_KEY, REFRESH_TAB_WAIT_KEY]);
@@ -525,7 +547,7 @@ async function refreshSession(config, remainingMs) {
     const ok = status >= 200 && status < 300;
     const rejected = status === 401 || status === 403;
     // 복원용 스냅샷이 갱신 전 토큰으로 남지 않게 바로 새 값으로 찍는다(takeSnapshot은 예외를 밖으로 내지 않는다).
-    if (ok) await takeSnapshot(config);
+    if (ok) await takeSnapshot(config, generation);
     await chrome.storage.session.set({ [REFRESH_LAST_KEY]: { at: now, ok, rejected } });
 
     if (ok) return { state: "refreshed", status, retry: true, keepSnapshot: true };
@@ -603,16 +625,18 @@ async function syncOnce(trigger) {
     // 시간 예산: 앱 lease(45초) 안에 postResult가 닿도록 getConfig 응답 시점부터 잰다.
     const budgetStart = Date.now();
     const remainingMs = () => SYNC_BUDGET_MS - (Date.now() - budgetStart);
+    // 조회 전 폐기 세대. 조회 전 복원·조회·갱신·재조회 도중 폐기(로그아웃 등)가 있었으면 이번 응답으로 스냅샷을 찍지 않는다.
+    const generation = snapshotGeneration;
     await restoreBeforeFetch();
     let result = await fetchAndLog(config, FETCH_TIMEOUT_MS);
     let refresh = null;
     // 만료(ROUTE-0006)면 갱신을 판정하고, 갱신이 성공했을 때만 한 번 다시 조회한다. 다시 조회한 결과가 앱에 간다.
     if (result.outcome === "response" && result.status === 401 && readApiCode(result.body) === EXPIRED_API_CODE) {
-      refresh = await refreshSession(config, remainingMs());
+      refresh = await refreshSession(config, remainingMs(), generation);
       logInfo("REFRESH", `state=${refresh.state} status=${refresh.status ?? "none"} retry=${refresh.retry}`);
       if (refresh.retry) result = await fetchAndLog(config, Math.min(FETCH_TIMEOUT_MS, Math.max(RETRY_MIN_MS, remainingMs())));
     }
-    await afterFetch(config, result, refresh);
+    await afterFetch(config, result, refresh, generation);
     if (refresh) {
       result.refreshState = refresh.state;
       if (Number.isInteger(refresh.status)) result.refreshStatus = refresh.status;

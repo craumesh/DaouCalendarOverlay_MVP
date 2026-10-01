@@ -7,7 +7,7 @@
 // 종료 코드: 전부 통과 0, 하나라도 실패 1, 하네스 자체 오류(예외, worker 로드 실패, 시간 초과) 2.
 //
 // 변형 검사: node tools/worker-mock-test.js --mutants
-//   - worker 원문을 정확한 문자열 치환으로 일부러 망가뜨린 변형 M1~M9를 임시 폴더에 만들고(저장소 파일은 건드리지 않는다),
+//   - worker 원문을 정확한 문자열 치환으로 일부러 망가뜨린 변형 M1~M10을 임시 폴더에 만들고(저장소 파일은 건드리지 않는다),
 //     변형마다 같은 시나리오를 자식 프로세스로 돌린다(병렬). 종료 코드 1이고 FAIL 줄이 1개 이상이면 KILLED다.
 //     하네스가 예외·시간 초과로 끝난 것(종료 2)은 KILLED가 아니다.
 //   - 치환 대상이 정확히 한 번 일치하지 않으면 "mutation target not found: M<n>"을 내고 종료 코드 2로 끝낸다.
@@ -247,8 +247,9 @@ function makeEnv({ windows = 1, tabs = 0, cookies, scaleTimers = 0 } = {}) {
       onChanged: event('cookies'),
       async getAll(filter = {}) {
         if (env.getAllError) throw new Error('getAll failed');
-        // 스냅샷을 읽는 호출(url 필터)만 붙잡는다(S26). 풀어 줄 때까지 돌려주지 않는다.
-        if (env.cookieGate && filter.url !== undefined) {
+        // 스냅샷을 읽는 호출(url 필터) 중 처음 들어온 하나만 붙잡는다(S26, S28, S29). 풀어 줄 때까지 돌려주지 않는다.
+        // 그 뒤의 url 읽기는 붙잡지 않는다(S29: 붙잡힌 resnapshot과 별개로 재로그인 뒤 takeSnapshot이 진행돼야 한다).
+        if (env.cookieGate && filter.url !== undefined && !env.cookieGate.entered) {
           env.cookieGate.entered = true;
           await env.cookieGate.promise;
         }
@@ -290,6 +291,11 @@ function makeEnv({ windows = 1, tabs = 0, cookies, scaleTimers = 0 } = {}) {
     env.timeline.push({ type: 'fetch', method });
     const next = env.script.shift();
     if (!next) throw new TypeError('no scripted response');
+    // gate: 응답을 돌려주기 전에 붙잡는다(S30, S31: 조회·갱신 응답을 기다리는 사이에 로그아웃 폐기를 끼워 넣는다).
+    if (next.gate) {
+      next.gate.entered = true;
+      await next.gate.promise;
+    }
     // throws: 네트워크 오류처럼 응답 없이 예외. hang: abort 신호가 올 때만 끝난다(응답하지 않는 서버).
     if (next.throws) throw new TypeError('network error');
     if (next.hang) {
@@ -534,6 +540,138 @@ async function scenarioRefreshSessionThrows() {
   return out;
 }
 
+// ---- S28~S31: 폐기 세대 확인(로그아웃 폐기와 스냅샷 저장이 겹치는 경로) ----
+// 풀어 줄 때까지 붙잡는 문. cookieGate(쿠키 읽기)와 fetch 스크립트 항목의 gate(응답)에 쓴다.
+function makeGate() {
+  const gate = { entered: false, release: null, promise: null };
+  gate.promise = new Promise(resolve => { gate.release = resolve; });
+  return gate;
+}
+
+// syncOnce를 기다리지 않고 시작한다. 붙잡힌 단계에서 이벤트를 끼워 넣은 뒤 settle로 끝을 기다린다(시간 한도 있음).
+function startSync(env) {
+  env.run = { getSeen: false, expiredFirst: false };
+  const pending = vm.runInContext('syncOnce("test")', env.ctx);
+  return { settle: maxMs => Promise.race([Promise.resolve(pending).then(() => true), tick(maxMs).then(() => false)]) };
+}
+
+const SKIP_LOG = 'snapshot skipped reason=discarded_during_read';
+const snapshotWrites = env => env.sessionWrites.filter(write => write.key === env.keys.snapshot).length;
+const hasSkipLog = env => env.logs.some(line => line.includes(SKIP_LOG));
+
+// S28 [M10: takeSnapshot이 쿠키를 읽는 사이 로그아웃 폐기가 오면 저장하지 않는다. 스냅샷이 없어 폐기가 일찍 끝나도 같다]
+async function scenarioDiscardDuringTakeSnapshot() {
+  const { out, chk } = collector();
+
+  // (a) 첫 조회(스냅샷 없음): discardSnapshot은 지울 것이 없어 일찍 끝나지만 폐기 세대는 올라가야 한다.
+  const fresh = makeEnv();
+  fresh.cookieGate = makeGate();
+  fresh.script = [OK];
+  const syncA = startSync(fresh);
+  const enteredA = await waitFor(() => fresh.cookieGate.entered, 2000);
+  chk('S28a', '대조군: 첫 조회 200 뒤 takeSnapshot이 쿠키를 읽는 중에 붙잡혔다', enteredA && !snapOf(fresh));
+  await removeCookie(fresh, 'AccessToken', 'explicit'); // 창 1개: 로그아웃
+  fresh.cookieGate.release();
+  const doneA = await syncA.settle(3000);
+  await tick(50);
+  chk('S28b', '스냅샷이 없던 상태에서 읽는 사이 로그아웃이 오면 스냅샷을 만들지 않는다', doneA && !snapOf(fresh), `done=${doneA} writes=${snapshotWrites(fresh)}`);
+  chk('S28c', '저장을 건너뛰어도 앱에는 조회 200이 그대로 간다', fresh.posts.length === 1 && lastPost(fresh).status === 200,
+    JSON.stringify(fresh.posts.map(post => post.status)));
+  chk('S28d', `건너뜀 로그 한 줄(${SKIP_LOG})`, hasSkipLog(fresh), `logs=${fresh.logs.length}`);
+
+  // (b) 스냅샷이 있을 때: 읽는 사이 폐기된 스냅샷을 로그아웃 이전 읽기로 되살리지 않는다.
+  const env = await envWithSnapshot();
+  env.cookieGate = makeGate();
+  env.script = [OK];
+  const syncB = startSync(env);
+  const enteredB = await waitFor(() => env.cookieGate.entered, 2000);
+  await removeCookie(env, 'RefreshToken', 'explicit'); // 창 1개: 로그아웃
+  chk('S28e', '대조군: takeSnapshot이 붙잡힌 사이 기존 스냅샷이 폐기됐다', enteredB && !snapOf(env), `entered=${enteredB}`);
+  env.cookieGate.release();
+  const doneB = await syncB.settle(3000);
+  await tick(50);
+  chk('S28f', '읽기가 끝난 뒤에도 폐기된 스냅샷을 되살리지 않는다', doneB && !snapOf(env), `done=${doneB}`);
+
+  // 세대가 막힌 채로 남지 않는다: 재로그인 뒤 다음 조회 200은 정상으로 스냅샷을 찍는다.
+  env.cookieGate = null;
+  env.jar = defaultCookies();
+  env.script = [OK];
+  await run(env);
+  const relog = snapOf(env);
+  chk('S28g', '폐기 뒤 다음 조회 200은 다시 스냅샷을 찍는다(쿠키 2개)', !!relog && relog.cookies.length === 2, relog ? String(relog.cookies.length) : 'none');
+  return out;
+}
+
+// S29 [M4: resnapshot은 읽기 시작 뒤 폐기가 있었으면, 그사이 재로그인으로 새 스냅샷이 생겼어도 저장하지 않는다]
+async function scenarioRelogBeforeResnapshotSave() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.cookieGate = makeGate();
+  plantCookie(env, 'AccessToken', S_ACCESS_NEW); // 1.5초 뒤 resnapshot이 쿠키 읽기에서 붙잡힌다
+  const entered = await waitFor(() => env.cookieGate.entered, 3500);
+  chk('S29a', '대조군: resnapshot이 쿠키를 읽는 중에 붙잡혔다', entered);
+  await removeCookie(env, 'AccessToken', 'explicit'); // 창 1개: 로그아웃
+  chk('S29b', '읽는 사이 AccessToken 로그아웃 삭제로 스냅샷이 폐기됐다', !snapOf(env));
+  // 재로그인: 새 쿠키가 이벤트 없이 들어오고(다시 찍기 예약을 만들지 않으려고) 다음 조회 200이 새 스냅샷을 찍는다.
+  env.jar.push(makeCookie('AccessToken', S_ACCESS));
+  env.script = [OK];
+  await run(env);
+  chk('S29c', '대조군: 재로그인 뒤 조회 200이 새 스냅샷을 찍었다', !!snapOf(env));
+  const writesBefore = snapshotWrites(env);
+  env.cookieGate.release();
+  await tick(150);
+  chk('S29d', '로그아웃 전에 읽기 시작한 resnapshot은 새 스냅샷을 덮어쓰지 않는다', snapshotWrites(env) === writesBefore,
+    `before=${writesBefore} after=${snapshotWrites(env)}`);
+  chk('S29e', `건너뜀 로그 한 줄(${SKIP_LOG})`, hasSkipLog(env), `logs=${env.logs.length}`);
+  return out;
+}
+
+// S30 [M10: 조회(GET) 응답을 기다리는 사이 로그아웃 폐기가 있었으면 200을 받아도 스냅샷을 찍지 않는다.
+//      폐기는 takeSnapshot이 시작되기 전에 끝나므로 syncOnce가 조회 전 세대를 넘겨야만 막힌다]
+async function scenarioDiscardDuringFetch() {
+  const { out, chk } = collector();
+  // [스냅샷 검사 id, 앱 전달 검사 id, env]
+  const cases = [['S30a', 'S30b', makeEnv()], ['S30c', 'S30d', await envWithSnapshot()]];
+  for (const [snapId, postId, env] of cases) {
+    const hadSnapshot = !!snapOf(env);
+    const gate = makeGate();
+    env.script = [{ ...OK, gate }];
+    const sync = startSync(env);
+    const entered = await waitFor(() => gate.entered, 2000);
+    await removeCookie(env, 'AccessToken', 'explicit'); // 창 1개: 로그아웃
+    gate.release();
+    const done = await sync.settle(3000);
+    await tick(50);
+    const label = hadSnapshot ? '스냅샷 있음' : '스냅샷 없음';
+    chk(snapId, `${label}: GET 응답 대기 중 로그아웃 폐기가 있었으면 200을 받아도 스냅샷이 없다`, entered && done && !snapOf(env),
+      `entered=${entered} done=${done} writes=${snapshotWrites(env)}`);
+    chk(postId, `${label}: 앱에는 조회 200이 그대로 간다`, env.posts.length === 1 && lastPost(env).status === 200,
+      JSON.stringify(env.posts.map(post => post.status)));
+  }
+  return out;
+}
+
+// S31 [M10: 갱신 POST 응답을 기다리는 사이 로그아웃 폐기가 있었으면 갱신 2xx 뒤와 재조회 200 뒤 모두 스냅샷을 찍지 않는다]
+async function scenarioDiscardDuringRefresh() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  const gate = makeGate();
+  env.script = [EXPIRED, { ...REFRESH_OK, gate }, OK];
+  const sync = startSync(env);
+  const entered = await waitFor(() => gate.entered, 2000);
+  await removeCookie(env, 'RefreshToken', 'explicit'); // 창 1개: 로그아웃
+  chk('S31a', '대조군: 갱신 POST가 붙잡힌 사이 스냅샷이 폐기됐다', entered && !snapOf(env), `entered=${entered}`);
+  gate.release();
+  const done = await sync.settle(3000);
+  await tick(50);
+  chk('S31b', '갱신 흐름은 그대로: GET,POST,GET과 refreshed', done && methods(env) === 'GET,POST,GET' && lastPost(env).refreshState === 'refreshed',
+    `${methods(env)} ${lastPost(env).refreshState}`);
+  chk('S31c', '갱신 2xx와 재조회 200 뒤에도 스냅샷이 없다', !snapOf(env), `writes=${snapshotWrites(env)}`);
+  await tick(1700); // 갱신 Set-Cookie가 예약한 다시 찍기(1.5초)가 지나도
+  chk('S31d', '갱신 Set-Cookie 뒤의 다시 찍기도 스냅샷을 만들지 않는다', !snapOf(env));
+  return out;
+}
+
 async function main() {
   // S1 첫 조회 200
   const s1 = makeEnv();
@@ -721,15 +859,16 @@ async function main() {
   check('S15a', '예약 복원이 돌아도 누락이 없으면 cookies.set 0회', s15.setCalls.length === 0, s15.setCalls.length);
   check('S15b', '스냅샷 유지', !!snapOf(s15));
 
-  // S19~S27 경계 시나리오(느린 것이 있어 동시에 돌리고, 출력은 번호 순서로 모아서 낸다). S16 앞에서 돌아 S16 검사에 포함된다.
+  // S19~S31 경계 시나리오(느린 것이 있어 동시에 돌리고, 출력은 번호 순서로 모아서 낸다). S16 앞에서 돌아 S16 검사에 포함된다.
   const boundary = await Promise.all([
     scenarioWindowCountFails(), scenarioNoRestoreWithWindow(), scenarioWindowOpensBeforeTimer(),
     scenarioRefreshPostFails(), scenarioTabsQueryFails(), scenarioPendingBeforePost(),
-    scenarioRefreshTimeout(), scenarioDiscardDuringResnapshot(), scenarioRefreshSessionThrows()
+    scenarioRefreshTimeout(), scenarioDiscardDuringResnapshot(), scenarioRefreshSessionThrows(),
+    scenarioDiscardDuringTakeSnapshot(), scenarioRelogBeforeResnapshotSave(), scenarioDiscardDuringFetch(), scenarioDiscardDuringRefresh()
   ]);
   for (const entries of boundary) for (const entry of entries) check(...entry);
 
-  // S16 값 비유출(S1~S15와 S19~S27 누적)
+  // S16 값 비유출(S1~S15와 S19~S31 누적)
   const nativeAll = allEnvs.flatMap(env => env.native);
   const logsAll = allEnvs.flatMap(env => env.logs);
   const lastErrorAll = allEnvs.flatMap(env => [...env.lastErrorWrites, JSON.stringify(env.session[env.keys.lastError] === undefined ? null : env.session[env.keys.lastError])]);
@@ -779,8 +918,9 @@ const MUTATIONS = [
     to: 'return { state: "failed", status, retry: true, keepSnapshot: false };', note: 'failed 반환을 retry true, keepSnapshot false로' },
   { id: 'M3', fn: 'async function restoreBeforeFetch()', from: 'if ((await windowCount()) !== 0) return;', to: '',
     note: 'restoreBeforeFetch의 창 0개 확인 제거' },
-  { id: 'M4', fn: 'async function resnapshot()', from: 'if (!(await loadSnapshot())) return;', to: '',
-    note: 'resnapshot의 저장 직전 재확인 제거' },
+  // resnapshot의 저장 직전 재확인은 폐기 세대 비교다(F3에서 loadSnapshot 재확인을 대체). 같은 문자열이 takeSnapshot에도 있어 함수로 한정한다.
+  { id: 'M4', fn: 'async function resnapshot()', from: 'if (generation !== snapshotGeneration) {', to: 'if (false) {',
+    note: 'resnapshot의 저장 직전 재확인(폐기 세대 비교) 제거' },
   { id: 'M5', fn: 'async function refreshSession(', from: 'if (tabs < 0) return refreshSkipped("unavailable", true);', to: '',
     note: '탭 조회 실패 분기 제거' },
   { id: 'M6', fn: 'async function refreshSession(',
@@ -793,7 +933,9 @@ const MUTATIONS = [
   // catch 안의 반환은 같은 문자열이 refreshSession에 세 번 있으므로 로그 줄을 앵커로 삼아 catch 쪽만 고른다.
   { id: 'M9', fn: 'async function refreshSession(',
     from: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", true);',
-    to: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", false);', note: 'refreshSession catch의 unavailable을 스냅샷 폐기로' }
+    to: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", false);', note: 'refreshSession catch의 unavailable을 스냅샷 폐기로' },
+  { id: 'M10', fn: 'async function takeSnapshot(', from: 'if (generation !== snapshotGeneration) {', to: 'if (false) {',
+    note: 'takeSnapshot의 저장 직전 폐기 세대 확인 제거' }
 ];
 
 function countOccurrences(text, needle) {
