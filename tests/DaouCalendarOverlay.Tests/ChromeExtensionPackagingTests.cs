@@ -336,7 +336,9 @@ public sealed class ChromeExtensionPackagingTests
             "readCookiesFromAllStores", "DEFAULT_COOKIE_STORE_ID", "COOKIE_DEBOUNCE_MS", "scheduleCookieSync",
             "navigator.userAgent", "document.cookie", "\"Cookie\"", "User-Agent", "Referer",
             "console.log(", "console.error(", "console.debug(",
-            "storage.local"
+            "storage.local",
+            "windows.onRemoved",
+            "windows.onCreated"
         };
 
         foreach (var token in forbidden)
