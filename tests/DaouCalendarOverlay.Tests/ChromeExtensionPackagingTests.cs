@@ -10,7 +10,7 @@ namespace DaouCalendarOverlay.Tests;
 public sealed class ChromeExtensionPackagingTests
 {
     private const string ManifestResource = "DaouCalendarOverlay.ChromeExtension.manifest.json";
-    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v720.js";
+    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v730.js";
 
     private static string ReadResource(string resourceName)
     {
@@ -35,17 +35,18 @@ public sealed class ChromeExtensionPackagingTests
     }
 
     [Fact]
-    public void EmbeddedResources_ContainServiceWorkerV720Only()
+    public void EmbeddedResources_ContainServiceWorkerV730Only()
     {
         var names = typeof(ChromeExtensionInstaller).Assembly.GetManifestResourceNames();
 
         Assert.Contains(WorkerResource, names);
+        Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v720.js", names);
         Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v710.js", names);
         Assert.DoesNotContain("DaouCalendarOverlay.ChromeExtension.service-worker-v700.js", names);
     }
 
     [Fact]
-    public void EmbeddedManifest_TargetsV720WorkerWithoutCookiesPermission()
+    public void EmbeddedManifest_TargetsV730WorkerWithCookiesPermission()
     {
         var manifestText = ReadResource(ManifestResource);
         using var manifest = JsonDocument.Parse(manifestText);
@@ -58,12 +59,14 @@ public sealed class ChromeExtensionPackagingTests
         Assert.Contains("background", permissions);
         Assert.Contains("storage", permissions);
         Assert.Contains("nativeMessaging", permissions);
-        Assert.DoesNotContain("cookies", permissions);
+        Assert.Contains("cookies", permissions);
+        Assert.Equal(5, permissions.Length);
+        Assert.DoesNotContain("tabs", permissions);
 
         var hostPermissions = root.GetProperty("host_permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
         Assert.Contains("https://*.daouoffice.com/*", hostPermissions);
 
-        Assert.Equal("service-worker-v720.js", root.GetProperty("background").GetProperty("service_worker").GetString());
+        Assert.Equal("service-worker-v730.js", root.GetProperty("background").GetProperty("service_worker").GetString());
 
         Assert.DoesNotContain("gkchgbpcbljkgabjcgjelacfkphcmhmi", manifestText);
         Assert.Contains("\"key\"", manifestText);
@@ -225,22 +228,136 @@ public sealed class ChromeExtensionPackagingTests
             "최대 본문이 파이프 메시지 한도를 넘습니다.");
     }
 
-    /// <summary>쿠키 API와 쿠키·식별 헤더를 worker가 쓰지 않는지 확인한다(주석 포함 전체 원문 기준).</summary>
+    private static long ReadWorkerMs(string worker, string name)
+    {
+        var match = Regex.Match(worker, name + @" = (\d+);");
+        Assert.True(match.Success, $"worker에 {name} 정수 상수가 없습니다.");
+        return long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// worker의 시간 예산(SYNC_BUDGET_MS)이 앱 조회 lease 안에 들고, 갱신·재조회 상수와 맞물리는지 확인한다.
+    /// 상수를 정규식으로 읽지 못하면 통과가 아니라 실패한다.
+    /// </summary>
     [Fact]
-    public void EmbeddedServiceWorker_DoesNotUseCookieApisOrIdentityHeaders()
+    public void EmbeddedServiceWorker_SessionBudgetFitsLease()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        var budget = ReadWorkerMs(worker, "SYNC_BUDGET_MS");
+        var refreshTimeout = ReadWorkerMs(worker, "REFRESH_TIMEOUT_MS");
+        var settle = ReadWorkerMs(worker, "REFRESH_SETTLE_MS");
+        var retryMin = ReadWorkerMs(worker, "RETRY_MIN_MS");
+        var fetchTimeout = ReadWorkerMs(worker, "FETCH_TIMEOUT_MS");
+
+        Assert.True(
+            budget + 5000 <= CalendarBridgeServer.FetchLeaseSeconds * 1000L,
+            "시간 예산에 postResult 전달 여유 5초를 더한 값이 조회 lease보다 큽니다.");
+        Assert.True(
+            refreshTimeout + settle + retryMin < budget,
+            "갱신 타임아웃, 갱신 후 대기, 재조회 최소 시간의 합이 시간 예산보다 작아야 합니다.");
+        Assert.True(refreshTimeout < 30000, "갱신 타임아웃은 MV3 종료 기준 30초보다 짧아야 합니다.");
+        Assert.True(fetchTimeout < 30000, "fetch 타임아웃은 MV3 종료 기준 30초보다 짧아야 합니다.");
+    }
+
+    /// <summary>
+    /// <see cref="BridgeRefreshStates"/>의 각 const 값이 worker에 문자열 리터럴로 존재하는지, 값이 정확히 9개인지 확인한다.
+    /// </summary>
+    [Fact]
+    public void EmbeddedServiceWorker_RefreshStateLiteralsMatchBridgeRefreshStates()
+    {
+        var worker = ReadResource(WorkerResource);
+        var values = typeof(BridgeRefreshStates)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToArray();
+
+        Assert.Equal(9, values.Length);
+        foreach (var value in values)
+            Assert.Contains($"\"{value}\"", worker);
+    }
+
+    /// <summary>worker의 만료 API 코드 상수가 앱 분류기의 <see cref="BridgeResultClassifier.ExpiredApiCode"/>와 같은지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_ExpiredApiCodeMatchesClassifier()
+    {
+        var worker = ReadResource(WorkerResource);
+
+        Assert.Contains($"EXPIRED_API_CODE = \"{BridgeResultClassifier.ExpiredApiCode}\";", worker);
+    }
+
+    /// <summary>
+    /// 세션 스냅샷 키는 저장소 호출에서 chrome.storage.session만 쓰고,
+    /// 로그 호출 줄에는 스냅샷 키나 스냅샷 쿠키 배열이 나타나지 않는지 줄 단위로 확인한다.
+    /// </summary>
+    [Fact]
+    public void EmbeddedServiceWorker_KeepsSessionSnapshotInSessionStorage()
+    {
+        var lines = WorkerLines();
+        var keyLines = lines.Where(l => l.Contains("SESSION_SNAPSHOT_KEY", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(keyLines);
+
+        var storageCalls = keyLines
+            .Where(l => l.Contains(".get(", StringComparison.Ordinal)
+                || l.Contains(".set(", StringComparison.Ordinal)
+                || l.Contains(".remove(", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(storageCalls);
+        foreach (var line in storageCalls)
+            Assert.True(
+                line.Contains("chrome.storage.session", StringComparison.Ordinal),
+                $"스냅샷 키를 chrome.storage.session 밖에서 다룹니다: {line.Trim()}");
+
+        var logCalls = lines
+            .Where(l => (l.Contains("logInfo(", StringComparison.Ordinal) || l.Contains("logWarn(", StringComparison.Ordinal))
+                && !l.Contains("function log", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(logCalls);
+        foreach (var line in logCalls)
+        {
+            Assert.DoesNotContain("SESSION_SNAPSHOT_KEY", line);
+            Assert.DoesNotContain("snapshot.cookies", line);
+        }
+    }
+
+    /// <summary>
+    /// 쿠키 API는 복원·스냅샷 용도로 허용하되, 쿠키·식별 헤더를 직접 만들지 않고 디스크 저장소를 쓰지 않는지 확인한다
+    /// (주석 포함 전체 원문 기준).
+    /// </summary>
+    [Fact]
+    public void EmbeddedServiceWorker_DoesNotBuildCookieOrIdentityHeaders()
     {
         var worker = ReadResource(WorkerResource);
 
         var forbidden = new[]
         {
-            "chrome.cookies", "cookies.onChanged", "cookieHeader", "cookiesToHeader",
+            "cookieHeader", "cookiesToHeader",
             "readCookiesFromAllStores", "DEFAULT_COOKIE_STORE_ID", "COOKIE_DEBOUNCE_MS", "scheduleCookieSync",
             "navigator.userAgent", "document.cookie", "\"Cookie\"", "User-Agent", "Referer",
-            "console.log(", "console.error(", "console.debug("
+            "console.log(", "console.error(", "console.debug(",
+            "storage.local",
+            "windows.onRemoved",
+            "windows.onCreated"
         };
 
         foreach (var token in forbidden)
             Assert.DoesNotContain(token, worker);
+
+        Assert.False(
+            worker.Contains("spike", StringComparison.OrdinalIgnoreCase),
+            "정식 worker에 시험 흔적(spike)이 있습니다.");
+    }
+
+    /// <summary>툴바 아이콘으로 즉시 동기화하는 기존 기능(기술 문서 §10·§29)이 worker에 그대로 있는지 확인한다.</summary>
+    [Fact]
+    public void EmbeddedServiceWorker_KeepsToolbarSyncTrigger()
+    {
+        var lines = WorkerLines();
+
+        Assert.Contains(
+            lines,
+            l => l.TrimEnd() == "chrome.action.onClicked.addListener(() => { void syncOnce(\"action\"); });");
     }
 
     /// <summary>로그는 두 헬퍼로만 남기고, 로그 인자에 본문·쿠키·URL·헤더·텍스트가 들어가지 않는지 줄 단위로 확인한다.</summary>

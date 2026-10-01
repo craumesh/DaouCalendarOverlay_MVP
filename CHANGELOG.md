@@ -4,6 +4,33 @@
 WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브 브리지 프로토콜 버전은 별도로 `NativeBridgeProtocol.ProtocolVersion` 으로 관리합니다(현재 v2, 파이프 이름 `DaouCalendarOverlay.NativeBridge.v8`).
 릴리스 이후에는 Chrome 확장 서비스 워커를 바꾸면 확장 버전을 반드시 올립니다(worker 파일명 `service-worker-v<버전>.js`, `ChromeExtensionInstaller` obsolete 목록, 패키징 테스트를 함께 갱신).
 
+## 7.3.0 - 2026-09-30
+
+### Added
+- 세션 스냅샷: 조회가 200으로 성공할 때 DaouOffice 인증 쿠키를 `chrome.storage.session`(메모리)에만 찍어 둡니다. 디스크(`chrome.storage.local`)에는 저장하지 않습니다.
+- 창 닫기 복원: Chrome 창을 모두 닫으면서 Chrome이 지운 인증 쿠키를, 창이 0개일 때 스냅샷으로 되살립니다(삭제 이벤트 뒤 예약 복원, 조회 직전 복원). 창을 모두 닫아도 Chrome이 백그라운드(`background` 권한)로 남아 있으면 동기화가 이어지는 것이 목표이며, 실환경 재확인 전입니다(수동 확인 R-A).
+- 만료 갱신: 조회가 401 + `ROUTE-0006`(만료)을 받으면 갱신 요청(`POST /api/portal/public/auth/refresh/login`)을 1회 보내고 조회를 1회 다시 합니다. 갱신을 시도한 뒤 5분(갱신이 거절됐으면 30분) 동안은 다시 시도하지 않고, DaouOffice 탭이 열려 있으면 페이지가 갱신하도록 최대 3분 양보합니다. getConfig 응답부터 재는 시간 예산 `SYNC_BUDGET_MS`(40초) 안에 갱신 요청(최대 20초)·대기(0.5초)·재조회(최소 5초)가 들어가지 않으면 갱신을 건너뛰어(`budget`) 결과가 앱의 조회 lease 45초 안에 닿게 합니다.
+- 로그아웃 불복원: 창이 열린 상태에서 인증 쿠키가 지워지면(로그아웃 등) 스냅샷을 바로 버려, 이후 창을 닫아도 로그아웃된 세션을 되살리지 않습니다. 토큰 교체(`overwrite`)에 따른 삭제는 예외입니다.
+- JS 동작 시험 `tools/worker-mock-test.js`: 가짜 chrome으로 worker의 스냅샷·복원·갱신·폐기 시나리오를 검사하며, 0단계 게이트(`.claude/scripts/gate-extra.sh`)에서 항상 실행합니다.
+- 상태 문구 "DaouOffice 세션 갱신을 기다리는 중입니다": 만료 401 + 갱신 대기(`waiting_tab`, `budget`)일 때만 표시합니다(ReasonCode `session_refresh_pending`).
+- 로그 필드: 앱 로그의 결과 요약 줄(`bridge.result`, `bridge.pipe`, host 로그의 요청 수신 줄)에 `refreshState=<값>`과 `refreshStatus=<갱신 요청의 HTTP 상태, 응답이 없으면 0>`이 값이 있을 때만 붙고, 확장 콘솔에 `[SESSION]`·`[REFRESH]` 줄이 남습니다. 쿠키·토큰 값은 어디에도 남기지 않습니다.
+
+### Changed
+- `cookies` 권한이 manifest에 다시 들어갑니다(7.2.0에서 제거했던 권한). 쿠키 변경 이벤트(`chrome.cookies.onChanged`)는 스냅샷·복원 판단에만 쓰이고 동기화 트리거로는 쓰지 않습니다. 값은 Chrome 밖(Native Messaging, 앱, 로그)으로 나가지 않습니다.
+- 확장 worker 파일을 `service-worker-v730.js`로 교체하고 이전 `service-worker-v720.js`는 정리 대상입니다.
+- 포장 테스트 가드 개정: 금지 목록에서 `chrome.cookies`·`cookies.onChanged`를 풀고, `storage.local`·`spike` 금지를 더했으며, 시간 예산 부등식과 `refreshState`·`ROUTE-0006` 리터럴이 앱과 같은지 검사하는 테스트를 추가했습니다. 툴바 아이콘 즉시 동기화(`chrome.action.onClicked`)는 7.2.0부터 있던 기능이라 유지합니다.
+- 포장 테스트 가드 추가: worker에 `windows.onRemoved`·`windows.onCreated` 리스너가 들어가지 못하게 금지 목록에 더했습니다(창 닫기 판단은 이벤트 시점의 창 개수 조회로만 합니다).
+- postResult 결과에 선택 필드 2개(`refreshState`, `refreshStatus`)를 더했습니다. 필드가 없으면 판정은 7.2.0과 같습니다.
+
+### 유지(바뀌지 않음)
+- 앱과 확장이 주고받는 메시지 형식의 번호(`NativeBridgeProtocol.ProtocolVersion`, 현재 2)와 파이프 이름 `DaouCalendarOverlay.NativeBridge.v8`은 7.2.0 그대로입니다. 이 번호가 다르면 앱이 확장에 조회를 맡기지 않는데, 7.3.0은 조회 결과에 없어도 되는 항목 2개(`refreshState`, `refreshStatus`)만 덧붙였으므로 번호를 바꾸지 않았습니다. 그래서 EXE를 7.3.0으로 바꾼 뒤 확장을 새로고침하기 전까지도 조회가 끊기지 않고, 상태 표시줄에 `Chrome 확장 새로고침 필요 (7.2.0 → 7.3.0)`가 표시됩니다(코드 기준, 실환경 미확인).
+- 앱의 조회 lease 45초, `settings.json`, getConfig 응답은 바뀌지 않습니다. 세션 유지를 끄는 설정은 두지 않으며 세션 유지는 항상 켜져 있습니다.
+
+### 알려진 한계
+- 확장을 새로고침하면 `chrome.storage.session`이 비워지므로, 새로고침 직후 첫 조회 성공 전에 Chrome 창을 모두 닫으면 다시 로그인해야 합니다(수동 확인 R-E).
+- 페이지가 로그아웃한 직후 1초 안에 마지막 창을 닫으면 창 닫기 정리로 오인해 로그아웃된 쿠키를 복원할 수 있습니다. 서버가 로그아웃 때 세션을 무효화하는지는 미확인이며, 무효화돼 있으면 다음 조회의 `ROUTE-0004`에서 스냅샷을 버립니다(수동 확인 R-B).
+- `cookies` 권한이 추가되는 업그레이드에서 Chrome이 권한 재승인을 묻거나 확장을 비활성화하는지는 미확인입니다(수동 확인 R-G).
+
 ## 7.2.0 - 2026-09-29
 
 ### Added

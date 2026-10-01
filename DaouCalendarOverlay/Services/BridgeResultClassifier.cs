@@ -15,6 +15,40 @@ public static class BridgeFetchOutcomes
     public const string Error = "error";
 }
 
+/// <summary>
+/// worker가 postResult <c>result.refreshState</c>로 보내는 토큰 갱신 결과 상태. 이 클래스에만 리터럴을 둔다.
+/// 만료 401(ROUTE-0006)을 감지했을 때만 오며, 7.2.0 확장은 보내지 않는다.
+/// </summary>
+public static class BridgeRefreshStates
+{
+    /// <summary>갱신 POST가 2xx였다. 조회를 1회 다시 했다.</summary>
+    public const string Refreshed = "refreshed";
+
+    /// <summary>갱신 POST가 401 또는 403이었다(갱신 거절).</summary>
+    public const string Rejected = "rejected";
+
+    /// <summary>갱신 POST가 그 밖의 상태였거나 응답이 없었다(네트워크·타임아웃).</summary>
+    public const string Failed = "failed";
+
+    /// <summary>갱신에 쓸 세션이 저장소에 없어 갱신하지 않았다.</summary>
+    public const string NoToken = "no_token";
+
+    /// <summary>직전 시도 뒤 쿨다운(5분) 안이라 갱신하지 않았다.</summary>
+    public const string Cooldown = "cooldown";
+
+    /// <summary>직전 거절 뒤 쿨다운(30분) 안이라 갱신하지 않았다.</summary>
+    public const string CooldownRejected = "cooldown_rejected";
+
+    /// <summary>DaouOffice 탭이 열려 있어 페이지의 갱신을 기다렸다(갱신 대기).</summary>
+    public const string WaitingTab = "waiting_tab";
+
+    /// <summary>이번 동기화의 남은 시간 예산이 모자라 갱신을 다음 주기로 미뤘다(갱신 대기).</summary>
+    public const string Budget = "budget";
+
+    /// <summary>탭 조회 실패, 갱신 URL 검증 실패, 예외로 갱신 여부를 판단하지 못했다.</summary>
+    public const string Unavailable = "unavailable";
+}
+
 /// <summary><see cref="BridgeResultClassifier.Classify"/>의 판정 결과.</summary>
 public sealed class BridgeResultVerdict
 {
@@ -59,6 +93,12 @@ public static class BridgeResultClassifier
     public const string ExtensionErrorFormat = "Chrome 확장 조회 오류: {0}";
     public const string UnknownOutcomeMessage = "Chrome 확장 결과 형식을 알 수 없습니다";
     public const string ProcessingFailedFormat = "동기화 결과 처리 실패: {0}";
+
+    /// <summary>DaouOffice가 만료된 세션에 돌려주는 401 본문의 최상위 code. worker EXPIRED_API_CODE와 같아야 한다.</summary>
+    public const string ExpiredApiCode = "ROUTE-0006";
+
+    /// <summary>만료 401인데 확장이 갱신을 미뤘을 때(<see cref="BridgeRefreshStates.WaitingTab"/>, <see cref="BridgeRefreshStates.Budget"/>)의 문구.</summary>
+    public const string SessionRefreshPendingMessage = "DaouOffice 세션 갱신을 기다리는 중입니다";
 
     private const int MaxErrorNameLength = 64;
     private const int MaxApiCodeLength = 32;
@@ -108,12 +148,23 @@ public static class BridgeResultClassifier
             status is >= 300 and <= 399)
             return Failure(BridgeFailureKind.Authentication, "redirect", RedirectMessage);
 
-        // 7: 인증 실패. 로그아웃 응답(401 + ROUTE-0004)의 code를 로그용으로만 추출한다.
+        // 7: 인증 실패. 본문 최상위 code(로그아웃 ROUTE-0004, 만료 ROUTE-0006 등)를 로그용으로 추출한다.
+        //    만료 401인데 확장이 갱신을 미뤘으면(waiting_tab, budget) 문구만 '세션 갱신 대기'로 바꾼다.
+        //    refreshState가 없거나 그 밖의 값이면 7.2.0과 같은 판정이다.
         if (status is 401 or 403)
+        {
+            var authApiCode = TryReadTopLevelCode(body);
+            if (status == 401 &&
+                string.Equals(authApiCode, ExpiredApiCode, StringComparison.Ordinal) &&
+                (string.Equals(result.RefreshState, BridgeRefreshStates.WaitingTab, StringComparison.Ordinal) ||
+                 string.Equals(result.RefreshState, BridgeRefreshStates.Budget, StringComparison.Ordinal)))
+                return Failure(BridgeFailureKind.Authentication, "session_refresh_pending", SessionRefreshPendingMessage, authApiCode);
+
             return Failure(BridgeFailureKind.Authentication,
                 status == 401 ? "http_401" : "http_403",
                 AuthRequiredMessage,
-                TryReadTopLevelCode(body));
+                authApiCode);
+        }
 
         // 8: 본문 크기 초과
         if (body is not null && body.Length > MaxBodyChars)

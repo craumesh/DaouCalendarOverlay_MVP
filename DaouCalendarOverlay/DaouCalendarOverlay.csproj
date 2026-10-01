@@ -8,9 +8,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>DaouCalendarOverlay</AssemblyName>
     <RootNamespace>DaouCalendarOverlay</RootNamespace>
-    <Version>7.2.0</Version>
-    <AssemblyVersion>7.2.0.0</AssemblyVersion>
-    <FileVersion>7.2.0.0</FileVersion>
+    <Version>7.3.0</Version>
+    <AssemblyVersion>7.3.0.0</AssemblyVersion>
+    <FileVersion>7.3.0.0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
     <DebugType>portable</DebugType>
     <DebugSymbols>true</DebugSymbols>
@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="ChromeExtension\manifest.json" LogicalName="DaouCalendarOverlay.ChromeExtension.manifest.json" />
-    <EmbeddedResource Include="ChromeExtension\service-worker-v720.js" LogicalName="DaouCalendarOverlay.ChromeExtension.service-worker-v720.js" />
+    <EmbeddedResource Include="ChromeExtension\service-worker-v730.js" LogicalName="DaouCalendarOverlay.ChromeExtension.service-worker-v730.js" />
     <EmbeddedResource Include="ChromeExtension\icon16.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon16.png" />
     <EmbeddedResource Include="ChromeExtension\icon32.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon32.png" />
     <EmbeddedResource Include="ChromeExtension\icon48.png" LogicalName="DaouCalendarOverlay.ChromeExtension.icon48.png" />

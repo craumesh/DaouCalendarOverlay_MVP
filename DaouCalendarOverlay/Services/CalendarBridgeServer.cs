@@ -624,6 +624,10 @@ public sealed class BridgeResultPayload
     [JsonPropertyName("bodyLength")]   public int? BodyLength { get; set; }
     [JsonPropertyName("elapsedMs")]    public int? ElapsedMs { get; set; }
     [JsonPropertyName("errorName")]    public string? ErrorName { get; set; }
+    /// <summary>worker의 토큰 갱신 결과 상태(<see cref="BridgeRefreshStates"/>). 만료 401을 감지했을 때만 온다. 7.2.0 확장은 보내지 않는다.</summary>
+    [JsonPropertyName("refreshState")] public string? RefreshState { get; set; }
+    /// <summary>갱신 POST의 HTTP 상태. 응답이 없으면 0, 갱신을 보내지 않았으면 없음.</summary>
+    [JsonPropertyName("refreshStatus")] public int? RefreshStatus { get; set; }
 }
 
 public enum BridgeFailureKind
