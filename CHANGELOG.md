@@ -19,6 +19,7 @@ WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브
 - `cookies` 권한이 manifest에 다시 들어갑니다(7.2.0에서 제거했던 권한). 쿠키 변경 이벤트(`chrome.cookies.onChanged`)는 스냅샷·복원 판단에만 쓰이고 동기화 트리거로는 쓰지 않습니다. 값은 Chrome 밖(Native Messaging, 앱, 로그)으로 나가지 않습니다.
 - 확장 worker 파일을 `service-worker-v730.js`로 교체하고 이전 `service-worker-v720.js`는 정리 대상입니다.
 - 포장 테스트 가드 개정: 금지 목록에서 `chrome.cookies`·`cookies.onChanged`를 풀고, `storage.local`·`spike` 금지를 더했으며, 시간 예산 부등식과 `refreshState`·`ROUTE-0006` 리터럴이 앱과 같은지 검사하는 테스트를 추가했습니다. 툴바 아이콘 즉시 동기화(`chrome.action.onClicked`)는 7.2.0부터 있던 기능이라 유지합니다.
+- 포장 테스트 가드 추가: worker에 `windows.onRemoved`·`windows.onCreated` 리스너가 들어가지 못하게 금지 목록에 더했습니다(창 닫기 판단은 이벤트 시점의 창 개수 조회로만 합니다).
 - postResult 결과에 선택 필드 2개(`refreshState`, `refreshStatus`)를 더했습니다. 필드가 없으면 판정은 7.2.0과 같습니다.
 
 ### 유지(바뀌지 않음)

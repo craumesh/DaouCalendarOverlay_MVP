@@ -262,12 +262,24 @@
 | 2026-09-30 | T1 a73ec4f~T7 0c8d77a: 버전 7.3.0 상향과 worker 파일 이름 변경(v720→v730), manifest `cookies` 권한 복귀와 포장 테스트 가드 개정, worker 핵심(세션 스냅샷·쿠키 복원·토큰 갱신·시간 예산), JS 동작 시험 `tools/worker-mock-test.js`와 게이트 연결, C# 결과 필드 `refreshState`·`refreshStatus`와 "세션 갱신 대기" 판정, 로그 요약, 포장 테스트(시간 예산·갱신 상태 리터럴·만료 코드) | `/feature` 워크플로: 0단계 게이트와 검증 단계를 통과해야 커밋한다. 태스크별 검증 결과 원문은 이 로그에 옮기지 않았다 | 통과(커밋됨) |
 | 2026-09-30 | T8 f209029~T12 096f88b: 기술 문서 개정(§1~§6, §10~§17, §20~§24, §25~§33, §34~§39, 문서 기준일) | `/feature` 워크플로: 0단계 게이트와 검증 단계를 통과해야 커밋한다. 태스크별 검증 결과 원문은 이 로그에 옮기지 않았다 | 통과(커밋됨) |
 | 2026-09-30 | T13: verification-log 7.3.0 절, README, CHANGELOG 7.3.0 본문 | 자동 검증(아래) 실행. 문서 검증 단계는 별도 | 자동 검증 통과(아래 수치). 수동 확인 R-A~R-G 7건 미확인 |
+| 2026-10-01 | F2 2390d85: JS 하네스 보강(로그아웃·복원·갱신 경계 시나리오 추가)과 변형 검사(`--mutants`), `gate-extra.sh`에 변형 검사 연결 | `/feature` 워크플로: 0단계 게이트와 검증 단계를 통과해야 커밋한다. 태스크별 검증 결과 원문은 이 로그에 옮기지 않았다 | 통과(커밋됨) |
+| 2026-10-01 | F3 dd503e0: worker 스냅샷 저장에 폐기 세대 확인 추가(로그아웃 폐기와 저장이 겹치는 경로 차단)와 하네스 시나리오 | 위와 같음 | 통과(커밋됨) |
+| 2026-10-01 | F4 3aac6c0: 포장 테스트에 `windows.onRemoved`·`windows.onCreated` 금지를 상시 가드로 추가 | 위와 같음 | 통과(커밋됨) |
+| 2026-10-01 | F1 d22f71e: 기술 문서의 7.2.0 시절 현재형 서술 잔재 정정(§8·§9.1·§16·§26·§32·§33)과 회귀 테스트 | 위와 같음 | 통과(커밋됨) |
 
 ### 자동 검증 (7.3.0, T13에서 실제 실행한 값)
 
 - `dotnet test DaouCalendarOverlay.sln -c Release -nologo`: 통과 800, 실패 0, 건너뜀 0(전체 800).
 - `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=75 fail=0`.
 - `bash .claude/scripts/gate.sh`: `GATE RESULT: pass`(문서 3개 변경 뒤 실행, `[ALWAYS] pass : bash .claude/scripts/gate-extra.sh`). `gate-extra.sh`를 따로 실행해 보면 기술 문서 HTML 점검과 위 하네스를 돈 뒤, `.md` 변경을 보고 `dotnet build -c Release -warnaserror`(경고 0개, 오류 0개)와 `dotnet test`(통과 800, 실패 0, 건너뜀 0)를 다시 돈다.
+
+### 자동 검증 (7.3.0, 수정 태스크 F2·F3·F4·F1 뒤 2026-10-01에 다시 실행한 값)
+
+위 T13 시점 값은 그대로 두고, 수정 태스크 반영 뒤 명령을 다시 실행해 얻은 값을 덧붙인다. 기술 문서 §34의 수치(`pass=131`, `killed=10`)와 같다.
+
+- `dotnet test DaouCalendarOverlay.sln -c Release -nologo`: 통과 806, 실패 0, 건너뜀 0(전체 806).
+- `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=131 fail=0`(시나리오 S1~S31).
+- `node tools/worker-mock-test.js --mutants`: 마지막 줄 `mutants killed=10 survived=0`(변형 M1~M10 전부 KILLED).
 
 ### 수동 확인 대기 (7.3.0)
 
