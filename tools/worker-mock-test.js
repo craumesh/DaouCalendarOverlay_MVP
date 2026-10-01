@@ -6,12 +6,21 @@
 // 출력: 검사마다 "PASS <id> <설명>" 또는 "FAIL <id> <설명> <근거>", 마지막 줄 "summary pass=<n> fail=<m>".
 // 종료 코드: 전부 통과 0, 하나라도 실패 1, 하네스 자체 오류(예외, worker 로드 실패, 시간 초과) 2.
 //
+// 변형 검사: node tools/worker-mock-test.js --mutants
+//   - worker 원문을 정확한 문자열 치환으로 일부러 망가뜨린 변형 M1~M9를 임시 폴더에 만들고(저장소 파일은 건드리지 않는다),
+//     변형마다 같은 시나리오를 자식 프로세스로 돌린다(병렬). 종료 코드 1이고 FAIL 줄이 1개 이상이면 KILLED다.
+//     하네스가 예외·시간 초과로 끝난 것(종료 2)은 KILLED가 아니다.
+//   - 치환 대상이 정확히 한 번 일치하지 않으면 "mutation target not found: M<n>"을 내고 종료 코드 2로 끝낸다.
+//   - 마지막 줄 "mutants killed=<n> survived=<m>"(KILLED가 아닌 것은 모두 survived에 센다). 전부 KILLED면 0, 살아남은 변형이 있으면 1, 오류가 있으면 2.
+//
 // 근거·출력에는 쿠키 값을 쓰지 않는다(개수·이름·상태·불리언만).
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const os = require('os');
+const childProcess = require('child_process');
 
 const HOST = 'cmworld.daouoffice.com';
 const BASE_URL = 'https://cmworld.daouoffice.com';
@@ -53,8 +62,12 @@ function fatal(message) {
   process.stderr.write(`harness error: ${message}\n`, () => process.exit(2));
 }
 
-// 전체 안전 타이머. 지나면 하네스 오류로 끝낸다.
-setTimeout(() => fatal('60s safety timer expired'), 60000).unref();
+const cliArgs = process.argv.slice(2);
+const mutantsMode = cliArgs.includes('--mutants');
+const workerArg = cliArgs.find(arg => !arg.startsWith('--'));
+
+// 전체 안전 타이머. 지나면 하네스 오류로 끝낸다. 변형 검사는 자식 프로세스를 따로 기다리므로 조금 더 길게 둔다.
+setTimeout(() => fatal(mutantsMode ? '85s safety timer expired' : '60s safety timer expired'), mutantsMode ? 85000 : 60000).unref();
 process.on('beforeExit', () => {
   if (!finished) {
     finished = true;
@@ -77,8 +90,8 @@ let workerPath;
 let workerCode;
 try {
   manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  workerPath = process.argv[2]
-    ? path.resolve(process.argv[2])
+  workerPath = workerArg
+    ? path.resolve(workerArg)
     : path.join(path.dirname(manifestPath), manifest.background.service_worker);
   workerCode = fs.readFileSync(workerPath, 'utf8');
   if (!manifest || !manifest.background || typeof manifest.background.service_worker !== 'string') throw new Error('manifest background.service_worker missing');
@@ -163,9 +176,14 @@ const readConst = (ctx, name) => {
 
 const allEnvs = [];
 
-function makeEnv({ windows = 1, tabs = 0, cookies } = {}) {
+// 옵션: scaleTimers(n)이면 worker의 setTimeout 중 10초 이상인 지연을 1/n로 줄인다(S25만 쓴다. 20초 타임아웃을 실제로 기다리지 않으려는 용도).
+function makeEnv({ windows = 1, tabs = 0, cookies, scaleTimers = 0 } = {}) {
   const env = {
     jar: cookies || defaultCookies(), windows, tabs,
+    // 제어 상태: 창·탭·쿠키 API를 예외로 만들거나(Error), 쿠키 읽기를 붙잡는다(cookieGate).
+    windowsError: false, tabsError: false, getAllError: false, cookieGate: null, aborts: 0,
+    // storage.session.set 호출과 fetch 호출을 한 배열에 순서대로 남긴다(S24). 값은 담지 않는다.
+    timeline: [],
     session: {}, localCalls: [], setCalls: [], native: [], posts: [], postMeta: [], postMessages: [],
     allPostResults: [], fetches: [], order: [], logs: [], script: [], fakeNow: Date.now(),
     listeners: { cookies: [], alarm: [], installed: [], startup: [], action: [] },
@@ -184,6 +202,7 @@ function makeEnv({ windows = 1, tabs = 0, cookies } = {}) {
       for (const [key, value] of Object.entries(items)) {
         // 모든 쓰기를 {key, json}으로 남긴다(S16f: 스냅샷 키 밖에 값이 쓰이지 않았는지 본다).
         env.sessionWrites.push({ key, json: JSON.stringify(value === undefined ? null : value) });
+        env.timeline.push({ type: 'session.set', key, pending: !!value && typeof value === 'object' && value.pending === true });
         if (env.keys && key === env.keys.lastError) env.lastErrorWrites.push(JSON.stringify(value));
         env.session[key] = clone(value);
       }
@@ -226,7 +245,14 @@ function makeEnv({ windows = 1, tabs = 0, cookies } = {}) {
     action: { onClicked: event('action') },
     cookies: {
       onChanged: event('cookies'),
-      async getAll(filter = {}) { return env.jar.filter(cookie => matchFilter(cookie, filter)).map(cookie => ({ ...cookie })); },
+      async getAll(filter = {}) {
+        if (env.getAllError) throw new Error('getAll failed');
+        // 스냅샷을 읽는 호출(url 필터)만 붙잡는다(S26). 풀어 줄 때까지 돌려주지 않는다.
+        if (env.cookieGate && filter.url !== undefined) {
+          env.cookieGate.entered = true;
+          await env.cookieGate.promise;
+        }
+        return env.jar.filter(cookie => matchFilter(cookie, filter)).map(cookie => ({ ...cookie })); },
       async set(details) {
         env.setCalls.push(clone(details));
         env.order.push('cookies.set');
@@ -243,16 +269,36 @@ function makeEnv({ windows = 1, tabs = 0, cookies } = {}) {
         return { ...cookie };
       }
     },
-    windows: { async getAll() { return Array.from({ length: env.windows }, () => ({})); } },
-    tabs: { async query() { return Array.from({ length: env.tabs }, () => ({})); } }
+    windows: {
+      async getAll() {
+        if (env.windowsError) throw new Error('windows.getAll failed');
+        return Array.from({ length: env.windows }, () => ({}));
+      }
+    },
+    tabs: {
+      async query() {
+        if (env.tabsError) throw new Error('tabs.query failed');
+        return Array.from({ length: env.tabs }, () => ({}));
+      }
+    }
   };
 
   const fetchMock = async (url, init = {}) => {
     const method = init.method || 'GET';
     env.fetches.push({ method, url: String(url), body: init.body, headers: { ...(init.headers || {}) } });
     env.order.push('fetch');
+    env.timeline.push({ type: 'fetch', method });
     const next = env.script.shift();
     if (!next) throw new TypeError('no scripted response');
+    // throws: 네트워크 오류처럼 응답 없이 예외. hang: abort 신호가 올 때만 끝난다(응답하지 않는 서버).
+    if (next.throws) throw new TypeError('network error');
+    if (next.hang) {
+      return new Promise((_resolve, reject) => {
+        const signal = init.signal;
+        const onAbort = () => { env.aborts += 1; const error = new Error('aborted'); error.name = 'AbortError'; reject(error); };
+        if (signal && signal.aborted) onAbort(); else if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      });
+    }
     if (next.advanceMs) env.fakeNow += next.advanceMs;
     if (method === 'GET' && !env.run.getSeen) {
       env.run.getSeen = true;
@@ -276,6 +322,7 @@ function makeEnv({ windows = 1, tabs = 0, cookies } = {}) {
     console: { info: capture, warn: capture, log: capture, error: capture, debug: capture },
     URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TypeError, Error
   };
+  if (scaleTimers > 0) sandbox.setTimeout = (fn, ms, ...rest) => setTimeout(fn, ms >= 10000 ? ms / scaleTimers : ms, ...rest);
   env.ctx = vm.createContext(sandbox);
   try {
     vm.runInContext(workerCode, env.ctx, { filename: 'worker.js' });
@@ -326,6 +373,165 @@ async function envWithSnapshot(options) {
   await run(env);
   resetCapture(env);
   return env;
+}
+
+// 조건이 참이 되거나 maxMs가 지날 때까지 기다린다. 변형 worker가 끝나지 않아도 하네스가 멈추지 않도록 항상 시간 한도를 둔다.
+async function waitFor(cond, maxMs, stepMs = 25) {
+  const startedAt = Date.now();
+  while (!cond() && Date.now() - startedAt < maxMs) await tick(stepMs);
+  return cond();
+}
+
+// ---- S19~S27: 로그아웃·복원·갱신 경계 시나리오 ----
+// 각 시나리오는 검사 목록을 돌려준다([id, 설명, 조건, 근거]). 느린 시나리오를 동시에 돌리려고 main이 모아서 check로 출력한다.
+// "Mn"은 --mutants가 이 시나리오로 죽이는 변형이다(치환 규칙은 MUTATIONS 참고). 이 번호는 시나리오가 S16(값 비유출) 앞에서 돌아 S16에 포함된다.
+function collector() {
+  const out = [];
+  const chk = (id, description, cond, evidence) => { out.push([id, description, cond, evidence]); };
+  return { out, chk };
+}
+
+// S19 [M1: windowCount의 catch가 -1 대신 0을 돌려주면, 창 개수 확인 실패가 창 0개로 오인돼 로그아웃된 쿠키가 되살아난다]
+async function scenarioWindowCountFails() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.windowsError = true;
+  await removeCookie(env, 'AccessToken', 'explicit');
+  chk('S19a', '창 개수 확인이 실패한 상태의 explicit 삭제는 스냅샷을 즉시 폐기', !snapOf(env));
+  await tick(1200);
+  chk('S19b', 'RESTORE_DELAY_MS 뒤에도 cookies.set 0회', env.setCalls.length === 0, env.setCalls.length);
+  chk('S19c', '대조군: AccessToken은 jar에서 빠져 있다', !env.jar.some(cookie => cookie.name === 'AccessToken'), String(env.jar.length));
+  return out;
+}
+
+// S20 [M3: restoreBeforeFetch의 창 0개 확인이 없으면 창이 열려 있어도 조회 전에 쿠키를 되살린다]
+async function scenarioNoRestoreWithWindow() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot({ windows: 1 });
+  const index = env.jar.findIndex(cookie => cookie.name === 'RefreshToken');
+  if (index < 0) throw new HarnessError('S20: RefreshToken not in jar');
+  env.jar.splice(index, 1); // 이벤트 없이 조용히 빠진 쿠키 하나
+  env.script = [OK];
+  await run(env);
+  chk('S20a', '창 1개이고 쿠키 하나가 이벤트 없이 빠진 채 syncOnce를 돌려도 cookies.set 0회', env.setCalls.length === 0, env.setCalls.length);
+  chk('S20b', '조회는 GET 1번', methods(env) === 'GET', methods(env));
+  chk('S20c', '대조군: 빠진 RefreshToken은 jar에 없다', !env.jar.some(cookie => cookie.name === 'RefreshToken'), String(env.jar.length));
+  return out;
+}
+
+// S21 [M7: runScheduledRestore의 창 0개 재확인이 없으면 예약 뒤 창이 열려도 되살린다]
+async function scenarioWindowOpensBeforeTimer() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.windows = 0;
+  await removeCookie(env, 'AccessToken', 'explicit'); // 창 0개: 복원이 예약된다
+  chk('S21a', '대조군: 창 0개의 explicit 삭제는 스냅샷을 유지한다(복원 예약)', !!snapOf(env));
+  env.windows = 1; // 예약 시점과 실행 시점 사이에 창이 열렸다
+  await tick(1200);
+  chk('S21b', '타이머가 돌 때 창이 1개이면 cookies.set 0회', env.setCalls.length === 0, env.setCalls.length);
+  return out;
+}
+
+// S22 [M2: 갱신 POST가 실패(500 또는 응답 없음)인데 재조회하거나 스냅샷을 버리면 안 된다]
+async function scenarioRefreshPostFails() {
+  const { out, chk } = collector();
+  const http500 = await envWithSnapshot();
+  http500.script = [EXPIRED, { status: 500, body: '{}' }, OK];
+  await run(http500);
+  chk('S22a', '갱신 500: 요청 순서 GET,POST(재조회 없음)', methods(http500) === 'GET,POST', methods(http500));
+  chk('S22b', '갱신 500: refreshState는 failed', lastPost(http500).refreshState === 'failed', lastPost(http500).refreshState);
+  chk('S22c', '갱신 500: refreshStatus는 500', lastPost(http500).refreshStatus === 500, lastPost(http500).refreshStatus);
+  chk('S22d', '갱신 500: 스냅샷 유지', !!snapOf(http500));
+  chk('S22e', '갱신 500: 앱에는 첫 조회의 401이 한 번 간다', http500.posts.length === 1 && lastPost(http500).status === 401, JSON.stringify(http500.posts.map(post => post.status)));
+
+  const network = await envWithSnapshot();
+  network.script = [EXPIRED, { throws: true }, OK];
+  await run(network);
+  chk('S22f', '갱신 네트워크 오류: 요청 순서 GET,POST(재조회 없음)', methods(network) === 'GET,POST', methods(network));
+  chk('S22g', '갱신 네트워크 오류: refreshState는 failed', lastPost(network).refreshState === 'failed', lastPost(network).refreshState);
+  chk('S22h', '갱신 네트워크 오류: refreshStatus는 0', lastPost(network).refreshStatus === 0, lastPost(network).refreshStatus);
+  chk('S22i', '갱신 네트워크 오류: 스냅샷 유지', !!snapOf(network));
+  return out;
+}
+
+// S23 [M5: 탭 조회 실패 분기가 없으면 탭 상태를 모른 채 갱신 POST를 보낸다]
+async function scenarioTabsQueryFails() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.tabsError = true;
+  env.script = [EXPIRED, REFRESH_OK, OK];
+  await run(env);
+  chk('S23a', '탭 조회 실패: refreshState는 unavailable', lastPost(env).refreshState === 'unavailable', lastPost(env).refreshState);
+  chk('S23b', '탭 조회 실패: 스냅샷 유지', !!snapOf(env));
+  chk('S23c', '탭 조회 실패: 갱신 POST 없음(GET만)', methods(env) === 'GET', methods(env));
+  chk('S23d', '탭 조회 실패: refreshStatus 없음', !('refreshStatus' in lastPost(env)), JSON.stringify(Object.keys(lastPost(env))));
+  return out;
+}
+
+// S24 [M6: POST 전에 REFRESH_LAST_KEY pending 기록을 남기지 않으면 POST 도중 worker가 죽을 때 같은 토큰으로 되풀이한다]
+async function scenarioPendingBeforePost() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.timeline.length = 0;
+  env.script = [EXPIRED, REFRESH_OK, OK];
+  await run(env);
+  const pendingAt = env.timeline.findIndex(item => item.type === 'session.set' && item.key === env.keys.refreshLast && item.pending);
+  const postAt = env.timeline.findIndex(item => item.type === 'fetch' && item.method === 'POST');
+  chk('S24a', 'REFRESH_LAST_KEY pending 기록이 있다', pendingAt >= 0, `pendingAt=${pendingAt}`);
+  chk('S24b', 'pending 기록이 갱신 POST보다 앞', pendingAt >= 0 && postAt >= 0 && pendingAt < postAt, `pendingAt=${pendingAt} postAt=${postAt}`);
+  chk('S24c', '갱신 POST는 1번', env.timeline.filter(item => item.type === 'fetch' && item.method === 'POST').length === 1,
+    env.timeline.filter(item => item.type === 'fetch' && item.method === 'POST').length);
+  return out;
+}
+
+// S25 [M8: postRefresh의 타임아웃이 무력화되면 응답 없는 서버를 영원히 기다려 동기화가 멈춘다]
+// 20초를 실제로 기다리지 않도록 이 시나리오에서만 10초 이상의 setTimeout 지연을 1/100로 줄인다(REFRESH_TIMEOUT_MS 20초 -> 0.2초).
+async function scenarioRefreshTimeout() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot({ scaleTimers: 100 });
+  env.script = [EXPIRED, { hang: true }, OK];
+  env.run = { getSeen: false, expiredFirst: false };
+  const pending = vm.runInContext('syncOnce("test")', env.ctx);
+  void pending; // 변형 worker에서는 끝나지 않을 수 있으므로 기다리지 않고 postResult만 시간 한도 안에서 기다린다.
+  await waitFor(() => env.posts.length > 0, 2500);
+  chk('S25a', '응답 없는 갱신 POST가 abort됐다', env.aborts === 1, env.aborts);
+  chk('S25b', '요청 순서 GET,POST(재조회 없음)', methods(env) === 'GET,POST', methods(env));
+  chk('S25c', 'refreshState는 failed', lastPost(env).refreshState === 'failed', lastPost(env).refreshState);
+  chk('S25d', 'refreshStatus는 0', lastPost(env).refreshStatus === 0, lastPost(env).refreshStatus);
+  chk('S25e', '스냅샷 유지', !!snapOf(env));
+  return out;
+}
+
+// S26 [M4: resnapshot이 쿠키를 읽는 사이 스냅샷이 폐기됐는데 저장하면 로그아웃된 세션이 부활한다]
+async function scenarioDiscardDuringResnapshot() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  let release;
+  env.cookieGate = { entered: false, promise: new Promise(resolve => { release = resolve; }) };
+  plantCookie(env, 'AccessToken', S_ACCESS_NEW); // 1.5초 뒤 resnapshot이 쿠키 읽기에서 붙잡힌다
+  const entered = await waitFor(() => env.cookieGate.entered, 3500);
+  chk('S26a', '대조군: resnapshot이 쿠키를 읽는 중에 붙잡혔다', entered);
+  await removeCookie(env, 'RefreshToken', 'explicit'); // 창 1개: 로그아웃으로 보고 폐기
+  chk('S26b', '읽는 사이에 스냅샷이 폐기됐다', !snapOf(env));
+  release();
+  await tick(150);
+  chk('S26c', '읽기가 끝난 뒤에도 스냅샷을 다시 저장하지 않는다', !snapOf(env));
+  return out;
+}
+
+// S27 [M9: refreshSession 안의 예외가 unavailable(스냅샷 유지)이 아니라 스냅샷 폐기로 이어지면 안 된다]
+async function scenarioRefreshSessionThrows() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.getAllError = true; // refreshSession의 RefreshToken 확인(쿠키 읽기)이 예외를 던진다
+  env.script = [EXPIRED, REFRESH_OK, OK];
+  await run(env);
+  env.getAllError = false;
+  chk('S27a', 'refreshSession 예외: refreshState는 unavailable', lastPost(env).refreshState === 'unavailable', lastPost(env).refreshState);
+  chk('S27b', 'refreshSession 예외: 스냅샷 유지', !!snapOf(env));
+  chk('S27c', 'refreshSession 예외: 갱신 POST 없음(GET만)', methods(env) === 'GET', methods(env));
+  chk('S27d', 'refreshSession 예외: 앱에는 401이 간다', lastPost(env).status === 401, lastPost(env).status);
+  return out;
 }
 
 async function main() {
@@ -515,7 +721,15 @@ async function main() {
   check('S15a', '예약 복원이 돌아도 누락이 없으면 cookies.set 0회', s15.setCalls.length === 0, s15.setCalls.length);
   check('S15b', '스냅샷 유지', !!snapOf(s15));
 
-  // S16 값 비유출(S1~S15 누적)
+  // S19~S27 경계 시나리오(느린 것이 있어 동시에 돌리고, 출력은 번호 순서로 모아서 낸다). S16 앞에서 돌아 S16 검사에 포함된다.
+  const boundary = await Promise.all([
+    scenarioWindowCountFails(), scenarioNoRestoreWithWindow(), scenarioWindowOpensBeforeTimer(),
+    scenarioRefreshPostFails(), scenarioTabsQueryFails(), scenarioPendingBeforePost(),
+    scenarioRefreshTimeout(), scenarioDiscardDuringResnapshot(), scenarioRefreshSessionThrows()
+  ]);
+  for (const entries of boundary) for (const entry of entries) check(...entry);
+
+  // S16 값 비유출(S1~S15와 S19~S27 누적)
   const nativeAll = allEnvs.flatMap(env => env.native);
   const logsAll = allEnvs.flatMap(env => env.logs);
   const lastErrorAll = allEnvs.flatMap(env => [...env.lastErrorWrites, JSON.stringify(env.session[env.keys.lastError] === undefined ? null : env.session[env.keys.lastError])]);
@@ -554,8 +768,117 @@ async function main() {
     `posts=${otherMetas.length}`);
 }
 
+// ---- 변형 검사(--mutants) ----
+// 변형은 worker 원문의 정확한 문자열 치환이다. fn은 치환을 한정할 함수의 머리말(원문에 정확히 한 번)이고,
+// 함수 본문은 머리말부터 열 0의 닫는 중괄호 줄까지다. from은 그 함수 안에서 정확히 한 번 일치해야 한다.
+// from·to·anchor 안의 줄바꿈은 \n으로 쓰고, 원문의 줄바꿈 형식(LF/CRLF)에 맞춰 바꾼다.
+const MUTATIONS = [
+  { id: 'M1', fn: 'async function windowCount()', from: 'catch { return -1; }', to: 'catch { return 0; }',
+    note: 'windowCount 실패를 -1 대신 0(창 없음)으로' },
+  { id: 'M2', fn: 'async function refreshSession(', from: 'return { state: "failed", status, retry: false, keepSnapshot: true };',
+    to: 'return { state: "failed", status, retry: true, keepSnapshot: false };', note: 'failed 반환을 retry true, keepSnapshot false로' },
+  { id: 'M3', fn: 'async function restoreBeforeFetch()', from: 'if ((await windowCount()) !== 0) return;', to: '',
+    note: 'restoreBeforeFetch의 창 0개 확인 제거' },
+  { id: 'M4', fn: 'async function resnapshot()', from: 'if (!(await loadSnapshot())) return;', to: '',
+    note: 'resnapshot의 저장 직전 재확인 제거' },
+  { id: 'M5', fn: 'async function refreshSession(', from: 'if (tabs < 0) return refreshSkipped("unavailable", true);', to: '',
+    note: '탭 조회 실패 분기 제거' },
+  { id: 'M6', fn: 'async function refreshSession(',
+    from: 'await chrome.storage.session.set({ [REFRESH_LAST_KEY]: { at: now, ok: false, rejected: false, pending: true } });', to: '',
+    note: 'POST 전 pending 기록 제거' },
+  { id: 'M7', fn: 'async function runScheduledRestore()', from: 'if ((await windowCount()) !== 0) return;', to: '',
+    note: 'runScheduledRestore의 창 0개 확인 제거' },
+  { id: 'M8', fn: 'async function postRefresh(', from: 'setTimeout(() => controller.abort(), timeoutMs)', to: 'setTimeout(() => {}, timeoutMs)',
+    note: 'postRefresh 타임아웃 무력화' },
+  // catch 안의 반환은 같은 문자열이 refreshSession에 세 번 있으므로 로그 줄을 앵커로 삼아 catch 쪽만 고른다.
+  { id: 'M9', fn: 'async function refreshSession(',
+    from: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", true);',
+    to: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", false);', note: 'refreshSession catch의 unavailable을 스냅샷 폐기로' }
+];
+
+function countOccurrences(text, needle) {
+  if (needle === '') return 0;
+  let count = 0;
+  for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length)) count += 1;
+  return count;
+}
+
+// 변형 worker 원문을 만든다. 치환 대상이 정확히 한 번이 아니면 null.
+function applyMutation(code, mutation) {
+  const eol = code.includes('\r\n') ? '\r\n' : '\n';
+  const fit = text => text.replace(/\n/g, eol);
+  if (countOccurrences(code, mutation.fn) !== 1) return null;
+  const start = code.indexOf(mutation.fn);
+  const closing = code.indexOf(`${eol}}${eol}`, start);
+  if (closing < 0) return null;
+  const end = closing + eol.length + 1;
+  const body = code.slice(start, end);
+  const from = fit(mutation.from);
+  if (countOccurrences(body, from) !== 1) return null;
+  const mutatedBody = body.replace(from, () => fit(mutation.to));
+  if (mutatedBody === body) return null;
+  return code.slice(0, start) + mutatedBody + code.slice(end);
+}
+
+// 자식 하네스를 변형 worker 경로로 돌려 종료 코드와 FAIL 줄을 모은다.
+function runChild(mutatedPath) {
+  return new Promise(resolve => {
+    const child = childProcess.spawn(process.execPath, [__filename, mutatedPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let stdout = '';
+    let settled = false;
+    const done = result => { if (!settled) { settled = true; clearTimeout(killer); resolve(result); } };
+    const killer = setTimeout(() => { child.kill(); done({ code: null, fails: [], timedOut: true }); }, 70000);
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', () => { /* 자식의 harness error 문구는 쓰지 않는다. 종료 코드로만 판단한다. */ });
+    child.on('error', () => done({ code: null, fails: [], timedOut: false }));
+    child.on('close', code => {
+      const fails = stdout.split(/\r?\n/).filter(line => line.startsWith('FAIL ')).map(line => line.split(' ')[1]);
+      done({ code, fails, timedOut: false });
+    });
+  });
+}
+
+async function runMutants() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-mutants-'));
+  process.on('exit', () => { try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* 무시 */ } });
+  const prepared = [];
+  for (const mutation of MUTATIONS) {
+    const mutated = applyMutation(workerCode, mutation);
+    if (mutated === null) {
+      finished = true;
+      process.stdout.write(`mutation target not found: ${mutation.id}\n`, () => process.exit(2));
+      return;
+    }
+    const file = path.join(tempDir, `${mutation.id}.js`);
+    fs.writeFileSync(file, mutated, 'utf8');
+    prepared.push({ mutation, file });
+  }
+  const results = await Promise.all(prepared.map(async ({ mutation, file }) => ({ mutation, result: await runChild(file) })));
+  let killed = 0;
+  let errors = 0;
+  for (const { mutation, result } of results) {
+    if (result.timedOut) {
+      errors += 1;
+      emit(`ERROR ${mutation.id} ${mutation.note} (시간 초과, KILLED 아님)`);
+    } else if (result.code === 1 && result.fails.length > 0) {
+      killed += 1;
+      emit(`KILLED ${mutation.id} ${mutation.note} (FAIL ${result.fails.length}건: ${result.fails.slice(0, 4).join(',')})`);
+    } else if (result.code === 0) {
+      emit(`SURVIVED ${mutation.id} ${mutation.note} (FAIL 없음)`);
+    } else {
+      errors += 1;
+      emit(`ERROR ${mutation.id} ${mutation.note} (종료 코드 ${result.code}, 하네스 오류, KILLED 아님)`);
+    }
+  }
+  const survived = MUTATIONS.length - killed;
+  finished = true;
+  process.stdout.write(`mutants killed=${killed} survived=${survived}\n`, () => process.exit(errors > 0 ? 2 : (survived > 0 ? 1 : 0)));
+}
+
 // manifest·worker를 읽지 못했으면 fatal이 이미 종료 코드 2로 끝내는 중이므로 시나리오를 시작하지 않는다.
-if (typeof workerCode === 'string') {
+if (typeof workerCode === 'string' && mutantsMode) {
+  runMutants().catch(error => fatal(error && error.message ? error.message : String(error)));
+} else if (typeof workerCode === 'string') {
   main().then(
     () => finish(failCount === 0 ? 0 : 1),
     error => fatal(error && error.message ? error.message : String(error))
