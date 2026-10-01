@@ -7,7 +7,7 @@
 // 종료 코드: 전부 통과 0, 하나라도 실패 1, 하네스 자체 오류(예외, worker 로드 실패, 시간 초과) 2.
 //
 // 변형 검사: node tools/worker-mock-test.js --mutants
-//   - worker 원문을 정확한 문자열 치환으로 일부러 망가뜨린 변형 M1~M10을 임시 폴더에 만들고(저장소 파일은 건드리지 않는다),
+//   - worker 원문을 정확한 문자열 치환으로 일부러 망가뜨린 변형 M1~M13을 임시 폴더에 만들고(저장소 파일은 건드리지 않는다),
 //     변형마다 같은 시나리오를 자식 프로세스로 돌린다(병렬). 종료 코드 1이고 FAIL 줄이 1개 이상이면 KILLED다.
 //     하네스가 예외·시간 초과로 끝난 것(종료 2)은 KILLED가 아니다.
 //   - 치환 대상이 정확히 한 번 일치하지 않으면 "mutation target not found: M<n>"을 내고 종료 코드 2로 끝낸다.
@@ -672,6 +672,67 @@ async function scenarioDiscardDuringRefresh() {
   return out;
 }
 
+// ---- S32~S34: 2차 최종 검토가 찾은 변형 M11~M13을 잡는 시나리오 ----
+// S32 [M11: cooldown_rejected 반환의 keepSnapshot이 true로 바뀌면 I-5(cooldown_rejected도 스냅샷 폐기)를 어긴다.
+//      기존 S4는 앞 단계 rejected에서 스냅샷이 이미 지워진 상태에서만 cooldown_rejected를 보므로 놓친다.
+//      여기서는 거절 뒤 재로그인 200으로 새 스냅샷이 생긴 상태에서 30분 안에 만료가 오게 한다]
+async function scenarioCooldownRejectedDiscards() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.script = [EXPIRED, { status: 403, body: JSON.stringify({ code: 'AUTH-0001' }) }];
+  await run(env); // 갱신 거절: 스냅샷 폐기, 30분 쿨다운 기록
+  chk('S32a', '대조군: 갱신 거절 뒤 스냅샷이 폐기되고 rejected가 기록됐다', !snapOf(env) && lastPost(env).refreshState === 'rejected',
+    `snapshot=${!!snapOf(env)} state=${lastPost(env).refreshState}`);
+  env.jar = defaultCookies(); // 재로그인(이벤트 없이 들어와 다시 찍기 예약을 만들지 않는다)
+  env.script = [OK];
+  await run(env);
+  chk('S32b', '대조군: 재로그인 뒤 조회 200이 새 스냅샷을 찍었다', !!snapOf(env));
+  resetCapture(env);
+  env.fakeNow += 60 * 1000; // 거절 뒤 1분: 30분 쿨다운 안
+  env.script = [EXPIRED];
+  await run(env);
+  chk('S32c', '쿨다운 안의 만료: GET만(갱신 POST 없음)', methods(env) === 'GET', methods(env));
+  chk('S32d', 'refreshState는 cooldown_rejected', lastPost(env).refreshState === 'cooldown_rejected', lastPost(env).refreshState);
+  chk('S32e', 'cooldown_rejected는 새로 생긴 스냅샷도 폐기', !snapOf(env), 'snapshot kept');
+  return out;
+}
+
+// S33 [M12: 갱신 2xx 뒤 스냅샷을 새 값으로 바로 다시 찍는 호출이 없으면, 재조회가 실패했을 때 옛 AccessToken이 스냅샷에 남는다.
+//      재조회가 200이면 afterFetch가 다시 찍어 차이가 드러나지 않으므로 재조회를 네트워크 오류로 끝낸다.
+//      갱신 Set-Cookie가 예약한 다시 찍기(1.5초)가 오기 전에 확인한다]
+async function scenarioSnapshotRetakenAfterRefresh() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  env.script = [EXPIRED, REFRESH_OK, { throws: true }];
+  await run(env);
+  chk('S33a', '대조군: 갱신 2xx 뒤 재조회가 응답 없이 끝났다(GET,POST,GET)', methods(env) === 'GET,POST,GET' && lastPost(env).refreshState === 'refreshed',
+    `${methods(env)} ${lastPost(env).refreshState}`);
+  chk('S33b', '대조군: 재조회 실패여도 스냅샷은 유지된다', !!snapOf(env));
+  chk('S33c', '재조회가 실패해도 스냅샷의 AccessToken은 갱신 전 값이 아니라 새 값', snapCookieValue(env, 'AccessToken') === S_ACCESS_NEW,
+    snapOf(env) ? `old=${snapCookieValue(env, 'AccessToken') === S_ACCESS}` : 'snapshot missing');
+  return out;
+}
+
+// S34 [M13: restoreFromSnapshot의 도메인 방어(!isDaouCookieDomain)가 없으면 스냅샷에 섞인 다른 도메인 쿠키까지 cookies.set으로 심는다]
+async function scenarioForeignDomainNotRestored() {
+  const { out, chk } = collector();
+  const env = await envWithSnapshot();
+  const snapshot = snapOf(env);
+  if (!snapshot) throw new HarnessError('S34: snapshot missing');
+  const foreign = makeCookie('ForeignCookie', 'FOREIGN_VALUE', { domain: 'other.example.com' });
+  snapshot.cookies.push(foreign); // 직접 심는다: worker 쪽 저장 경로는 이 쿠키를 만들지 않는다
+  env.session[env.keys.snapshot] = clone(snapshot);
+  env.windows = 0;
+  await removeCookie(env, 'AccessToken', 'explicit'); // 창 0개: 복원 예약
+  await tick(1200);
+  const foreignSets = env.setCalls.filter(call => call.name === 'ForeignCookie' || String(call.url).includes('example.com'));
+  const daouSets = env.setCalls.filter(call => call.name === 'AccessToken');
+  chk('S34a', '대조군: DaouOffice 쿠키(AccessToken)는 정상 복원(cookies.set 1회)', daouSets.length === 1, daouSets.length);
+  chk('S34b', '다른 도메인 쿠키에 대한 cookies.set은 0회', foreignSets.length === 0, foreignSets.length);
+  chk('S34c', '다른 도메인 쿠키가 jar에 들어가지 않았다', !env.jar.some(cookie => cookie.name === 'ForeignCookie'), String(env.jar.length));
+  return out;
+}
+
 async function main() {
   // S1 첫 조회 200
   const s1 = makeEnv();
@@ -859,12 +920,13 @@ async function main() {
   check('S15a', '예약 복원이 돌아도 누락이 없으면 cookies.set 0회', s15.setCalls.length === 0, s15.setCalls.length);
   check('S15b', '스냅샷 유지', !!snapOf(s15));
 
-  // S19~S31 경계 시나리오(느린 것이 있어 동시에 돌리고, 출력은 번호 순서로 모아서 낸다). S16 앞에서 돌아 S16 검사에 포함된다.
+  // S19~S34 경계 시나리오(느린 것이 있어 동시에 돌리고, 출력은 번호 순서로 모아서 낸다). S16 앞에서 돌아 S16 검사에 포함된다.
   const boundary = await Promise.all([
     scenarioWindowCountFails(), scenarioNoRestoreWithWindow(), scenarioWindowOpensBeforeTimer(),
     scenarioRefreshPostFails(), scenarioTabsQueryFails(), scenarioPendingBeforePost(),
     scenarioRefreshTimeout(), scenarioDiscardDuringResnapshot(), scenarioRefreshSessionThrows(),
-    scenarioDiscardDuringTakeSnapshot(), scenarioRelogBeforeResnapshotSave(), scenarioDiscardDuringFetch(), scenarioDiscardDuringRefresh()
+    scenarioDiscardDuringTakeSnapshot(), scenarioRelogBeforeResnapshotSave(), scenarioDiscardDuringFetch(), scenarioDiscardDuringRefresh(),
+    scenarioCooldownRejectedDiscards(), scenarioSnapshotRetakenAfterRefresh(), scenarioForeignDomainNotRestored()
   ]);
   for (const entries of boundary) for (const entry of entries) check(...entry);
 
@@ -935,7 +997,14 @@ const MUTATIONS = [
     from: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", true);',
     to: 'refresh check failed error=${errorName(error)}`);\n    return refreshSkipped("unavailable", false);', note: 'refreshSession catch의 unavailable을 스냅샷 폐기로' },
   { id: 'M10', fn: 'async function takeSnapshot(', from: 'if (generation !== snapshotGeneration) {', to: 'if (false) {',
-    note: 'takeSnapshot의 저장 직전 폐기 세대 확인 제거' }
+    note: 'takeSnapshot의 저장 직전 폐기 세대 확인 제거' },
+  // M11~M13은 2차 최종 검토가 찾은, M1~M10으로 못 죽이던 변형이다. 시나리오는 S32~S34.
+  { id: 'M11', fn: 'async function refreshSession(', from: 'return refreshSkipped("cooldown_rejected", false);', to: 'return refreshSkipped("cooldown_rejected", true);',
+    note: 'cooldown_rejected 반환의 keepSnapshot을 true로' },
+  { id: 'M12', fn: 'async function refreshSession(', from: 'if (ok) await takeSnapshot(config, generation);', to: '',
+    note: '갱신 성공 뒤 스냅샷 재저장 제거' },
+  { id: 'M13', fn: 'async function restoreFromSnapshot(', from: '!isDaouCookieDomain(item.domain) || ', to: '',
+    note: 'restoreFromSnapshot의 도메인 방어 제거' }
 ];
 
 function countOccurrences(text, needle) {
