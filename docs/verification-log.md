@@ -266,6 +266,8 @@
 | 2026-10-01 | F3 dd503e0: worker 스냅샷 저장에 폐기 세대 확인 추가(로그아웃 폐기와 저장이 겹치는 경로 차단)와 하네스 시나리오 | 위와 같음 | 통과(커밋됨) |
 | 2026-10-01 | F4 3aac6c0: 포장 테스트에 `windows.onRemoved`·`windows.onCreated` 금지를 상시 가드로 추가 | 위와 같음 | 통과(커밋됨) |
 | 2026-10-01 | F1 d22f71e: 기술 문서의 7.2.0 시절 현재형 서술 잔재 정정(§8·§9.1·§16·§26·§32·§33)과 회귀 테스트 | 위와 같음 | 통과(커밋됨) |
+| 2026-10-01 | H1 8cf80d5: JS 하네스 보강(못 죽이던 변형 M11~M13을 잡는 시나리오 S32~S34 추가) | 위와 같음 | 통과(커밋됨) |
+| 2026-10-01 | H2 이 커밋: 검증 기록·기술 문서·게이트 스크립트 주석의 하네스 수치를 H1 결과(시나리오 S1~S34, 통과 142, 변형 M1~M13)에 맞춤 | 위와 같음 | 통과 |
 
 ### 자동 검증 (7.3.0, T13에서 실제 실행한 값)
 
@@ -273,13 +275,13 @@
 - `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=75 fail=0`.
 - `bash .claude/scripts/gate.sh`: `GATE RESULT: pass`(문서 3개 변경 뒤 실행, `[ALWAYS] pass : bash .claude/scripts/gate-extra.sh`). `gate-extra.sh`를 따로 실행해 보면 기술 문서 HTML 점검과 위 하네스를 돈 뒤, `.md` 변경을 보고 `dotnet build -c Release -warnaserror`(경고 0개, 오류 0개)와 `dotnet test`(통과 800, 실패 0, 건너뜀 0)를 다시 돈다.
 
-### 자동 검증 (7.3.0, 수정 태스크 F2·F3·F4·F1 뒤 2026-10-01에 다시 실행한 값)
+### 자동 검증 (7.3.0, 수정 태스크 F2·F3·F4·F1·H1 뒤 2026-10-01에 다시 실행한 값)
 
-위 T13 시점 값은 그대로 두고, 수정 태스크 반영 뒤 명령을 다시 실행해 얻은 값을 덧붙인다. 기술 문서 §34의 수치(`pass=131`, `killed=10`)와 같다.
+위 T13 시점 값은 그대로 두고, 수정 태스크 반영 뒤 명령을 다시 실행해 얻은 값을 덧붙인다. 기술 문서 §34의 수치(`pass=142`, `killed=13`)와 같다.
 
 - `dotnet test DaouCalendarOverlay.sln -c Release -nologo`: 통과 806, 실패 0, 건너뜀 0(전체 806).
-- `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=131 fail=0`(시나리오 S1~S31).
-- `node tools/worker-mock-test.js --mutants`: 마지막 줄 `mutants killed=10 survived=0`(변형 M1~M10 전부 KILLED).
+- `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=142 fail=0`(시나리오 S1~S34).
+- `node tools/worker-mock-test.js --mutants`: 마지막 줄 `mutants killed=13 survived=0`(변형 M1~M13 전부 KILLED).
 
 ### 수동 확인 대기 (7.3.0)
 
