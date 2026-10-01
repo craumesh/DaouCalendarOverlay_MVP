@@ -855,6 +855,202 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("cookies 권한 없이", html, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 7.3.0 최종 검토 지적(2026-10-01): 옛 worker 파일 이름 <c>service-worker-v720.js</c>는 obsolete 목록·옛 파일 정리·
+    /// 버전 변경 이력 설명 문맥에서만 나올 수 있다. 현재 worker를 가리키는 곳(발췌 설명, 상수표 근거 등)에 남으면 실패한다.
+    /// 허용 문맥은 등장 위치 앞 160자·뒤 80자(태그를 벗기고 HTML 이스케이프를 푼 본문)에서 <see cref="V720AllowedContext"/>가 일치하는 경우다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_V720WorkerNameAppearsOnlyInObsoleteOrHistoryContext()
+    {
+        const string name = "service-worker-v720.js";
+        var html = File.ReadAllText(TechnicalDocPath);
+        var text = System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]+>", string.Empty));
+
+        var offenders = new List<string>();
+        var count = 0;
+        var index = text.IndexOf(name, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            count++;
+            var from = Math.Max(0, index - 160);
+            var to = Math.Min(text.Length, index + name.Length + 80);
+            var context = text.Substring(from, to - from);
+            var before = text.Substring(Math.Max(0, index - 600), index - Math.Max(0, index - 600));
+            if (!V720AllowedContext.IsMatch(context) && !ObsoleteArrayPrefix.IsMatch(before))
+            {
+                var show = Math.Max(0, index - 60);
+                offenders.Add(text.Substring(show, Math.Min(text.Length - show, 140)));
+            }
+            index = text.IndexOf(name, index + name.Length, StringComparison.Ordinal);
+        }
+
+        // 옛 이름이 obsolete 목록(§16.2 발췌)에 있어야 하므로 한 번도 안 나오면 오히려 문서가 잘못된 것이다.
+        Assert.True(count > 0, "문서에 obsolete 목록의 service-worker-v720.js가 없다.");
+        Assert.True(
+            offenders.Count == 0,
+            "service-worker-v720.js가 허용 문맥(obsolete 배열·목록, 옛 파일 정리, 직전 worker, 7.3.0 추가, 변경 이력) 밖에 있다: "
+            + string.Join(" || ", offenders));
+    }
+
+    // §16.2 발췌의 obsolete 배열 안: foreach (var obsolete in new[] { 뒤로 닫는 }가 나오기 전이다.
+    private static readonly Regex ObsoleteArrayPrefix = new(
+        @"foreach \(var obsolete in new\[\]\s*\{[^}]*$",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex V720AllowedContext = new(
+        @"obsolete|옛 (worker )?파일|직전 worker|7\.3\.0에서 (추가|넣었)|Chrome 확장 7\.2\.0\(service-worker-v720\.js\)",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// §16의 csproj 발췌가 실제 <c>DaouCalendarOverlay.csproj</c>의 Version·AssemblyVersion·FileVersion과
+    /// worker EmbeddedResource(Include, LogicalName)와 같은지 고정한다(7.3.0 최종 검토에서 7.2.0 발췌가 남아 있었다).
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_CsprojExcerptMatchesActualCsproj()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+        var build = System.Net.WebUtility.HtmlDecode(GetSectionHtml(html, "build"));
+        var csproj = File.ReadAllText(RepoLayout.Path("DaouCalendarOverlay", "DaouCalendarOverlay.csproj"));
+
+        var excerptStart = build.IndexOf("<Project Sdk=", StringComparison.Ordinal);
+        Assert.True(excerptStart >= 0, "§16 발췌에서 <Project Sdk=를 찾지 못했다.");
+        var excerptEnd = build.IndexOf("</Project>", excerptStart, StringComparison.Ordinal);
+        Assert.True(excerptEnd > excerptStart, "§16 발췌에서 </Project>를 찾지 못했다.");
+        var excerpt = build.Substring(excerptStart, excerptEnd - excerptStart);
+
+        foreach (var element in new[] { "Version", "AssemblyVersion", "FileVersion", "InformationalVersion" })
+        {
+            var pattern = new Regex($"<{element}>([^<]*)</{element}>", RegexOptions.CultureInvariant);
+            var actual = pattern.Match(csproj);
+            var documented = pattern.Match(excerpt);
+            Assert.True(actual.Success, $"csproj에서 <{element}>를 찾지 못했다.");
+            Assert.True(documented.Success, $"§16 csproj 발췌에서 <{element}>를 찾지 못했다.");
+            Assert.Equal(actual.Groups[1].Value, documented.Groups[1].Value);
+        }
+
+        var resourcePattern = new Regex(
+            "<EmbeddedResource Include=\"([^\"]+)\" LogicalName=\"([^\"]+)\"",
+            RegexOptions.CultureInvariant);
+        var actualResources = resourcePattern.Matches(csproj).Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
+        var documentedResources = resourcePattern.Matches(excerpt).Select(m => (m.Groups[1].Value, m.Groups[2].Value)).ToList();
+        Assert.NotEmpty(actualResources);
+        Assert.Equal(actualResources, documentedResources);
+    }
+
+    /// <summary>
+    /// 7.3.0 최종 검토 지적(2026-10-01): §16의 publish 결과 예시가 "현재 publish\DaouCalendarOverlay-7.2.0.exe"로 남아 있었다.
+    /// 문서에 나오는 EXE 파일 이름 예시(DaouCalendarOverlay-x.y.z.exe)는 모두 현재 버전을 가리키므로 csproj의 Version과 같아야 한다.
+    /// (옛 버전 EXE 이름을 역사 서술로 적어야 하면 이 테스트에 허용 문맥을 더한다.)
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_PublishExeExamplesMatchCsprojVersion()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+        var csproj = File.ReadAllText(RepoLayout.Path("DaouCalendarOverlay", "DaouCalendarOverlay.csproj"));
+        var version = Regex.Match(csproj, "<Version>([^<]*)</Version>", RegexOptions.CultureInvariant);
+        Assert.True(version.Success, "csproj에서 <Version>을 찾지 못했다.");
+
+        var examples = Regex.Matches(html, @"DaouCalendarOverlay-(\d+\.\d+\.\d+)\.exe", RegexOptions.CultureInvariant);
+        Assert.NotEmpty(examples);
+        Assert.All(examples, match => Assert.Equal(version.Groups[1].Value, match.Groups[1].Value));
+
+        var build = GetSectionHtml(html, "build");
+        Assert.Contains($@"publish\DaouCalendarOverlay-{version.Groups[1].Value}.exe", build, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 7.3.0 최종 검토 지적(2026-10-01): 7.2.0 시절의 "worker는 쿠키 값을 읽지도 넘기지도 않는다"와
+    /// "cookies 권한은 7.2.0에서 제거" 서술은 7.3.0의 현재 사실이 아니다. 태그를 벗긴 본문에도 없어야 한다.
+    /// 7.3.0 사실(조회 경로는 쿠키를 읽지 않고, cookies 권한으로 메모리 스냅샷에만 값을 둔다)은 §8이 싣는다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_NoStaleV720CookieStatements_AndAuthSectionDescribesSnapshot()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+        var text = System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]+>", string.Empty));
+
+        foreach (var stale in new[] { "worker는 쿠키 값을 읽지도 넘기지도 않는다", "cookies 권한은 7.2.0에서 제거" })
+        {
+            Assert.DoesNotContain(stale, html, StringComparison.Ordinal);
+            Assert.DoesNotContain(stale, text, StringComparison.Ordinal);
+        }
+
+        var auth = System.Net.WebUtility.HtmlDecode(
+            Regex.Replace(GetSectionHtml(html, "auth"), "<[^>]+>", string.Empty));
+        Assert.Contains("cookies 권한", auth, StringComparison.Ordinal);
+        Assert.Contains("storage.session", auth, StringComparison.Ordinal);
+        Assert.Contains("앱으로", auth, StringComparison.Ordinal);
+        Assert.Contains("폐기 세대", auth, StringComparison.Ordinal);
+        Assert.Contains("§6.4", auth, StringComparison.Ordinal);
+        Assert.Contains("§36", auth, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 7.3.0 최종 검토 지적(2026-10-01): <c>postRefresh</c>는 <c>redirect: "manual"</c>이라 3xx도 opaqueredirect(status 0)다.
+    /// refreshStatus 0은 "응답 없음"뿐 아니라 "리디렉션(opaqueredirect)"도 뜻한다고 §26·§27·§32·§33이 적어야 한다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_RefreshStatusZeroMeansNoResponseOrRedirect()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+
+        foreach (var id in new[] { "bridge-schema", "sequence", "api-contract", "diagnostics" })
+        {
+            var section = System.Net.WebUtility.HtmlDecode(
+                Regex.Replace(GetSectionHtml(html, id), "<[^>]+>", string.Empty));
+            Assert.Contains("응답 없음 또는 리디렉션", section, StringComparison.Ordinal);
+            Assert.Contains("opaqueredirect", section, StringComparison.Ordinal);
+        }
+
+        var glossary = System.Net.WebUtility.HtmlDecode(
+            Regex.Replace(GetSectionHtml(html, "glossary"), "<[^>]+>", string.Empty));
+        Assert.Contains("응답이 없거나 리디렉션(opaqueredirect)이면 0이다", glossary, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 7.3.0 2차 검토 지적(2026-10-01): §34.4가 7.2.0 시점의 구성과 총 건수에서 멈춰 있었다.
+    /// verification-log.md의 "### 수동 확인 대기" 절마다 "- "로 시작하는 줄을 세어 합계가 §34.4의 총 건수와 같고,
+    /// 7.3.0 절이 §34.4 목록에 들어 있으며 §34.5가 7.3.0 절 등록을 계획이 아닌 사실로 적는지 고정한다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_VerificationLogSummaryMatchesActualLog()
+    {
+        var html = File.ReadAllText(TechnicalDocPath);
+        var testing = System.Net.WebUtility.HtmlDecode(
+            Regex.Replace(GetSectionHtml(html, "testing"), "<[^>]+>", string.Empty));
+
+        var lines = File.ReadAllLines(RepoLayout.Path("docs", "verification-log.md"));
+        var total = 0;
+        var inPending = false;
+        var pendingSections = 0;
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("## ", StringComparison.Ordinal) || line.StartsWith("### ", StringComparison.Ordinal))
+            {
+                inPending = line.StartsWith("### 수동 확인 대기", StringComparison.Ordinal);
+                if (inPending)
+                {
+                    pendingSections++;
+                }
+
+                continue;
+            }
+
+            if (inPending && line.StartsWith("- ", StringComparison.Ordinal))
+            {
+                total++;
+            }
+        }
+
+        Assert.True(pendingSections >= 5, "verification-log.md에서 수동 확인 대기 절을 5개 이상 찾지 못했다.");
+        Assert.Contains($"총 {total}건이다(계산)", testing, StringComparison.Ordinal);
+        Assert.Contains("수동 확인 대기 (7.3.0)", testing, StringComparison.Ordinal);
+        Assert.Contains("R-A~R-G 7", testing, StringComparison.Ordinal);
+        Assert.DoesNotContain("7.3.0 절을 더해", testing, StringComparison.Ordinal);
+        Assert.DoesNotContain("결과를 적을 계획이다", testing, StringComparison.Ordinal);
+    }
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {
