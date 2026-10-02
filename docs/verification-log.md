@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | OS | Windows 11 Pro 10.0.26200 |
-| .NET SDK | 10.0.401 (프로젝트 TFM net8.0-windows) |
+| .NET SDK | 10.0.401 (프로젝트 TFM net10.0-windows, 7.3.0까지 net8.0-windows) |
 | 저장소 | `C:\Users\USER\Develop\DaouCalendarOverlay_MVP` (main) |
 | 기준 커밋 | `a046a1b` = 태그 `v7.0.0-asbuilt` |
 
@@ -297,3 +297,53 @@
 - R-F: RefreshToken 만료 — RefreshToken까지 만료된 세션에서 조회하면 `refreshState=rejected`가 남고 "Chrome의 DaouOffice 로그인이 필요합니다"가 보이며 30분 동안 갱신을 시도하지 않는지, 재로그인하면 회복하는지 확인 — 미확인(2026-10-01 기준): RefreshToken 자체의 수명은 아직 모른다. `refreshState=rejected` 경로와 재로그인 회복은 실환경에서 보지 못했다. 장기 관찰이 필요하다
 - R-G: 7.3.0 반영 때 권한 재승인 — 7.2.0 확장이 로드된 상태에서 7.3.0으로 확장을 새로고침할 때(manifest에 `cookies` 권한 추가) 재승인 대화상자나 확장 비활성화가 있는지 확인. 압축 해제 로드이고 `key`로 ID가 고정돼 없을 것으로 예상하나 추정임. 발생하면 확장 관리 화면에서 다시 켜야 하는지 기록 — 확인(2026-10-01, 사용자 보고): 확장 새로고침 때 경고나 "비활성화됨" 표시를 보지 못했다. 확장은 7.3.0으로 로드되어 동작한다(앱 로그의 `ver=7.3.0`). 화면 캡처 같은 별도 증거는 없다
 - R-H: 재부팅 뒤 오버레이 자동 시작(이 목록에 새로 더한 항목, 기술 문서 §34.5 표에는 없음) — 2026-09-30 08:50과 2026-10-01 09:00 부팅 두 번 모두 오버레이가 자동으로 시작되지 않았다(같은 부팅에서 카카오톡·Chrome·Edge 자동 실행은 시작됐다). 원인 미확인. 당시 시작 항목은 7.2.0 EXE를 가리켰던 것으로 보이나 그 시점의 실제 값은 확인하지 못했다. 2026-10-01 11:12~11:14에 사용자가 설정창에서 "Windows 시작 시 자동 실행"을 끄고 켜는 시험을 했다. 가설(미확인): 그 시험으로 시작 항목이 다시 만들어지며 시작 승인 상태가 정상화됐을 수 있다. 이 가설을 확인하는 시험은 하지 않았다 — 확인(2026-10-02, 1회 부팅): 사용자와 함께 확인했고 시각은 오버레이 앱 로그와 Windows 이벤트 기준이다. Windows 시스템 로그에 2026-10-01 18:36:15 종료 요청(이벤트 1074)이 있고, 2026-10-02 09:00:11에 탐색기가 시작됐다(로그온). 정식 7.3.0 EXE(`%LOCALAPPDATA%\Programs\DaouCalendarOverlay-7.3.0\DaouCalendarOverlay-7.3.0.exe`)가 09:00:33에 자동으로 시작됐다(앱 로그의 `startup` 줄 09:00:33.819, 부모 프로세스 탐색기). 같은 부팅에서 카카오톡 09:00:26, Chrome 09:00:29, Edge 09:00:35 자동 실행이 시작됐다. Windows 서비스(WMI)로 읽은 실제 값은 Run의 시작 항목이 7.3.0 EXE를 가리키고 시작 승인 상태가 "사용"이다. 부팅 직후 첫 조회(09:00:42)는 401 `ROUTE-0004`("Chrome의 DaouOffice 로그인이 필요합니다")였다. 재부팅으로 Chrome 세션 쿠키가 없어졌기 때문이며 로그인 전이라 정상이다(알려진 한계, R-E와 같은 계열). 확인하지 못한 것: 과거 두 번의 실패 원인(위 가설 포함). 한 번의 부팅만 확인했으므로 이후 부팅에서도 계속 뜨는지는 관찰이 더 필요하다
+
+## 7.3.1 (.NET 10 전환, 브랜치 net10-migration)
+
+### 자동 검증 (7.3.1, 2026-10-02)
+
+이 PC, 다른 빌드 병행 없음, .NET SDK 10.0.401, 게시 시점 커밋 `16a83cf`(작업 트리에 변경 없음)에서 실제 실행한 값이다. 저장소 밖 설계 문서의 게시 검증 P0~P5와 host 스모크 H1·H2를 따랐다. 실행 전 실행 중 프로세스는 `Get-Process DaouCalendarOverlay*`로 기록만 했다: 7.3.0 오버레이 1개(PID 20936, `%LOCALAPPDATA%\Programs\DaouCalendarOverlay-7.3.0\DaouCalendarOverlay-7.3.0.exe`)가 실행 중이었고 시작하거나 종료하지 않았다. 아래 스모크는 인자 없는 GUI 모드를 쓰지 않아 Run 값과 Native Messaging 등록(레지스트리)을 건드리지 않았다.
+
+- P0: `powershell -NoProfile -ExecutionPolicy Bypass -File publish.ps1 -DryRun`: exit 0. 출력에 `VERSION=7.3.1`, `ARTIFACT=DaouCalendarOverlay-7.3.1.exe`, `SYMBOLS_DIR=D:\Develop\DaouCalendarOverlay_MVP\publish\symbols`, `PROFILE=win-x64`, `SIGN=none`, `DRYRUN=1`이 나왔다.
+- P1: `powershell -NoProfile -ExecutionPolicy Bypass -File publish.ps1`: exit 0. `publish\DaouCalendarOverlay-7.3.1.exe`와 `publish\symbols\DaouCalendarOverlay.pdb`(80,932 bytes)가 생겼다. 코드 서명은 인증서 지문을 주지 않아 건너뛰었다(`Code signing skipped`).
+- P2: `dotnet publish DaouCalendarOverlay/DaouCalendarOverlay.csproj -p:PublishProfile=win-x64 -p:Version=7.3.1 -p:TreatWarningsAsErrors=true -o DaouCalendarOverlay/bin/p2-check`: exit 0, 출력에 경고 줄 없음. 출력 폴더는 gitignore 대상이고 `publish\`는 바뀌지 않았다.
+- P3(크기): `publish\DaouCalendarOverlay-7.3.1.exe` 75,897,256 bytes. 7.3.0 배포 EXE 72,099,811 bytes보다 3,797,445 bytes(약 +5.3%) 크다(계산). 원인은 .NET 10 런타임 포함이다. 허용 범위 70,000,000~80,000,000 bytes 안이고, 사전 시험값 75,897,250 bytes와는 6 bytes 차이다.
+- P4(VersionInfo): `FileVersion` 7.3.1.0, `ProductVersion` `7.3.1+16a83cf3c92c630c773129bd47c9268955d6a29c`(`7.3.1+`로 시작).
+- P5(deps.json): `DaouCalendarOverlay\bin\Release\net10.0-windows\win-x64\DaouCalendarOverlay.deps.json`에 `.NETCoreApp,Version=v10.0/win-x64`가 2줄 있다.
+- H1(host 스폰 시간, `tools\Measure-HostSpawn.ps1 -Iterations 20`, 워밍업 1회 제외 20회, 같은 세션에서 연달아 실행): net10(스모크 폴더 `%TEMP%\dco-smoke-7.3.1\`로 복사한 7.3.1 EXE)은 경과 중앙값 83.1 ms(최소 80.7, 평균 83.1, 최대 85.9), CPU 중앙값 78.1 ms. net8(7.3.0 배포 EXE)은 경과 중앙값 90.4 ms(최소 89.6, 평균 90.6, 최대 92.1), CPU 중앙값 93.8 ms. 두 실행 모두 전 회 exit 0이다. net10 중앙값은 net8의 약 0.92배(83.1 / 90.4, 계산)이고 기준(1.25배 이하, 1,000 ms 이하) 안이다.
+- H2(host 모드 getConfig 왕복): 스모크 폴더의 7.3.1 EXE를 host 인자(`chrome-extension://gkchgbpcbljkgabjcgjelacfkphcmhmi/ --parent-window=0`)로 실행하고 `{"type":"getConfig"}` 프레임 1개를 보내는 probe(저장소에 두지 않은 임시 스크립트)를 돌렸다. exit 0, 길이 접두 프레임 1개가 JSON으로 파싱됐고 host 프로세스 ExitCode는 0이다. 응답은 `ok:false`, `config:null`이고 오류 문구는 "Named Pipe 서버(PID 20936)가 Daou Calendar Overlay 실행 파일이 아니어서 요청을 전송하지 않았습니다."(PipePeerVerifier 거부)다. 경과 128.5 ms. 이 때는 7.3.0 오버레이가 실행 중이어서 오버레이 미실행일 때의 파이프 연결 실패(`ok:false`, 2.5~6 s)가 아니라 7.3.0 실행 중일 때의 거부 경로가 나왔다. host 로그 `host-20261002.log`에 다음 줄이 있다: `startup: DaouCalendarOverlay 7.3.1 (7.3.1+16a83cf3c92c630c773129bd47c9268955d6a29c) mode=host pid=20868`, `host: host 모드 시작 pid=20868`, `host: 요청 수신 type=getConfig`, `[WARN] host.pipe: 신뢰할 수 없는 파이프 서버: pid=20936, server=…\DaouCalendarOverlay-7.3.0.exe, self=…\dco-smoke-7.3.1\DaouCalendarOverlay-7.3.1.exe`, `host: 요청 완료 elapsed=36ms`.
+- `dotnet build DaouCalendarOverlay.sln -c Release -warnaserror -nologo -v q`: exit 0, 경고 0개, 오류 0개.
+- `dotnet test DaouCalendarOverlay.sln -c Release --no-build -nologo`: 통과 806, 실패 0, 건너뜀 0(전체 806, `net10.0`).
+- `node tools/worker-mock-test.js`: 마지막 줄 `summary pass=142 fail=0`.
+- `node tools/worker-mock-test.js --mutants`: 마지막 줄 `mutants killed=13 survived=0`(변형 13/13 KILLED).
+
+### 수동 확인 대기 (7.3.1)
+
+7.3.1 EXE를 이 PC에 배포한 뒤 사용자와 함께 확인할 항목이다. 2026-10-02 기준 모두 수행 전이다. 판정 기준은 설계 문서의 검증 전략(M1~M7, D-1~D-5)을 옮긴 것이다. 시작 전에 M0 백업을 만든다: `reg export HKCU\Software\Microsoft\Windows\CurrentVersion\Run %TEMP%\dco-run.reg`와 `reg export HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay %TEMP%\dco-nm.reg`를 실행하고(Edge 키가 있으면 같이 내보낸다), 그 시점의 Run 값과 Native Messaging manifest의 `path`를 적어 둔다. 수동 확인 중 settings.json과 캐시는 지우지 않는다. 확인 항목은 아래 10건이고, 7.3.0 EXE가 실행 중일 때 7.3.1 EXE를 인자 없이 실행하면 Run 값과 Native Messaging 등록이 7.3.1 경로로 바뀐다는 점에 주의한다.
+
+- M1 오버레이 시작 — 7.3.0을 트레이에서 종료하고 새 EXE를 `%LOCALAPPDATA%\Programs\DaouCalendarOverlay-7.3.1\`에 두고 실행한다. 30초 안에 다음을 모두 확인한다
+  - 오버레이 창이 표시되고, 첫 실행 설정창이 나오지 않으며(settings.json 호환), 캐시 일정이 표시된다
+  - 트레이 툴팁이 `Daou Calendar Overlay 7.3.1`이고 설정창 하단이 `버전 7.3.1 · 프로토콜 v2`다
+  - 로그 첫 줄이 `DaouCalendarOverlay 7.3.1 (7.3.1+<sha>) mode=overlay`다
+  - 화면 모양과 DPI가 7.3.0과 눈으로 봐서 차이가 없다
+- M2 확장 연결과 새로고침 — 확장이 7.3.0으로 로드된 상태에서 상태 표시줄에 `Chrome 확장 새로고침 필요 (7.3.0 → 7.3.1)`가 표시된다
+  - `chrome://extensions`에서 확장을 새로고침한다. 경고나 비활성화가 없어야 한다
+  - 트레이 "새로고침" 뒤 앱 로그에 `ver=7.3.1`과 `bridge.result … verdict=success`가 남는다(DaouOffice에 로그인된 상태여야 한다)
+- M3 Native Messaging host 모드와 NM path — M2 동안 `host-<날짜>.log`에 `7.3.1 … mode=host`와 `요청 완료` 줄이 있다
+  - Native Messaging manifest의 `path`가 새 EXE 경로와 같다
+- M4 시작 프로그램 Run 값과 토글 — `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v DaouCalendarOverlay`의 값이 `"<새 EXE 경로>"`다
+  - 설정창에서 자동 실행을 끄면 값이 사라지고, 켜면 다시 같은 값이 된다
+- M5 제거 경로(U5) — 오버레이 실행 중 `Start-Process <EXE> --uninstall -Wait -PassThru`: 안내 창이 뜨고 ExitCode가 2다
+  - 오버레이를 종료하고 같은 명령을 다시 실행한다. "계속"을 누르고 사용자 데이터는 "아니요"를 고른다. ExitCode 0이고 결과 창에 Run과 Chrome host(Edge는 있을 때) 항목이 나온다
+  - `reg query`로 해당 값과 키가 없고 `%LOCALAPPDATA%\DaouCalendarOverlay` 폴더는 남아 있다
+  - 이어서 새 EXE를 재실행해 M3·M4의 값이 복구되는지 확인한다(재실행으로 복구)
+- M6 M5 뒤 verdict=success — M5 뒤 트레이 새로고침 1회로 앱 로그에 `verdict=success`가 남는다
+- M7 재부팅 자동 시작(관찰 항목, 완료 판정에서 제외) — 다음 부팅 뒤 앱 로그 `startup` 줄의 버전이 7.3.1이고 부모 프로세스가 탐색기다. 완료 판정에는 넣지 않고 관찰로 기록한다
+- D-2 7.3.0 배포 폴더 삭제 — M1~M6이 통과하고 U3 승인을 받은 뒤에만 한다. 사전 조건 D-1 3가지를 모두 확인한다
+  - (1) `Get-Process DaouCalendarOverlay* | % Path` 중 `DaouCalendarOverlay-7.3.0` 경로가 0건이다
+  - (2) Run 값과 Chrome·Edge Native Messaging manifest의 `path`에 `DaouCalendarOverlay-7.3.0` 문자열이 0건이다(삭제 전에 실제 값을 다시 읽는다)
+  - (3) `publish\DaouCalendarOverlay-7.3.1.exe`가 존재한다
+  - 와일드카드 없이 `Remove-Item -LiteralPath "$env:LOCALAPPDATA\Programs\DaouCalendarOverlay-7.3.0" -Recurse`로 지우고 `Test-Path`가 False다. `%LOCALAPPDATA%\Programs\Common\`과 `%LOCALAPPDATA%\DaouCalendarOverlay\`는 지우지 않는다
+- D-4 저장소 bin·obj의 net8.0-windows 잔재 4곳 삭제(U6) — `DaouCalendarOverlay\bin\Release\net8.0-windows`, `DaouCalendarOverlay\obj\Release\net8.0-windows`, `tests\DaouCalendarOverlay.Tests\bin\Release\net8.0-windows`, `tests\DaouCalendarOverlay.Tests\obj\Release\net8.0-windows`를 `Remove-Item -LiteralPath … -Recurse`로 지운다
+  - 네 경로 모두 `Test-Path`가 False이고, 이어서 `dotnet build DaouCalendarOverlay.sln -c Release -warnaserror -nologo -v q`와 `dotnet test DaouCalendarOverlay.sln -c Release --no-build -nologo`가 통과한다
+- D-5 삭제 뒤 verdict=success — D-2 뒤 트레이 새로고침 1회로 `verdict=success`가 나온다. 삭제가 동작에 영향이 없음을 확인하는 단계다
