@@ -4,6 +4,14 @@
 WPF 앱(EXE)과 Chrome 확장은 같은 버전 번호를 씁니다. 네이티브 브리지 프로토콜 버전은 별도로 `NativeBridgeProtocol.ProtocolVersion` 으로 관리합니다(현재 v2, 파이프 이름 `DaouCalendarOverlay.NativeBridge.v8`).
 릴리스 이후에는 Chrome 확장 서비스 워커를 바꾸면 확장 버전을 반드시 올립니다(worker 파일명 `service-worker-v<버전>.js`, `ChromeExtensionInstaller` obsolete 목록, 패키징 테스트를 함께 갱신).
 
+## 7.3.1 - 2026-10-02
+
+### Changed
+- 대상 프레임워크를 `net10.0-windows`(.NET 10 LTS)로 바꿨습니다. .NET 8 지원이 2026-11-10에 끝나기 때문입니다. 동작 변경은 없습니다.
+- 개발 빌드(framework-dependent)를 실행하려면 .NET 10 데스크톱 런타임이 필요합니다. `publish.ps1`이 만드는 단일 EXE는 런타임을 포함하므로 따로 설치하지 않아도 됩니다.
+- Chrome 확장은 코드 변경 없이 버전만 7.3.1로 올렸습니다(`service-worker-v731.js`, 이전 `service-worker-v730.js`는 정리 대상입니다). EXE를 교체한 뒤에는 `chrome://extensions`에서 확장을 새로고침해야 하며, 새로고침하기 전에는 상태 표시줄에 `Chrome 확장 새로고침 필요 (7.3.0 → 7.3.1)`이 표시됩니다.
+- 네이티브 브리지 프로토콜 v2와 파이프 이름은 그대로입니다.
+
 ## 7.3.0 - 2026-09-30
 
 ### Added

@@ -1,4 +1,4 @@
-// DaouCalendarOverlay 확장 worker (7.3.0).
+// DaouCalendarOverlay 확장 worker (7.3.1).
 // - 알람마다 앱(native host)에 getConfig로 조회 지시를 받고, DaouOffice 일정 API를 직접 fetch해 postResult로 결과를 보낸다.
 //   조회와 토큰 갱신 요청의 쿠키는 브라우저가 붙인다(credentials: "include"). worker는 쿠키 헤더를 만들지 않는다.
 // - 세션 유지: 조회가 200이면 DaouOffice 세션 쿠키 스냅샷을 chrome.storage.session(메모리)에만 찍어 둔다. 디스크에는 두지 않는다.

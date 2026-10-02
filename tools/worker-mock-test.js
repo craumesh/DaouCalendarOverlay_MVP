@@ -1,4 +1,4 @@
-// 확장 worker(service-worker-v730.js)의 세션 유지·토큰 갱신 흐름을 가짜 chrome/fetch/시계로 돌려 보는 동작 테스트.
+// 확장 worker(service-worker-v731.js)의 세션 유지·토큰 갱신 흐름을 가짜 chrome/fetch/시계로 돌려 보는 동작 테스트.
 // 네트워크·브라우저·외부 패키지를 쓰지 않는다. 시나리오마다 새 vm 컨텍스트를 만든다.
 //
 // 실행: node tools/worker-mock-test.js [workerPath]
