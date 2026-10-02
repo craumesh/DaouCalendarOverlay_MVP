@@ -1,5 +1,7 @@
 # .NET 10 이전 시험 기록
 
+> **상태**: 이 문서는 7.1.0 시점(2026-09-23, 테스트 391건 기준)의 시험 기록이다. .NET 10 전환은 7.3.1에서 했다. 현재 사실은 기술 문서 §24.7과 `docs/verification-log.md`의 7.3.1 절에 있다. 아래 §1~§5는 당시 기록이므로 그대로 두고, §6 체크리스트만 전환 결과에 맞춰 갱신했다.
+
 작업 지시서 T2.7(.NET 10 이전 시험, Q5-b)의 측정 결과다. 측정은 작업 트리에서 두 csproj의 TFM만 임시로 바꿔 수행했고, 측정이 끝난 뒤 TFM은 `net8.0-windows`로 되돌렸다. 이 문서의 수치는 모두 아래 2절의 스크립트가 실제로 출력한 값이다.
 
 ## 1. 배경
@@ -71,12 +73,12 @@
 
 실제로 전환할 때 함께 바꾸거나 확인할 지점:
 
-- [ ] (a) 두 csproj의 `<TargetFramework>`: `DaouCalendarOverlay/DaouCalendarOverlay.csproj`, `tests/DaouCalendarOverlay.Tests/DaouCalendarOverlay.Tests.csproj`를 `net10.0-windows`로(테스트 프로젝트가 앱 프로젝트를 참조하므로 둘을 함께 바꿔야 빌드된다).
-- [ ] (b) `tests/DaouCalendarOverlay.Tests/TargetFrameworkGuardTests.cs`의 기대 문자열 `.NETCoreApp,Version=v8.0` → `.NETCoreApp,Version=v10.0`(메서드 이름 `*_TargetsNet8Windows`도 함께).
-- [ ] (c) README `## 요구 사항`의 "`.NET 8 SDK`" 표기. 같은 README의 `## 기술 스택` ".NET 8"과 `## 빌드`의 출력 폴더 `DaouCalendarOverlay\bin\Release\net8.0-windows\`도 함께.
-- [ ] (d) 기술 문서 §16 빌드·배포 구조의 csproj 발췌(`<TargetFramework>net8.0-windows</TargetFramework>`). 같은 문서의 §4 기술 스택, §24 개발 빌드 출력 경로, §19의 ".NET 8 지원 종료" 항목도 함께.
-- [ ] (e) `publish.ps1` 인자 확인: 현재 `publish.ps1`과 `Properties/PublishProfiles/win-x64.pubxml`에는 TFM이 없다(csproj 한 곳에서만 관리). 전환 후 `publish.ps1 -DryRun`과 실제 publish로 산출물명(`DaouCalendarOverlay-<버전>.exe`)·`publish\symbols\` PDB 분리가 그대로인지 확인한다.
-- [ ] (f) 자동 시작 EXE 교체 시 재게시 필요: 설치된 EXE는 새로 게시한 net10 EXE로 교체해야 한다(설치·업그레이드 절차: EXE 종료 → 교체 → 실행 → `chrome://extensions` 새로고침). Native Messaging manifest의 `path`는 오버레이 기동 때마다 현재 EXE 경로로 갱신되므로, 개발 빌드 경로가 `bin\Release\net8.0-windows\`에서 `bin\Release\net10.0-windows\`로 바뀌면 새 경로의 EXE로 오버레이를 한 번 실행해 등록을 갱신한다(갱신 전에는 Chrome이 옛 EXE를 띄우고, 서버 EXE 경로가 달라 동기화가 거부된다).
-- [ ] (g) `tools/Measure-HostSpawn.ps1` 도움말의 예시 경로 `bin\Release\net8.0-windows\`, `tools/net10-trial.ps1`의 기본값(`-BaselineTfm net8.0-windows`)과 가드 테스트 제외 필터.
-- [ ] (h) framework-dependent 개발 빌드를 실행하는 머신에는 .NET 10 Desktop Runtime이 필요하다(self-contained 릴리스 EXE는 불필요).
-- [ ] (i) `CHANGELOG.md`에 전환 릴리스 항목 추가.
+- [x] (a) 두 csproj의 `<TargetFramework>`: `DaouCalendarOverlay/DaouCalendarOverlay.csproj`, `tests/DaouCalendarOverlay.Tests/DaouCalendarOverlay.Tests.csproj`를 `net10.0-windows`로(테스트 프로젝트가 앱 프로젝트를 참조하므로 둘을 함께 바꿔야 빌드된다). (완료: T1, 커밋 `b1e5337`)
+- [x] (b) `tests/DaouCalendarOverlay.Tests/TargetFrameworkGuardTests.cs`의 기대 문자열 `.NETCoreApp,Version=v8.0` → `.NETCoreApp,Version=v10.0`(메서드 이름 `*_TargetsNet8Windows`도 함께). (완료: T1, 커밋 `b1e5337`)
+- [x] (c) README `## 요구 사항`의 "`.NET 8 SDK`" 표기. 같은 README의 `## 기술 스택` ".NET 8"과 `## 빌드`의 출력 폴더 `DaouCalendarOverlay\bin\Release\net8.0-windows\`도 함께. (완료: T5, 커밋 `07fba21`)
+- [x] (d) 기술 문서 §16 빌드·배포 구조의 csproj 발췌(`<TargetFramework>net8.0-windows</TargetFramework>`). 같은 문서의 §4 기술 스택, §24 개발 빌드 출력 경로, §19의 ".NET 8 지원 종료" 항목도 함께. (완료: T6·T7, 커밋 `e459030`·`253074c`. §24.7과 §34·§38은 T8 `0d306a0`)
+- [x] (e) `publish.ps1` 인자 확인: 현재 `publish.ps1`과 `Properties/PublishProfiles/win-x64.pubxml`에는 TFM이 없다(csproj 한 곳에서만 관리). 전환 후 `publish.ps1 -DryRun`과 실제 publish로 산출물명(`DaouCalendarOverlay-<버전>.exe`)·`publish\symbols\` PDB 분리가 그대로인지 확인한다. (완료: `docs/verification-log.md` 7.3.1 자동 검증의 P0·P1, 커밋 `2f14465`)
+- [ ] (f) 자동 시작 EXE 교체 시 재게시 필요: 설치된 EXE는 새로 게시한 net10 EXE로 교체해야 한다(설치·업그레이드 절차: EXE 종료 → 교체 → 실행 → `chrome://extensions` 새로고침). Native Messaging manifest의 `path`는 오버레이 기동 때마다 현재 EXE 경로로 갱신되므로, 개발 빌드 경로가 `bin\Release\net8.0-windows\`에서 `bin\Release\net10.0-windows\`로 바뀌면 새 경로의 EXE로 오버레이를 한 번 실행해 등록을 갱신한다(갱신 전에는 Chrome이 옛 EXE를 띄우고, 서버 EXE 경로가 달라 동기화가 거부된다). (수동 확인 대기: verification-log 수동 확인 대기 (7.3.1) M1·M3·M4)
+- [x] (g) `tools/Measure-HostSpawn.ps1` 도움말의 예시 경로 `bin\Release\net8.0-windows\`, `tools/net10-trial.ps1`의 기본값(`-BaselineTfm net8.0-windows`)과 가드 테스트 제외 필터. (완료: T9. 예시 경로와 런타임 표기를 고쳤고, `net10-trial.ps1`은 코드를 바꾸지 않고 주석에 중단 조건과 `-BaselineTfm net10.0-windows -TrialTfm <비교 TFM>` 사용법을 더했다)
+- [x] (h) framework-dependent 개발 빌드를 실행하는 머신에는 .NET 10 Desktop Runtime이 필요하다(self-contained 릴리스 EXE는 불필요). (완료: README와 기술 문서 §23·§24.1, 커밋 `07fba21`·`253074c`)
+- [x] (i) `CHANGELOG.md`에 전환 릴리스 항목 추가. (완료: `CHANGELOG.md` 7.3.1 항목, 커밋 `9defa88`)

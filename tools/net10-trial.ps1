@@ -8,6 +8,12 @@ $ErrorActionPreference = 'Stop'
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\net10-trial.ps1 -HostRuns 5
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\net10-trial.ps1 -SkipHostProbe
 #
+# 7.3.1 이후 사용 주의(코드와 기본값은 7.1.0 시점 그대로다):
+#   - 7.3.1부터 저장소 TFM이 net10.0-windows이므로, 기본값(-BaselineTfm net8.0-windows)으로 실행하면
+#     아래 baseline 확인(약 446행)에서 "현재 TargetFramework가 ...입니다(기대: ...)" 오류로 의도적으로 중단한다(csproj는 바꾸지 않는다).
+#   - 다른 TFM과 비교하려면 -BaselineTfm net10.0-windows -TrialTfm <비교 TFM> 을 준다.
+#   - dotnet test의 제외 필터에 있는 TargetFrameworkGuardTests는 이제 .NET 10 고정 가드다(아래 필터 주석 참고).
+#
 # 하는 일:
 #   1. 두 csproj(앱, 테스트)의 <TargetFramework>만 $BaselineTfm, $TrialTfm 순서로 바꿔 가며 시나리오마다
 #      Release 빌드, self-contained single-file publish, dotnet test, host 모드 stdio 왕복을 측정한다.
@@ -37,6 +43,8 @@ $tailLineCount = 20
 # TargetFrameworkGuardTests는 두 어셈블리가 .NETCoreApp v8.0을 겨냥하는지 단언하므로 net10 시나리오에서 설계상 실패한다.
 # 그대로 두면 net10 열의 테스트 결과가 항상 실패가 되어 비교가 왜곡되므로, 이 스크립트의 dotnet test에서만
 # 두 시나리오에 똑같이 제외한다. 필터 없는 일반 dotnet test에서는 항상 실행된다.
+# (7.3.1 이후) 위 설명의 "v8.0 단언"은 7.1.0 시점 기준이다. 지금 TargetFrameworkGuardTests는 .NET 10 고정 가드이므로
+# 기본값(baseline net8.0-windows)으로는 baseline 검사에서 먼저 중단하고, 비교하려면 -BaselineTfm net10.0-windows -TrialTfm <비교 TFM>을 준다.
 # PowerShell이 '!'를 해석하지 않도록 작은따옴표로 감싼다.
 $testFilter = 'FullyQualifiedName!~TargetFrameworkGuardTests'
 $testNote = 'TFM 가드 테스트 제외'
