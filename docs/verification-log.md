@@ -319,8 +319,11 @@
 
 ### 수동 확인 대기 (7.3.1)
 
-7.3.1 EXE를 이 PC에 배포한 뒤 사용자와 함께 확인할 항목이다. 2026-10-02 기준 모두 수행 전이다. 판정 기준은 설계 문서의 검증 전략(M1~M7, D-1~D-5)을 옮긴 것이다. 시작 전에 M0 백업을 만든다: `reg export HKCU\Software\Microsoft\Windows\CurrentVersion\Run %TEMP%\dco-run.reg`와 `reg export HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay %TEMP%\dco-nm.reg`를 실행하고(Edge 키가 있으면 같이 내보낸다), 그 시점의 Run 값과 Native Messaging manifest의 `path`를 적어 둔다. 수동 확인 중 settings.json과 캐시는 지우지 않는다. 확인 항목은 아래 10건이고, 7.3.0 EXE가 실행 중일 때 7.3.1 EXE를 인자 없이 실행하면 Run 값과 Native Messaging 등록이 7.3.1 경로로 바뀐다는 점에 주의한다.
+7.3.1 EXE를 이 PC에 배포한 뒤 사용자와 함께 확인할 항목이다. 2026-10-02 기준 모두 수행 전이다. 판정 기준은 설계 문서의 검증 전략(M1~M7, D-1~D-5)을 옮긴 것이다. 시작 전에 M0 백업을 만든다: `reg export HKCU\Software\Microsoft\Windows\CurrentVersion\Run %TEMP%\dco-run.reg`와 `reg export HKCU\Software\Google\Chrome\NativeMessagingHosts\com.daou.calendar_overlay %TEMP%\dco-nm.reg`를 실행하고(Edge 키가 있으면 같이 내보낸다), 그 시점의 Run 값과 Native Messaging manifest의 `path`를 적어 둔다. 수동 확인 중 settings.json과 캐시는 지우지 않는다. 확인 항목은 아래 11건이다. 7.3.0이 실행 중이면 7.3.1 EXE는 기존 창을 활성화하고 바로 종료하며 Run 값과 NM 등록을 바꾸지 않는다. 반드시 7.3.0을 먼저 종료한다(근거: `App.xaml.cs` 44~51행에서 `SingleInstanceService.TryAcquirePrimary`가 실패하면 `NotifyPrimaryAsync`를 부르고 바로 `Shutdown`하므로 `TryEnsureNativeHostRegistered`와 Run 기록까지 가지 않는다. 뮤텍스 이름은 버전과 무관한 `Local\DaouCalendarOverlay.Singleton`이다. `SingleInstanceService.cs` 9행).
 
+- H2-b 오버레이 미실행 상태의 host 왕복(2,500 ms 파이프 타임아웃 경로. 전환 전 확인 (2)) — M1 절차 중 7.3.0을 종료한 직후, 7.3.1 GUI를 실행하기 전에 수행한다. `%TEMP%\dco-smoke-7.3.1\probe-getconfig.ps1`을 스모크 EXE(`-ExePath %TEMP%\dco-smoke-7.3.1\DaouCalendarOverlay-7.3.1.exe`)로 실행한다. 레지스트리를 바꾸지 않는다
+  - 판정: 응답이 `ok:false`이고 경과가 2.5~6초이며, 같은 날짜의 `host-<날짜>.log`에 `[WARN] host.pipe: 파이프 연결 실패`와 `요청 완료` 줄이 있다
+  - 배경: 위 자동 검증 H2는 7.3.0 오버레이가 실행 중이어서 PipePeerVerifier 거부 경로만 지났다. 오버레이를 끈 채 Chrome이 30초마다 host를 띄우는 상황은 상시로 일어나므로, 이 오류 경로(NamedPipe 연결 타임아웃 → `ok:false`, "파이프 연결 실패")는 새 런타임에서 따로 확인해야 한다
 - M1 오버레이 시작 — 7.3.0을 트레이에서 종료하고 새 EXE를 `%LOCALAPPDATA%\Programs\DaouCalendarOverlay-7.3.1\`에 두고 실행한다. 30초 안에 다음을 모두 확인한다
   - 오버레이 창이 표시되고, 첫 실행 설정창이 나오지 않으며(settings.json 호환), 캐시 일정이 표시된다
   - 트레이 툴팁이 `Daou Calendar Overlay 7.3.1`이고 설정창 하단이 `버전 7.3.1 · 프로토콜 v2`다
