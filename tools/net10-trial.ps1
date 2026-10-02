@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 # 7.3.1 이후 사용 주의(코드와 기본값은 7.1.0 시점 그대로다):
 #   - 7.3.1부터 저장소 TFM이 net10.0-windows이므로, 기본값(-BaselineTfm net8.0-windows)으로 실행하면
 #     아래 baseline 확인(약 446행)에서 "현재 TargetFramework가 ...입니다(기대: ...)" 오류로 의도적으로 중단한다(csproj는 바꾸지 않는다).
+#     이 경우 메시지의 "이전 측정이 중단됐다면 ...\csproj-backup의 원본 사본으로 되돌린 뒤 다시 실행하세요" 안내는 따르지 않는다.
+#     OutRoot에 7.1.0 시점의 옛 백업이 남아 있어도 그대로 복원하지 않는다(현재 TFM net10.0-windows가 정상이다). 즉 백업 복원 안내는 따르지 않는다.
 #   - 다른 TFM과 비교하려면 -BaselineTfm net10.0-windows -TrialTfm <비교 TFM> 을 준다.
 #   - dotnet test의 제외 필터에 있는 TargetFrameworkGuardTests는 이제 .NET 10 고정 가드다(아래 필터 주석 참고).
 #
