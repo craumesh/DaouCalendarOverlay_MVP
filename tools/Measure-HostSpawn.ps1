@@ -14,9 +14,9 @@
     own log directory (%LOCALAPPDATA%\DaouCalendarOverlay\logs).
 
 .EXAMPLE
-    .\tools\Measure-HostSpawn.ps1 -ExePath .\DaouCalendarOverlay\bin\Release\net8.0-windows\DaouCalendarOverlay.exe -Label dev
+    .\tools\Measure-HostSpawn.ps1 -ExePath .\DaouCalendarOverlay\bin\Release\net10.0-windows\DaouCalendarOverlay.exe -Label dev
     Development build (dotnet build -c Release). Framework-dependent since T2.6, so the output no longer
-    has a win-x64 subfolder and the .NET 8 desktop runtime must be installed.
+    has a win-x64 subfolder and the .NET 10 desktop runtime must be installed.
 
 .EXAMPLE
     .\tools\Measure-HostSpawn.ps1 -ExePath .\publish\DaouCalendarOverlay-7.1.0.exe -Label release

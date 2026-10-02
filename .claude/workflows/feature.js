@@ -70,7 +70,7 @@ const RATIO_TARGET = 0.3        // 구현 Opus 비율 목표
 const RATIO_MAX = 0.4           // 구현 Opus 비율 허용 최대 (넘으면 결과에 표시)
 
 // 변경되면 저위험으로 보지 않는 경로. 태그를 빠뜨려도 실제로 바뀐 파일로 걸러낸다. 프로젝트 구조에 맞게 고칠 것.
-// DaouCalendarOverlay(.NET 8 WPF + Chrome MV3 확장 + Native Messaging/Named Pipe)에 맞춘 목록이다.
+// DaouCalendarOverlay(.NET 10 WPF + Chrome MV3 확장 + Native Messaging/Named Pipe)에 맞춘 목록이다.
 const RISK_PATHS = [
   // 쿠키·세션·권한, 파이프 신원 확인, BaseUrl 검증, 확장 manifest(권한·host_permissions·key)
   { tag: 'security', re: /(auth|crypt|cipher|secur|permission|credential|secret|token|session|cookie|PipePeerVerifier|NativeHostRelay|BaseUrlPolicy|ChromeExtension\/manifest\.json$)/i },

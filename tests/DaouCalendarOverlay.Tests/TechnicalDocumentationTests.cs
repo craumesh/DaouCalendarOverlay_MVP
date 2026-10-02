@@ -610,7 +610,7 @@ public sealed class TechnicalDocumentationTests
 
         // §37: 버전 이력과 프로토콜 유지
         var versioning = Section("versioning");
-        Assert.Contains("7.3.0", versioning, StringComparison.Ordinal);
+        Assert.Contains("7.3.1", versioning, StringComparison.Ordinal);
         Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", versioning, StringComparison.Ordinal);
 
         // §39: 용어
@@ -700,12 +700,12 @@ public sealed class TechnicalDocumentationTests
     }
 
     /// <summary>
-    /// 7.3.0: §16.2의 Installer 발췌가 v730 worker를 <c>Files</c>에, v720 worker를 obsolete 목록에 싣고,
+    /// 7.3.1: §16.2의 Installer 발췌가 v731 worker를 <c>Files</c>에, v720·v730 worker를 obsolete 목록에 싣고,
     /// §10이 <c>cookies.onChanged</c> 트리거와 스냅샷 저장소 키를 말하며, §13·§15·§17이 세션 유지 사실을 반영하는지 고정한다.
     /// 발췌는 HTML 이스케이프를 풀어 실제 소스 형태로 비교한다.
     /// </summary>
     [Fact]
-    public void TechnicalDoc_InstallerExcerptListsV730Worker()
+    public void TechnicalDoc_InstallerExcerptListsV731Worker()
     {
         var html = File.ReadAllText(TechnicalDocPath);
 
@@ -720,12 +720,14 @@ public sealed class TechnicalDocumentationTests
         var obsoleteExcerpt = build.Substring(obsoleteStart, obsoleteEnd - obsoleteStart);
 
         Assert.Contains(
-            "(\"DaouCalendarOverlay.ChromeExtension.service-worker-v730.js\", \"service-worker-v730.js\")",
+            "(\"DaouCalendarOverlay.ChromeExtension.service-worker-v731.js\", \"service-worker-v731.js\")",
             filesExcerpt,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v730.js", filesExcerpt, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", filesExcerpt, StringComparison.Ordinal);
         Assert.Contains("\"service-worker-v720.js\"", obsoleteExcerpt, StringComparison.Ordinal);
-        Assert.Contains("public const string ExpectedExtensionVersion = \"7.3.0\";", build, StringComparison.Ordinal);
+        Assert.Contains("\"service-worker-v730.js\"", obsoleteExcerpt, StringComparison.Ordinal);
+        Assert.Contains("public const string ExpectedExtensionVersion = \"7.3.1\";", build, StringComparison.Ordinal);
 
         var sync = GetSectionHtml(html, "sync");
         Assert.Contains("cookies.onChanged", sync, StringComparison.Ordinal);
@@ -740,7 +742,8 @@ public sealed class TechnicalDocumentationTests
         Assert.Contains("인증 문구 4종", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("인증 문구 3종", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("기대 버전은 7.2.0", sync, StringComparison.Ordinal);
-        Assert.Contains("기대 버전은 7.3.0", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("기대 버전은 7.3.0", sync, StringComparison.Ordinal);
+        Assert.Contains("기대 버전은 7.3.1", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("7.2.0 worker의", sync, StringComparison.Ordinal);
         Assert.Contains("SYNC_BUDGET_MS = 40000", sync, StringComparison.Ordinal);
         // §10.2 버전 불일치 예시는 현재 기대 버전(ExpectedExtensionVersion)을 쓴다.
@@ -752,7 +755,8 @@ public sealed class TechnicalDocumentationTests
 
         var storage = GetSectionHtml(html, "storage");
         Assert.Contains("daouSessionSnapshot", storage, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay-7.3.0.exe", storage, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay-7.3.1.exe", storage, StringComparison.Ordinal);
+        Assert.DoesNotContain("DaouCalendarOverlay-7.3.0.exe", storage, StringComparison.Ordinal);
         Assert.DoesNotContain("DaouCalendarOverlay-7.2.0.exe", storage, StringComparison.Ordinal);
 
         var security = GetSectionHtml(html, "security");
@@ -761,7 +765,8 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("확장에 <code class=\"inline\">cookies</code> 권한이 없고", security, StringComparison.Ordinal);
 
         var files = GetSectionHtml(html, "files");
-        Assert.Contains("service-worker-v730.js", files, StringComparison.Ordinal);
+        Assert.Contains("service-worker-v731.js", files, StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v730.js", files, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", files, StringComparison.Ordinal);
         Assert.Contains("worker-mock-test.js", files, StringComparison.Ordinal);
         Assert.Contains("check-html.js", files, StringComparison.Ordinal);
@@ -769,10 +774,10 @@ public sealed class TechnicalDocumentationTests
 
     /// <summary>
     /// 7.3.0: §20 상수표가 worker 시간 상수(예산·갱신·쿨다운·탭 양보·복원)를 싣고, §22·§23이 7.3.0 기준으로 서술하며,
-    /// §24.5 체크리스트의 현재값이 v730 worker인지 고정한다. 프로토콜·lease 상수는 바뀌지 않았다는 서술도 확인한다.
+    /// 7.3.1: §24.5 체크리스트의 현재값이 v731 worker인지 고정한다. 프로토콜·lease 상수는 바뀌지 않았다는 서술도 확인한다.
     /// </summary>
     [Fact]
-    public void TechnicalDoc_ConstantsAndReleaseChecklistReflectV730()
+    public void TechnicalDoc_ConstantsAndReleaseChecklistReflectV731()
     {
         var html = File.ReadAllText(TechnicalDocPath);
 
@@ -792,19 +797,21 @@ public sealed class TechnicalDocumentationTests
 
         Assert.Contains("FetchLeaseSeconds", appendix, StringComparison.Ordinal);
         Assert.Contains("ResultLeaseSeconds", appendix, StringComparison.Ordinal);
-        Assert.Contains("기대 확장 버전</td><td>7.3.0", appendix, StringComparison.Ordinal);
+        Assert.Contains("기대 확장 버전</td><td>7.3.1", appendix, StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v730.js", appendix, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", appendix, StringComparison.Ordinal);
 
         var browserMatrix = GetSectionHtml(html, "browser-matrix");
-        Assert.Contains("현재 빌드(v7.3.0)", browserMatrix, StringComparison.Ordinal);
+        Assert.Contains("현재 빌드(v7.3.1)", browserMatrix, StringComparison.Ordinal);
         Assert.DoesNotContain("v7.2.0", browserMatrix, StringComparison.Ordinal);
         Assert.Contains("R-E", browserMatrix, StringComparison.Ordinal);
 
         var release = GetSectionHtml(html, "release");
-        Assert.Contains("service-worker-v730.js", release, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v730.js", release, StringComparison.Ordinal);
+        Assert.Contains("service-worker-v731.js", release, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v731.js", release, StringComparison.Ordinal);
         Assert.Contains("worker-mock-test.js", release, StringComparison.Ordinal);
         Assert.DoesNotContain("-Version 7.2.0", release, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Version 7.3.0", release, StringComparison.Ordinal);
     }
 
     /// <summary>

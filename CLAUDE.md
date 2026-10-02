@@ -112,7 +112,7 @@
 
 ## 이 프로젝트에 맞춘 부분 (DaouCalendarOverlay)
 
-위 규칙은 범용 키트(claude-orchestration-starter)에서 왔다. 이 절은 .NET 8 WPF 오버레이, Chrome MV3 확장, Native Messaging/Named Pipe로 된 이 저장소에 맞춘 보충이다. 위 규칙과 충돌하면 위 규칙이 우선이다.
+위 규칙은 범용 키트(claude-orchestration-starter)에서 왔다. 이 절은 .NET 10 WPF 오버레이, Chrome MV3 확장, Native Messaging/Named Pipe로 된 이 저장소에 맞춘 보충이다. 위 규칙과 충돌하면 위 규칙이 우선이다.
 
 - **tier=opus에 해당하는 이 프로젝트의 영역.** 위의 "조용한 오류 영역"과 "되돌리기 비싼 결정"은 여기서 다음을 뜻한다.
   - 브리지 프로토콜: getConfig/postResult 스키마, `ProtocolVersion`, 파이프 이름
