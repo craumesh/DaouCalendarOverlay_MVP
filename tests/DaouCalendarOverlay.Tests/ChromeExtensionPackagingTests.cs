@@ -10,7 +10,7 @@ namespace DaouCalendarOverlay.Tests;
 public sealed class ChromeExtensionPackagingTests
 {
     private const string ManifestResource = "DaouCalendarOverlay.ChromeExtension.manifest.json";
-    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v730.js";
+    private const string WorkerResource = "DaouCalendarOverlay.ChromeExtension.service-worker-v731.js";
 
     private static string ReadResource(string resourceName)
     {
@@ -66,7 +66,7 @@ public sealed class ChromeExtensionPackagingTests
         var hostPermissions = root.GetProperty("host_permissions").EnumerateArray().Select(p => p.GetString()).ToArray();
         Assert.Contains("https://*.daouoffice.com/*", hostPermissions);
 
-        Assert.Equal("service-worker-v730.js", root.GetProperty("background").GetProperty("service_worker").GetString());
+        Assert.Equal("service-worker-v731.js", root.GetProperty("background").GetProperty("service_worker").GetString());
 
         Assert.DoesNotContain("gkchgbpcbljkgabjcgjelacfkphcmhmi", manifestText);
         Assert.Contains("\"key\"", manifestText);
