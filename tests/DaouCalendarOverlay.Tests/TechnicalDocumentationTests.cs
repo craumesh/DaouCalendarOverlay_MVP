@@ -1074,7 +1074,9 @@ public sealed class TechnicalDocumentationTests
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void EndCardDrag(bool cancel)")]
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ClampToVisibleWorkArea()")]
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialDisplayMode(bool minimized)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialPlacement()")]
     [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static PixelRect ClampWindowToWorkArea(PixelRect window, PixelRect work)")]
+    [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static CardPlacement PlanExpandedPlacement(PixelRect window, PixelRect work, CanvasMetrics m)")]
     public void TechnicalDoc_LayoutExcerptsMatchCurrentSource(string relativeSourcePath, string signature)
     {
         const string indent = "    ";
