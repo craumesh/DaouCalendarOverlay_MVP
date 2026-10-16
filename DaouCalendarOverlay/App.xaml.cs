@@ -369,7 +369,15 @@ public partial class App : WpfApplication
         if (dialog.ShowDialog() != true)
             return;
 
+        // 설정창은 열 때의 복제본을 돌려준다. 대화 상자가 열린 동안 바뀐 최소화 상태와 그 상태의 창 위치를
+        // 그 복제본으로 되돌리지 않도록, 대입 직전의 현재 값을 결과에 다시 넣는다(설정창은 이 세 값을 다루지 않는다).
+        var overlayMinimized = _settings.OverlayMinimized;
+        var left = _settings.Left;
+        var top = _settings.Top;
         _settings = dialog.Result;
+        _settings.OverlayMinimized = overlayMinimized;
+        _settings.Left = left;
+        _settings.Top = top;
         _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(_settings.RefreshMinutes);
         _settings.HiddenCalendarIds = _settings.HiddenCalendarIds
             .Where(id => _settings.CalendarIds.Contains(id, StringComparer.Ordinal))
@@ -426,13 +434,22 @@ public partial class App : WpfApplication
             return;
 
         if (_overlayWindow.IsVisible)
-            _overlayWindow.Hide();
+            _overlayWindow.HideOverlay();
         else
             ActivateOverlay();
     }
 
     public async Task SaveWindowBoundsAsync(double left, double top)
     {
+        _settings.Left = left;
+        _settings.Top = top;
+        await SaveSettingsAsync();
+    }
+
+    /// <summary>최소화 상태와 그 상태의 창 위치를 한 번의 SaveSettingsAsync로 저장한다. ApplySettings는 부르지 않는다.</summary>
+    public async Task SaveOverlayLayoutAsync(bool minimized, double left, double top)
+    {
+        _settings.OverlayMinimized = minimized;
         _settings.Left = left;
         _settings.Top = top;
         await SaveSettingsAsync();

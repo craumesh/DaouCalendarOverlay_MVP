@@ -28,8 +28,19 @@ public static class OverlayShortcutPolicy
         bool filterFocused,
         bool filterHasText,
         bool eventDetailsVisible,
-        bool dayListVisible)
+        bool dayListVisible,
+        bool miniBarMode = false)
     {
+        if (miniBarMode)
+        {
+            // 막대 모드: 달 이동 키는 막지 않으면 보이지 않는 달이 바뀌므로 None.
+            // 그 밖의 키는 검색창 상태를 무시(포커스·검색어 없음으로 강제)하고 기존 규칙을 그대로 쓴다.
+            if (key is Key.PageUp or Key.PageDown or Key.Home)
+                return OverlayShortcutAction.None;
+
+            return Resolve(key, modifiers, false, false, eventDetailsVisible, dayListVisible);
+        }
+
         if (key == Key.F5)
             return OverlayShortcutAction.Refresh;
 

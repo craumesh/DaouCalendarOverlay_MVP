@@ -35,7 +35,7 @@ function Get-ProjectVersion([string]$ProjectPath) {
         }
     }
 
-    return "7.3.1"
+    return "7.4.0"
 }
 
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments) {

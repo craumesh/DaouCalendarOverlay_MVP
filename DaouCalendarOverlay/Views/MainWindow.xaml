@@ -307,557 +307,645 @@
         </ContextMenu>
     </Window.ContextMenu>
 
-    <Border x:Name="RootChrome"
-            Margin="7"
-            Background="#FF1A1C21"
-            BorderBrush="#36FFFFFF"
-            BorderThickness="1"
-            CornerRadius="16"
-            Padding="8">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+    <Grid x:Name="WindowLayout">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="AttachAboveRow" Height="0"/>
+            <RowDefinition x:Name="CardRow" Height="*"/>
+            <RowDefinition x:Name="AttachBelowRow" Height="0"/>
+        </Grid.RowDefinitions>
 
-            <!-- 실 배경은 RootChrome 한 겹만 사용한다.
-                 이전에는 RootChrome + BackgroundLayer가 겹쳐져 콘텐츠 영역만 더 진하게 보여
-                 padding 영역과 색상이 달라 보였다. BackgroundLayer는 호환용 이름만 유지한다. -->
-            <Border x:Name="BackgroundLayer"
-                    Grid.Row="0" Grid.RowSpan="4"
-                    Panel.ZIndex="-10"
-                    Background="Transparent"
-                    CornerRadius="15"/>
+        <Border x:Name="RootChrome"
+                Grid.Row="1"
+                Margin="7"
+                Background="#FF1A1C21"
+                BorderBrush="#36FFFFFF"
+                BorderThickness="1"
+                CornerRadius="16"
+                Padding="8">
+            <Grid>
+                <Grid x:Name="ExpandedContent">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="0,0,0,6">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+                    <!-- 실 배경은 RootChrome 한 겹만 사용한다.
+                         이전에는 RootChrome + BackgroundLayer가 겹쳐져 콘텐츠 영역만 더 진하게 보여
+                         padding 영역과 색상이 달라 보였다. BackgroundLayer는 호환용 이름만 유지한다. -->
+                    <Border x:Name="BackgroundLayer"
+                            Grid.Row="0" Grid.RowSpan="4"
+                            Panel.ZIndex="-10"
+                            Background="Transparent"
+                            CornerRadius="15"/>
 
-                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="PrevMonth_Click" ToolTip="이전 달 (Page Up)">
-                        <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 6,1 L 1,6 L 6,11"/>
-                    </Button>
-                    <Button Content="이번달" Width="48" Style="{StaticResource TopHeaderButtonStyle}" Click="Today_Click" ToolTip="이번달 (Home)"/>
-                    <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="NextMonth_Click" ToolTip="다음 달 (Page Down)">
-                        <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 1,1 L 6,6 L 1,11"/>
-                    </Button>
-                </StackPanel>
-
-                <TextBlock Grid.Row="0" Grid.Column="1"
-                           Text="{Binding MonthTitle}"
-                           Foreground="#F8F8FA"
-                           FontSize="14"
-                           FontWeight="SemiBold"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
-
-                <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="↻" Width="24" ToolTip="새로고침 (F5)" Style="{StaticResource TopHeaderButtonStyle}" Click="Refresh_Click" FontSize="15"/>
-                    <Button Content="⚙" Width="24" ToolTip="설정" Style="{StaticResource TopHeaderButtonStyle}" Click="Settings_Click" FontSize="11.5"/>
-                    <Button Content="—" Width="24" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
-                </StackPanel>
-
-                <!-- 날짜/시간과 필터를 한 줄의 좌/우 절반에 배치하여 세로 공간을 줄인다. -->
-                <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,4,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="5"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="4,2">
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock x:Name="TodayDateText"
-                                       Foreground="#E7EAF0"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       LineHeight="16"
-                                       TextAlignment="Center"/>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,1,0,0">
-                                <TextBlock x:Name="TodayWeekdayText"
-                                           Foreground="#AFB5C0"
-                                           FontSize="11.5"
-                                           FontWeight="SemiBold"
-                                           LineHeight="15"/>
-                                <TextBlock Text="  " FontSize="11.5"/>
-                                <TextBlock x:Name="CurrentTimeText"
-                                           Foreground="#F5F7FA"
-                                           FontSize="11.5"
-                                           FontWeight="Bold"
-                                           LineHeight="15"/>
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="2" x:Name="FilterPanel" Tag="NoDrag" Background="#0BFFFFFF" CornerRadius="7" Padding="3">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="21"/>
-                                <RowDefinition Height="21"/>
-                            </Grid.RowDefinitions>
-                            <Grid Grid.Row="0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="47"/>
-                                </Grid.ColumnDefinitions>
-                                <ComboBox x:Name="FilterFieldCombo"
-                                          Grid.Column="0"
-                                          Height="21"
-                                          Margin="0,0,4,0"
-                                          Style="{StaticResource FilterComboBoxStyle}"
-                                          SelectedIndex="0"
-                                          SelectedValuePath="Tag"
-                                          SelectionChanged="FilterCriteria_Changed"
-                                          ToolTip="검색 대상">
-                                    <ComboBoxItem Content="제목" Tag="Title"/>
-                                    <ComboBoxItem Content="소유/작성" Tag="Owner"/>
-                                    <ComboBoxItem Content="공유/참석" Tag="Audience"/>
-                                </ComboBox>
-                                <Button Grid.Column="1"
-                                        Content="초기화"
-                                        Margin="0"
-                                        FontSize="9.8"
-                                        Padding="4,1"
-                                        Style="{StaticResource HeaderButtonStyle}"
-                                        Click="FilterReset_Click"/>
-                            </Grid>
-                            <TextBox x:Name="FilterTextBox"
-                                     Grid.Row="1"
-                                     Height="20"
-                                     Margin="0,1,0,0"
-                                     Style="{StaticResource FilterTextBoxStyle}"
-                                     TextChanged="FilterCriteria_Changed"
-                                     ToolTip="선택한 항목에서 검색할 텍스트"/>
-                        </Grid>
-                    </Border>
-                </Grid>
-            </Grid>
-
-            <Border Grid.Row="1" Background="#0EFFFFFF" CornerRadius="6" Padding="2,3" Margin="0,0,0,4">
-                <UniformGrid Columns="7">
-                    <TextBlock Text="일" Foreground="#FF9A9A" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="월" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="화" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="수" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="목" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="금" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                    <TextBlock Text="토" Foreground="#9CC3FF" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
-                </UniformGrid>
-            </Border>
-
-            <ItemsControl Grid.Row="2" ItemsSource="{Binding Days}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Columns="7" Rows="6"/>
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type models:DayCellViewModel}">
-                        <Border Margin="1"
-                                Padding="1.5"
-                                CornerRadius="6"
-                                MinHeight="40.5"
-                                Cursor="Hand"
-                                Tag="{Binding Date}"
-                                MouseLeftButtonUp="DayCell_MouseLeftButtonUp"
-                                BorderBrush="{Binding CellBorderBrush}"
-                                BorderThickness="{Binding CellBorderThickness}">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{Binding CellBackground}"/>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Background" Value="#2AFFFFFF"/>
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-
-                                <Border Background="{Binding DayBadgeBackground}"
-                                        CornerRadius="6"
-                                        Padding="1,0"
-                                        HorizontalAlignment="Left">
-                                    <TextBlock Text="{Binding DayText}"
-                                               Foreground="{Binding DayForeground}"
-                                               FontWeight="SemiBold"
-                                               FontSize="9.4"/>
-                                </Border>
-
-                                <ItemsControl Grid.Row="1" ItemsSource="{Binding VisibleEvents}" Margin="0,1,0,0">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type models:EventChipViewModel}">
-                                            <Border Background="{Binding ChipBackground}"
-                                                    ToolTip="{Binding Tooltip}"
-                                                    CornerRadius="3"
-                                                    Margin="0,0,0,1"
-                                                    Height="11.5">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="2.5"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <Border Background="{Binding AccentBrush}" CornerRadius="3,0,0,3"/>
-                                                    <TextBlock Grid.Column="1"
-                                                               Text="{Binding Text}"
-                                                               Foreground="#F1F3F7"
-                                                               FontSize="9.3"
-                                                               FontWeight="SemiBold"
-                                                               Padding="1.5,0,0.5,0"
-                                                               VerticalAlignment="Center"/>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
-                                <!-- 일정이 3개 이상이면 첫 일정만 표시하고 두 번째 줄은 ... 전용 표시로 사용한다. -->
-                                <Border Grid.Row="2"
-                                        Visibility="{Binding MoreVisibility}"
-                                        Background="#16FFFFFF"
-                                        BorderBrush="#18FFFFFF"
-                                        BorderThickness="1"
-                                        CornerRadius="4"
-                                        Height="11.5"
-                                        Margin="0,1,0,0"
-                                        HorizontalAlignment="Stretch">
-                                    <TextBlock Text="..."
-                                               Foreground="#BFD3FF"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               Margin="0,-2,0,0"
-                                               FontSize="10"
-                                               FontWeight="Bold"/>
-                                </Border>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <Grid Grid.Row="3" Margin="2,5,2,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Grid Grid.Column="0" Margin="0,0,5,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Ellipse Width="7" Height="7" Fill="{Binding StatusForeground}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1"
-                               Text="{Binding StatusText}"
-                               ToolTip="{Binding StatusToolTip}"
-                               Foreground="{Binding StatusForeground}"
-                               FontSize="10.5"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"/>
-                </Grid>
-
-                <Border Grid.Column="1"
-                        Tag="NoDrag"
-                        Width="124"
-                        Height="30"
-                        Background="#0BFFFFFF"
-                        BorderBrush="#18FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        Padding="4,1"
-                        Margin="0,0,4,0">
-                    <Grid VerticalAlignment="Center">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="66"/>
-                            <ColumnDefinition Width="28"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="투명도" Foreground="#B6BBC5" FontSize="9.5" VerticalAlignment="Center"/>
-                        <Slider x:Name="OpacitySlider"
-                                Grid.Column="1"
-                                Margin="3,0,1,0"
-                                Minimum="0.0" Maximum="1.0" SmallChange="0.02" LargeChange="0.05"
-                                Style="{StaticResource OpacitySliderStyle}"
-                                ValueChanged="OpacitySlider_ValueChanged"
-                                ToolTip="바깥 배경 투명도"/>
-                        <TextBlock x:Name="OpacityPercentText"
-                                   Grid.Column="2"
-                                   TextAlignment="Right"
-                                   Foreground="#D1D5DE"
-                                   FontSize="9.5"
-                                   FontWeight="SemiBold"
-                                   VerticalAlignment="Center"/>
-                    </Grid>
-                </Border>
-
-                <Button Grid.Column="2"
-                        Content="열기"
-                        FontSize="10.5"
-                        Padding="6,3"
-                        Visibility="{Binding LoginRequired, Converter={StaticResource BoolToVisibility}}"
-                        Style="{StaticResource HeaderButtonStyle}"
-                        Click="Login_Click"/>
-            </Grid>
-
-            <!-- 날짜를 클릭하면 해당 날짜의 모든 일정을 한 번에 볼 수 있다. -->
-            <Grid x:Name="DayEventsOverlay"
-                  Grid.Row="0" Grid.RowSpan="4"
-                  Panel.ZIndex="90"
-                  Visibility="Collapsed">
-                <Border Background="#9A080A0E" MouseLeftButtonUp="DayEventsBackdrop_MouseLeftButtonUp"/>
-                <Border Width="285"
-                        MaxHeight="370"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Background="#FC25282F"
-                        BorderBrush="#45FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="12">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
-                    </Border.Effect>
-                    <Grid>
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
 
-                        <Grid>
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="PrevMonth_Click" ToolTip="이전 달 (Page Up)">
+                                <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 6,1 L 1,6 L 6,11"/>
+                            </Button>
+                            <Button Content="이번달" Width="48" Style="{StaticResource TopHeaderButtonStyle}" Click="Today_Click" ToolTip="이번달 (Home)"/>
+                            <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="NextMonth_Click" ToolTip="다음 달 (Page Down)">
+                                <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 1,1 L 6,6 L 1,11"/>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- 헤더 오른쪽 버튼이 4개라 이 열은 80 DIP다. "2026년 12월"(81 DIP)이 잘리지 않도록
+                             양옆 버튼의 바깥 여백(Margin 1.5)만큼만 배치 폭을 넓힌다(83 DIP). 버튼 면적은 침범하지 않는다. -->
+                        <TextBlock Grid.Row="0" Grid.Column="1"
+                                   Margin="-1.5,0"
+                                   Text="{Binding MonthTitle}"
+                                   Foreground="#F8F8FA"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+
+                        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="↻" Width="24" ToolTip="새로고침 (F5)" Style="{StaticResource TopHeaderButtonStyle}" Click="Refresh_Click" FontSize="15"/>
+                            <Button Content="⚙" Width="24" ToolTip="설정" Style="{StaticResource TopHeaderButtonStyle}" Click="Settings_Click" FontSize="11.5"/>
+                            <Button x:Name="MinimizeToggleButton" Content="—" Width="24" ToolTip="막대로 최소화" Style="{StaticResource TopHeaderButtonStyle}" Click="ToggleDisplayMode_Click" FontSize="11.5"/>
+                            <Button Content="✕" Width="24" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
+                        </StackPanel>
+
+                        <!-- 날짜/시간과 필터를 한 줄의 좌/우 절반에 배치하여 세로 공간을 줄인다. -->
+                        <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="5"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock x:Name="DayEventsDateText"
-                                           Foreground="#FAFAFC"
-                                           FontSize="16"
-                                           FontWeight="SemiBold"/>
-                                <TextBlock x:Name="DayEventsCountText"
-                                           Foreground="#8F949E"
-                                           FontSize="11"
-                                           Margin="0,2,0,0"/>
-                            </StackPanel>
-                            <Button Grid.Column="1" Content="✕" Width="26" Height="26"
-                                    Style="{StaticResource HeaderButtonStyle}"
-                                    Click="CloseDayEvents_Click"/>
+
+                            <Border Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="4,2">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="TodayDateText"
+                                               Foreground="#E7EAF0"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               LineHeight="16"
+                                               TextAlignment="Center"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,1,0,0">
+                                        <TextBlock x:Name="TodayWeekdayText"
+                                                   Foreground="#AFB5C0"
+                                                   FontSize="11.5"
+                                                   FontWeight="SemiBold"
+                                                   LineHeight="15"/>
+                                        <TextBlock Text="  " FontSize="11.5"/>
+                                        <TextBlock x:Name="CurrentTimeText"
+                                                   Foreground="#F5F7FA"
+                                                   FontSize="11.5"
+                                                   FontWeight="Bold"
+                                                   LineHeight="15"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" x:Name="FilterPanel" Tag="NoDrag" Background="#0BFFFFFF" CornerRadius="7" Padding="3">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="21"/>
+                                        <RowDefinition Height="21"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="47"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="FilterFieldCombo"
+                                                  Grid.Column="0"
+                                                  Height="21"
+                                                  Margin="0,0,4,0"
+                                                  Style="{StaticResource FilterComboBoxStyle}"
+                                                  SelectedIndex="0"
+                                                  SelectedValuePath="Tag"
+                                                  SelectionChanged="FilterCriteria_Changed"
+                                                  ToolTip="검색 대상">
+                                            <ComboBoxItem Content="제목" Tag="Title"/>
+                                            <ComboBoxItem Content="소유/작성" Tag="Owner"/>
+                                            <ComboBoxItem Content="공유/참석" Tag="Audience"/>
+                                        </ComboBox>
+                                        <Button Grid.Column="1"
+                                                Content="초기화"
+                                                Margin="0"
+                                                FontSize="9.8"
+                                                Padding="4,1"
+                                                Style="{StaticResource HeaderButtonStyle}"
+                                                Click="FilterReset_Click"/>
+                                    </Grid>
+                                    <TextBox x:Name="FilterTextBox"
+                                             Grid.Row="1"
+                                             Height="20"
+                                             Margin="0,1,0,0"
+                                             Style="{StaticResource FilterTextBoxStyle}"
+                                             TextChanged="FilterCriteria_Changed"
+                                             ToolTip="선택한 항목에서 검색할 텍스트"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <Border Grid.Row="1" Background="#0EFFFFFF" CornerRadius="6" Padding="2,3" Margin="0,0,0,4">
+                        <UniformGrid Columns="7">
+                            <TextBlock Text="일" Foreground="#FF9A9A" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="월" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="화" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="수" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="목" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="금" Foreground="#AEB1B8" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                            <TextBlock Text="토" Foreground="#9CC3FF" HorizontalAlignment="Center" FontSize="11.5" FontWeight="SemiBold"/>
+                        </UniformGrid>
+                    </Border>
+
+                    <ItemsControl Grid.Row="2" ItemsSource="{Binding Days}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="7" Rows="6"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type models:DayCellViewModel}">
+                                <Border Margin="1"
+                                        Padding="1.5"
+                                        CornerRadius="6"
+                                        MinHeight="40.5"
+                                        Cursor="Hand"
+                                        Tag="{Binding Date}"
+                                        MouseLeftButtonUp="DayCell_MouseLeftButtonUp"
+                                        BorderBrush="{Binding CellBorderBrush}"
+                                        BorderThickness="{Binding CellBorderThickness}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{Binding CellBackground}"/>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#2AFFFFFF"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Border Background="{Binding DayBadgeBackground}"
+                                                CornerRadius="6"
+                                                Padding="1,0"
+                                                HorizontalAlignment="Left">
+                                            <TextBlock Text="{Binding DayText}"
+                                                       Foreground="{Binding DayForeground}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="9.4"/>
+                                        </Border>
+
+                                        <ItemsControl Grid.Row="1" ItemsSource="{Binding VisibleEvents}" Margin="0,1,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type models:EventChipViewModel}">
+                                                    <Border Background="{Binding ChipBackground}"
+                                                            ToolTip="{Binding Tooltip}"
+                                                            CornerRadius="3"
+                                                            Margin="0,0,0,1"
+                                                            Height="11.5">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="2.5"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Background="{Binding AccentBrush}" CornerRadius="3,0,0,3"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding Text}"
+                                                                       Foreground="#F1F3F7"
+                                                                       FontSize="9.3"
+                                                                       FontWeight="SemiBold"
+                                                                       Padding="1.5,0,0.5,0"
+                                                                       VerticalAlignment="Center"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- 일정이 3개 이상이면 첫 일정만 표시하고 두 번째 줄은 ... 전용 표시로 사용한다. -->
+                                        <Border Grid.Row="2"
+                                                Visibility="{Binding MoreVisibility}"
+                                                Background="#16FFFFFF"
+                                                BorderBrush="#18FFFFFF"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Height="11.5"
+                                                Margin="0,1,0,0"
+                                                HorizontalAlignment="Stretch">
+                                            <TextBlock Text="..."
+                                                       Foreground="#BFD3FF"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,-2,0,0"
+                                                       FontSize="10"
+                                                       FontWeight="Bold"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Grid Grid.Row="3" Margin="2,5,2,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Grid.Column="0" Margin="0,0,5,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Ellipse Width="7" Height="7" Fill="{Binding StatusForeground}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding StatusText}"
+                                       ToolTip="{Binding StatusToolTip}"
+                                       Foreground="{Binding StatusForeground}"
+                                       FontSize="10.5"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
                         </Grid>
 
-                        <Border Grid.Row="1" Height="1" Background="#20FFFFFF" Margin="0,8,0,7"/>
+                        <Border Grid.Column="1"
+                                Tag="NoDrag"
+                                Width="124"
+                                Height="30"
+                                Background="#0BFFFFFF"
+                                BorderBrush="#18FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="4,1"
+                                Margin="0,0,4,0">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="66"/>
+                                    <ColumnDefinition Width="28"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="투명도" Foreground="#B6BBC5" FontSize="9.5" VerticalAlignment="Center"/>
+                                <Slider x:Name="OpacitySlider"
+                                        Grid.Column="1"
+                                        Margin="3,0,1,0"
+                                        Minimum="0.0" Maximum="1.0" SmallChange="0.02" LargeChange="0.05"
+                                        Style="{StaticResource OpacitySliderStyle}"
+                                        ValueChanged="OpacitySlider_ValueChanged"
+                                        ToolTip="바깥 배경 투명도"/>
+                                <TextBlock x:Name="OpacityPercentText"
+                                           Grid.Column="2"
+                                           TextAlignment="Right"
+                                           Foreground="#D1D5DE"
+                                           FontSize="9.5"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
 
-                        <Grid Grid.Row="2">
-                            <TextBlock x:Name="DayEventsEmptyText"
-                                       Text="등록된 일정이 없습니다."
+                        <Button Grid.Column="2"
+                                Content="열기"
+                                FontSize="10.5"
+                                Padding="6,3"
+                                Visibility="{Binding LoginRequired, Converter={StaticResource BoolToVisibility}}"
+                                Style="{StaticResource HeaderButtonStyle}"
+                                Click="Login_Click"/>
+                    </Grid>
+                </Grid>
+
+                <!-- 최소화 막대: 날짜·시각 칸, 남은 일정 2줄, 동기화 오류 점, 펼치기/숨기기 버튼. -->
+                <Grid x:Name="MiniBarContent" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="6,2" VerticalAlignment="Center">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="MiniDateText"
+                                       Foreground="#E7EAF0"
+                                       FontSize="11.5"
+                                       FontWeight="SemiBold"
+                                       TextAlignment="Center"/>
+                            <TextBlock x:Name="MiniTimeText"
+                                       Foreground="#F5F7FA"
+                                       FontSize="12"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="MiniAgendaArea"
+                            Grid.Column="2"
+                            Tag="NoDrag"
+                            Background="Transparent"
+                            ClipToBounds="True"
+                            Cursor="Hand"
+                            Height="34"
+                            VerticalAlignment="Center"
+                            MouseLeftButtonUp="MiniAgenda_MouseLeftButtonUp"
+                            MouseEnter="MiniAgenda_MouseEnter"
+                            MouseLeave="MiniAgenda_MouseLeave">
+                        <Grid>
+                            <!-- Canvas로 감싸 StackPanel이 슬롯(34 DIP)보다 커도 레이아웃 클립을 받지 않게 한다.
+                                 클립은 RenderTransform과 함께 움직여 슬라이드 중 들어오는 3번째 행을 가린다.
+                                 잘라내기는 MiniAgendaArea의 ClipToBounds가 맡는다. -->
+                            <Canvas x:Name="MiniAgendaCanvas">
+                                <StackPanel x:Name="MiniAgendaRows"
+                                            Width="{Binding ActualWidth, ElementName=MiniAgendaCanvas}">
+                                    <StackPanel.RenderTransform>
+                                        <TranslateTransform x:Name="MiniAgendaShift"/>
+                                    </StackPanel.RenderTransform>
+                                </StackPanel>
+                            </Canvas>
+                            <TextBlock x:Name="MiniAgendaEmptyText"
+                                       Text="남은 일정 없음"
                                        Foreground="#7C818B"
                                        FontSize="11.5"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Visibility="Collapsed"/>
-                            <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,3,0">
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Ellipse Grid.Column="3"
+                             Width="6" Height="6"
+                             Margin="4,0"
+                             VerticalAlignment="Center"
+                             Fill="{Binding StatusForeground}"
+                             Visibility="{Binding StatusIsError, Converter={StaticResource BoolToVisibility}}"
+                             ToolTip="{Binding StatusText}"/>
+
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="MiniExpandButton" Content="□" Width="22" ToolTip="펼치기" Style="{StaticResource TopHeaderButtonStyle}" Click="ToggleDisplayMode_Click" FontSize="11.5"/>
+                        <Button Content="✕" Width="22" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 날짜를 클릭하면 해당 날짜의 모든 일정을 한 번에 볼 수 있다. -->
+        <Grid x:Name="DayEventsOverlay"
+              Grid.Row="1"
+              Margin="16"
+              Panel.ZIndex="90"
+              Visibility="Collapsed">
+            <Border x:Name="DayEventsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="DayEventsBackdrop_MouseLeftButtonUp"/>
+            <Border x:Name="DayEventsCard"
+                    Width="285"
+                    MaxHeight="370"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#FC25282F"
+                    BorderBrush="#45FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="12">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="DayEventsDateText"
+                                       Foreground="#FAFAFC"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"/>
+                            <TextBlock x:Name="DayEventsCountText"
+                                       Foreground="#8F949E"
+                                       FontSize="11"
+                                       Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="✕" Width="26" Height="26"
+                                Style="{StaticResource HeaderButtonStyle}"
+                                Click="CloseDayEvents_Click"/>
+                    </Grid>
+
+                    <Border Grid.Row="1" Height="1" Background="#20FFFFFF" Margin="0,8,0,7"/>
+
+                    <Grid Grid.Row="2">
+                        <TextBlock x:Name="DayEventsEmptyText"
+                                   Text="등록된 일정이 없습니다."
+                                   Foreground="#7C818B"
+                                   FontSize="11.5"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="Collapsed"/>
+                        <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,3,0">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource OverlayScrollBarStyle}"/>
+                            </ScrollViewer.Resources>
+                            <ItemsControl x:Name="DayEventsItemsControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type models:EventChipViewModel}">
+                                        <Button Style="{StaticResource EventChipButtonStyle}"
+                                                Background="{Binding ChipBackground}"
+                                                Tag="{Binding Event}"
+                                                Click="DayListEvent_Click"
+                                                MinHeight="68"
+                                                Margin="0,0,0,6">
+                                            <Grid Margin="7,5">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="2.5"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Background="{Binding AccentBrush}" CornerRadius="3" Margin="0,1,0,1"/>
+                                                <Grid Grid.Column="1" Margin="6,0,1,0">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding TimeText}"
+                                                                   Foreground="#D0D4DC"
+                                                                   FontSize="12.5"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding CalendarName}"
+                                                                   Foreground="#818792"
+                                                                   FontSize="11.5"
+                                                                   HorizontalAlignment="Right"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="12,0,0,0"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </Grid>
+                                                    <TextBlock Grid.Row="1"
+                                                               Text="{Binding Title}"
+                                                               Foreground="#F3F4F7"
+                                                               FontSize="14"
+                                                               FontWeight="SemiBold"
+                                                               Margin="0,3,0,0"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <Grid Grid.Row="2" Margin="0,4,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding OwnerText}"
+                                                                   Foreground="#A8ADB6"
+                                                                   FontSize="10.5"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding VisibilityText}"
+                                                                   Foreground="#858B96"
+                                                                   FontSize="10.5"
+                                                                   Margin="10,0,0,0"/>
+                                                    </Grid>
+                                                    <TextBlock Grid.Row="3"
+                                                               Text="{Binding AudienceText}"
+                                                               Foreground="#858B96"
+                                                               FontSize="10.5"
+                                                               Margin="0,3,0,0"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </Grid>
+                                            </Grid>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- 일정 상세는 별도 윈도우가 아니라 오버레이 카드로 표시한다. -->
+        <Grid x:Name="EventDetailsOverlay"
+              Grid.Row="1"
+              Margin="16"
+              Panel.ZIndex="100"
+              Visibility="Collapsed">
+            <Border x:Name="EventDetailsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="EventDetailsBackdrop_MouseLeftButtonUp"/>
+            <Border x:Name="EventDetailsCard"
+                    Width="285"
+                    MaxHeight="380"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="#FC25282F"
+                    BorderBrush="#45FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="12">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DetailTitleText"
+                                   Foreground="#FAFAFC"
+                                   FontSize="17"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,12,0"/>
+                        <Button Grid.Column="1" Content="✕" Width="26" Height="26"
+                                Style="{StaticResource HeaderButtonStyle}"
+                                Click="CloseEventDetails_Click"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Margin="0,8,0,0">
+                        <Border Background="#162E7CF6" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="시간" Foreground="#76ABFF" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailTimeText" Grid.Column="1" Foreground="#EEF5FF" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                        <Border Background="#142E2850" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="캘린더" Foreground="#B99BFF" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailCalendarText" Grid.Column="1" Foreground="#EEE8FF" FontSize="12" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                        <Border Background="#13233D3B" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="소유/작성" Foreground="#72D8C9" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailOwnerText" Grid.Column="1" Foreground="#E5FFF9" FontSize="12" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                        <Border Background="#13273B2C" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="공유/참석" Foreground="#8FE49E" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailAudienceText" Grid.Column="1" Foreground="#EAFFED" FontSize="12" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                        <Border Background="#152F281A" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="공개범위" Foreground="#F3C56D" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailVisibilityText" Grid.Column="1" Foreground="#FFF2D7" FontSize="12"/>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="DetailLocationRow" Background="#152C2032" CornerRadius="8" Padding="7,5" Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="장소" Foreground="#E6A0E9" FontSize="12" FontWeight="Bold"/>
+                                <TextBlock x:Name="DetailLocationText" Grid.Column="1" Foreground="#FCEBFC" FontSize="12" TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <Border Grid.Row="2" Margin="0,8,0,0" Background="#10111419" BorderBrush="#20FFFFFF" BorderThickness="1" CornerRadius="8" Padding="8">
+                        <StackPanel>
+                            <TextBlock Text="설명" Foreground="#AFC5FF" FontSize="12" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <ScrollViewer MaxHeight="105" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,3,0">
                                 <ScrollViewer.Resources>
                                     <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource OverlayScrollBarStyle}"/>
                                 </ScrollViewer.Resources>
-                                <ItemsControl x:Name="DayEventsItemsControl">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type models:EventChipViewModel}">
-                                            <Button Style="{StaticResource EventChipButtonStyle}"
-                                                    Background="{Binding ChipBackground}"
-                                                    Tag="{Binding Event}"
-                                                    Click="DayListEvent_Click"
-                                                    MinHeight="68"
-                                                    Margin="0,0,0,6">
-                                                <Grid Margin="7,5">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="2.5"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <Border Background="{Binding AccentBrush}" CornerRadius="3" Margin="0,1,0,1"/>
-                                                    <Grid Grid.Column="1" Margin="6,0,1,0">
-                                                        <Grid.RowDefinitions>
-                                                            <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="Auto"/>
-                                                        </Grid.RowDefinitions>
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                                <ColumnDefinition Width="*"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Text="{Binding TimeText}"
-                                                                       Foreground="#D0D4DC"
-                                                                       FontSize="12.5"
-                                                                       FontWeight="SemiBold"
-                                                                       VerticalAlignment="Center"/>
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding CalendarName}"
-                                                                       Foreground="#818792"
-                                                                       FontSize="11.5"
-                                                                       HorizontalAlignment="Right"
-                                                                       VerticalAlignment="Center"
-                                                                       Margin="12,0,0,0"
-                                                                       TextTrimming="CharacterEllipsis"/>
-                                                        </Grid>
-                                                        <TextBlock Grid.Row="1"
-                                                                   Text="{Binding Title}"
-                                                                   Foreground="#F3F4F7"
-                                                                   FontSize="14"
-                                                                   FontWeight="SemiBold"
-                                                                   Margin="0,3,0,0"
-                                                                   TextTrimming="CharacterEllipsis"/>
-                                                        <Grid Grid.Row="2" Margin="0,4,0,0">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="*"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Text="{Binding OwnerText}"
-                                                                       Foreground="#A8ADB6"
-                                                                       FontSize="10.5"
-                                                                       TextTrimming="CharacterEllipsis"/>
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding VisibilityText}"
-                                                                       Foreground="#858B96"
-                                                                       FontSize="10.5"
-                                                                       Margin="10,0,0,0"/>
-                                                        </Grid>
-                                                        <TextBlock Grid.Row="3"
-                                                                   Text="{Binding AudienceText}"
-                                                                   Foreground="#858B96"
-                                                                   FontSize="10.5"
-                                                                   Margin="0,3,0,0"
-                                                                   TextTrimming="CharacterEllipsis"/>
-                                                    </Grid>
-                                                </Grid>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <TextBlock x:Name="DetailDescriptionText" Foreground="#E9EBEF" FontSize="12" TextWrapping="Wrap" LineHeight="17"/>
                             </ScrollViewer>
-                        </Grid>
-                    </Grid>
-                </Border>
-            </Grid>
-
-            <!-- 일정 상세는 별도 윈도우가 아니라 오버레이 카드로 표시한다. -->
-            <Grid x:Name="EventDetailsOverlay"
-                  Grid.Row="0" Grid.RowSpan="4"
-                  Panel.ZIndex="100"
-                  Visibility="Collapsed">
-                <Border Background="#9A080A0E" MouseLeftButtonUp="EventDetailsBackdrop_MouseLeftButtonUp"/>
-                <Border x:Name="EventDetailsCard"
-                        Width="285"
-                        MaxHeight="380"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Background="#FC25282F"
-                        BorderBrush="#45FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="12">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
-                    </Border.Effect>
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="DetailTitleText"
-                                       Foreground="#FAFAFC"
-                                       FontSize="17"
-                                       FontWeight="SemiBold"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,12,0"/>
-                            <Button Grid.Column="1" Content="✕" Width="26" Height="26"
-                                    Style="{StaticResource HeaderButtonStyle}"
-                                    Click="CloseEventDetails_Click"/>
-                        </Grid>
-
-                        <StackPanel Grid.Row="1" Margin="0,8,0,0">
-                            <Border Background="#162E7CF6" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="시간" Foreground="#76ABFF" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailTimeText" Grid.Column="1" Foreground="#EEF5FF" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                </Grid>
-                            </Border>
-                            <Border Background="#142E2850" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="캘린더" Foreground="#B99BFF" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailCalendarText" Grid.Column="1" Foreground="#EEE8FF" FontSize="12" TextWrapping="Wrap"/>
-                                </Grid>
-                            </Border>
-                            <Border Background="#13233D3B" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="소유/작성" Foreground="#72D8C9" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailOwnerText" Grid.Column="1" Foreground="#E5FFF9" FontSize="12" TextWrapping="Wrap"/>
-                                </Grid>
-                            </Border>
-                            <Border Background="#13273B2C" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="공유/참석" Foreground="#8FE49E" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailAudienceText" Grid.Column="1" Foreground="#EAFFED" FontSize="12" TextWrapping="Wrap"/>
-                                </Grid>
-                            </Border>
-                            <Border Background="#152F281A" CornerRadius="8" Padding="7,5" Margin="0,0,0,6">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="공개범위" Foreground="#F3C56D" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailVisibilityText" Grid.Column="1" Foreground="#FFF2D7" FontSize="12"/>
-                                </Grid>
-                            </Border>
-                            <Border x:Name="DetailLocationRow" Background="#152C2032" CornerRadius="8" Padding="7,5" Visibility="Collapsed">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="장소" Foreground="#E6A0E9" FontSize="12" FontWeight="Bold"/>
-                                    <TextBlock x:Name="DetailLocationText" Grid.Column="1" Foreground="#FCEBFC" FontSize="12" TextWrapping="Wrap"/>
-                                </Grid>
-                            </Border>
                         </StackPanel>
-
-                        <Border Grid.Row="2" Margin="0,8,0,0" Background="#10111419" BorderBrush="#20FFFFFF" BorderThickness="1" CornerRadius="8" Padding="8">
-                            <StackPanel>
-                                <TextBlock Text="설명" Foreground="#AFC5FF" FontSize="12" FontWeight="Bold" Margin="0,0,0,6"/>
-                                <ScrollViewer MaxHeight="105" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,3,0">
-                                    <ScrollViewer.Resources>
-                                        <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource OverlayScrollBarStyle}"/>
-                                    </ScrollViewer.Resources>
-                                    <TextBlock x:Name="DetailDescriptionText" Foreground="#E9EBEF" FontSize="12" TextWrapping="Wrap" LineHeight="17"/>
-                                </ScrollViewer>
-                            </StackPanel>
-                        </Border>
-                        <Button x:Name="DetailCloseButton"
-                                Grid.Row="3" Content="닫기" HorizontalAlignment="Right" Margin="0,10,0,0"
-                                Width="70" Style="{StaticResource HeaderButtonStyle}" Click="CloseEventDetails_Click"/>
-                    </Grid>
-                </Border>
-            </Grid>
+                    </Border>
+                    <Button x:Name="DetailCloseButton"
+                            Grid.Row="3" Content="닫기" HorizontalAlignment="Right" Margin="0,10,0,0"
+                            Width="70" Style="{StaticResource HeaderButtonStyle}" Click="CloseEventDetails_Click"/>
+                </Grid>
+            </Border>
         </Grid>
-    </Border>
+    </Grid>
 </Window>

@@ -215,4 +215,133 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Empty(loaded.CalendarNames);
         Assert.True(loaded.IsConfigured);
     }
+
+    /// <summary>
+    /// 7.3.1이 쓴 settings.json(OverlayMinimized·SnapToScreenEdges 키 없음)은 펼침 모드, 스냅 켬으로 읽고
+    /// 기존 키 값은 그대로 유지한다.
+    /// </summary>
+    [Fact]
+    public async Task LoadAsync_FileWithoutOverlayKeys_DefaultsToExpandedAndSnapOn()
+    {
+        File.WriteAllText(
+            SettingsPath,
+            """
+            {
+              "BaseUrl": "https://x.daouoffice.com",
+              "CalendarIds": [ "123" ],
+              "HiddenCalendarIds": [],
+              "RefreshMinutes": 7,
+              "StartWithWindows": false,
+              "AlwaysOnTop": true,
+              "PositionLocked": true,
+              "RegisterEdge": false,
+              "UiOpacity": 0.6,
+              "Left": 1200.5,
+              "Top": 300,
+              "CalendarNames": { "123": "팀 캘린더" }
+            }
+            """);
+
+        var loaded = await new SettingsService(_dir).LoadAsync();
+
+        Assert.False(loaded.OverlayMinimized);
+        Assert.True(loaded.SnapToScreenEdges);
+
+        // 옛 파일을 기본값으로 대체한 것이 아니라 실제로 읽었는지 기존 키로 확인한다.
+        Assert.Equal("https://x.daouoffice.com", loaded.BaseUrl);
+        Assert.Equal(new[] { "123" }, loaded.CalendarIds);
+        Assert.Equal(7, loaded.RefreshMinutes);
+        Assert.False(loaded.StartWithWindows);
+        Assert.True(loaded.AlwaysOnTop);
+        Assert.True(loaded.PositionLocked);
+        Assert.False(loaded.RegisterEdge);
+        Assert.Equal(0.6, loaded.UiOpacity);
+        Assert.Equal(1200.5, loaded.Left);
+        Assert.Equal(300.0, loaded.Top);
+        Assert.Equal("팀 캘린더", loaded.CalendarNames["123"]);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task SaveThenLoad_RoundTripsOverlayKeys(bool overlayMinimized, bool snapToScreenEdges)
+    {
+        var service = new SettingsService(_dir);
+
+        var saved = await service.SaveAsync(new AppSettings
+        {
+            BaseUrl = "https://x.daouoffice.com",
+            CalendarIds = new List<string> { "12345" },
+            OverlayMinimized = overlayMinimized,
+            SnapToScreenEdges = snapToScreenEdges,
+            Left = 100,
+            Top = 200
+        });
+
+        Assert.True(saved);
+
+        var loaded = await new SettingsService(_dir).LoadAsync();
+        Assert.Equal(overlayMinimized, loaded.OverlayMinimized);
+        Assert.Equal(snapToScreenEdges, loaded.SnapToScreenEdges);
+        Assert.Equal(100.0, loaded.Left);
+        Assert.Equal(200.0, loaded.Top);
+    }
+
+    /// <summary>새 키도 기존 키와 같이 PascalCase 속성 이름 그대로 저장된다(명명 정책 없음).</summary>
+    [Fact]
+    public async Task SaveAsync_WritesOverlayKeysInPascalCase()
+    {
+        var service = new SettingsService(_dir);
+
+        Assert.True(await service.SaveAsync(new AppSettings
+        {
+            BaseUrl = "https://x.daouoffice.com",
+            CalendarIds = new List<string> { "12345" },
+            OverlayMinimized = true,
+            SnapToScreenEdges = false
+        }));
+
+        var text = File.ReadAllText(SettingsPath);
+        Assert.Contains("\"OverlayMinimized\": true", text, StringComparison.Ordinal);
+        Assert.Contains("\"SnapToScreenEdges\": false", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"overlayMinimized\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"snapToScreenEdges\"", text, StringComparison.Ordinal);
+
+        using var document = JsonDocument.Parse(text);
+        Assert.Equal(JsonValueKind.True, document.RootElement.GetProperty("OverlayMinimized").ValueKind);
+        Assert.Equal(JsonValueKind.False, document.RootElement.GetProperty("SnapToScreenEdges").ValueKind);
+    }
+
+    /// <summary>
+    /// 하위 호환: 7.3.1의 AppSettings(새 키 없음)처럼 모델에 없는 키는 System.Text.Json 기본 동작으로 무시된다.
+    /// 7.4.0이 쓴 파일을 새 키를 모르는 모델로 읽어도 실패하지 않고 기존 키를 그대로 읽는지 확인한다.
+    /// </summary>
+    [Fact]
+    public async Task SavedFile_ReadByModelWithoutOverlayKeys_IgnoresNewKeys()
+    {
+        var service = new SettingsService(_dir);
+        Assert.True(await service.SaveAsync(new AppSettings
+        {
+            BaseUrl = "https://x.daouoffice.com",
+            CalendarIds = new List<string> { "12345" },
+            RefreshMinutes = 9,
+            OverlayMinimized = true,
+            SnapToScreenEdges = false
+        }));
+
+        var legacy = JsonSerializer.Deserialize<LegacySettings731>(File.ReadAllText(SettingsPath));
+
+        Assert.NotNull(legacy);
+        Assert.Equal("https://x.daouoffice.com", legacy!.BaseUrl);
+        Assert.Equal(new[] { "12345" }, legacy.CalendarIds);
+        Assert.Equal(9, legacy.RefreshMinutes);
+    }
+
+    /// <summary>7.3.1 AppSettings의 키 일부를 흉내 낸 모델(새 키를 모른다).</summary>
+    private sealed class LegacySettings731
+    {
+        public string BaseUrl { get; set; } = "";
+        public List<string> CalendarIds { get; set; } = new();
+        public int RefreshMinutes { get; set; } = 5;
+    }
 }
