@@ -1069,9 +1069,9 @@ public sealed class TechnicalDocumentationTests
     /// </summary>
     [Theory]
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)")]
-    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void OnEnterSizeMove()")]
-    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private bool TrySnapMoving(IntPtr lParam)")]
-    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void OnExitSizeMove()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private bool BeginCardDrag()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ContinueCardDrag()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void EndCardDrag(bool cancel)")]
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ClampToVisibleWorkArea()")]
     [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialDisplayMode(bool minimized)")]
     [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static PixelRect ClampWindowToWorkArea(PixelRect window, PixelRect work)")]
@@ -1134,6 +1134,16 @@ public sealed class TechnicalDocumentationTests
         // (3) 비교: 공백 정규화 없이 글자 단위로 같아야 한다.
         Assert.Equal(expected: string.Join("\n", sourceBlock), actual: string.Join("\n", decoded));
     }
+
+    /// <summary>
+    /// 7.4.0: §14.2 WndProc 발췌 블록에 함께 실린 <c>ReplaceAfterDpiChange</c>도 현재 소스와 글자 단위로 같은지 고정한다.
+    /// 비교 규칙은 <see cref="TechnicalDoc_LayoutExcerptsMatchCurrentSource"/>와 같다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_ReplaceAfterDpiChangeExcerptMatchesCurrentSource() =>
+        TechnicalDoc_LayoutExcerptsMatchCurrentSource(
+            "DaouCalendarOverlay/Views/MainWindow.xaml.cs",
+            "private void ReplaceAfterDpiChange(PixelRect? cardBefore)");
 
     private static readonly Regex PreCodePrefixPattern = new("^<pre><code[^>]*>", RegexOptions.CultureInvariant);
     private static readonly Regex PreCodeSuffixPattern = new("</code></pre>$", RegexOptions.CultureInvariant);

@@ -225,17 +225,135 @@ public partial class MainWindow : Window
             DayEventsOverlay.Visibility == Visibility.Visible)
             return;
 
-        if (e.LeftButton != MouseButtonState.Pressed || IsInteractiveSource(e.OriginalSource))
+        if (e.LeftButton != MouseButtonState.Pressed || IsInteractiveSource(e.OriginalSource) || _dragSession is not null)
             return;
 
+        if (BeginCardDrag())
+            e.Handled = true;
+    }
+
+    // 카드 끌기를 시작한다. 마우스를 캡처하고 카드 사각형과 커서(둘 다 물리 px)로 세션을 만든다.
+    // 캡처 실패나 예외면 세션을 만들지 않고(또는 비우고) 캡처를 풀어 false를 돌려준다.
+    private bool BeginCardDrag()
+    {
         try
         {
-            DragMove();
+            if (GetCardRectPx() is not PixelRect card || TryGetCursorPx() is not PixelPoint cursor)
+                return false;
+
+            if (!CaptureMouse())
+                return false;
+
+            _dragSession = OverlayDragSnap.Begin(card, cursor);
+            return true;
         }
-        catch (InvalidOperationException)
+        catch (Exception ex)
         {
-            // 마우스 버튼 상태가 DragMove 직전에 바뀐 경우 무시한다.
+            _dragSession = null;
+            if (IsMouseCaptured)
+                ReleaseMouseCapture();
+            ReportHandlerFailure("ui.snap", ex);
+            return false;
         }
+    }
+
+    private void Window_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_dragSession is not null)
+            ContinueCardDrag();
+    }
+
+    // 끌기 중 매 마우스 이동. 커서는 GetCursorPos(물리 px)로만 읽는다. 창이 따라 움직이므로 창 기준 좌표를 쓰면 되먹임이 생긴다.
+    // 끌기 중에는 작업 영역 클램프를 하지 않는다(모니터 경계에서 카드가 걸린다). 클램프는 끌기 끝에 1회다.
+    private void ContinueCardDrag()
+    {
+        try
+        {
+            if (_dragSession is not DragSnapSession s ||
+                TryGetCursorPx() is not PixelPoint cursor ||
+                GetWindowRectPx() is not PixelRect win)
+                return;
+
+            var snapOn = _snapEnabled && !_positionLocked && !_transitionInProgress && _attached is null;
+            var proposed = OverlayDragSnap.Propose(s, cursor, win.Width, _placement.HeightPx);
+            var card = snapOn
+                ? OverlayDragSnap.Step(
+                    s,
+                    cursor,
+                    win.Width,
+                    _placement.HeightPx,
+                    GetWorkAreaPx(proposed),
+                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.SnapThresholdDip, VisualTreeHelper.GetDpi(this).DpiScaleX))
+                : proposed;
+            var target = OverlayLayoutPlanner.WindowForCard(card, _placement, win.Width, win.Height);
+            if (target != win)
+                ApplyWindowRectPx(target);
+        }
+        catch (Exception ex)
+        {
+            // 기준선을 더 믿을 수 없으므로 이 끌기를 끝낸다. 끝 로그는 남기지 않고 ReportHandlerFailure 1건이 기록이다.
+            _dragSession = null;
+            ReleaseMouseCapture();
+            ReportHandlerFailure("ui.snap", ex);
+        }
+    }
+
+    // 끌기 끝. 놓기와 캡처 상실은 cancel=false(끝 클램프 1회), Esc는 cancel=true(시작 카드 위치로 복귀)다.
+    // 세션을 먼저 비운 뒤 캡처를 푼다. ReleaseMouseCapture는 LostMouseCapture를 동기로 일으키는데,
+    // 세션이 null이라 재진입은 아무것도 하지 않는다(끝 로그와 클램프가 한 번만 일어난다).
+    // 움직인 끌기만 ui.snap 로그 1줄을 남긴다. Esc 복귀는 시작 위치와 같아 0줄이다.
+    private void EndCardDrag(bool cancel)
+    {
+        var s = _dragSession;
+        if (s is null)
+            return;
+
+        _dragSession = null;
+        try
+        {
+            if (IsMouseCaptured)
+                ReleaseMouseCapture();
+
+            if (cancel)
+            {
+                if (GetWindowRectPx() is PixelRect win)
+                {
+                    var back = OverlayLayoutPlanner.WindowForCard(s.Value.StartRect, _placement, win.Width, win.Height);
+                    if (back != win)
+                        ApplyWindowRectPx(back);
+                }
+            }
+            else
+            {
+                ClampToVisibleWorkArea();
+            }
+
+            if (GetCardRectPx() is not PixelRect f || !OverlayDragSnap.ShouldLogDragEnd(s.Value.StartRect, f))
+                return;
+
+            var w = GetWorkAreaPx(f);
+            var snapOn = _snapEnabled && !_positionLocked && _attached is null;
+            LogService.Info("ui.snap", $"드래그 끝: 카드=({f.Left},{f.Top},{f.Right},{f.Bottom}) 작업영역=({w.Left},{w.Top},{w.Right},{w.Bottom}) 붙은 변={OverlaySnap.DescribeEdges(OverlaySnap.DetectEdges(f, w, 0))} 스냅={(snapOn ? "켜짐" : "꺼짐")}");
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.snap", ex);
+        }
+    }
+
+    private void Window_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_dragSession is null)
+            return;
+
+        EndCardDrag(false);
+        e.Handled = true;
+    }
+
+    private void Window_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (ReferenceEquals(e.OriginalSource, this) && _dragSession is not null)
+            EndCardDrag(false);
     }
 
     /// <summary>비동기 이벤트 핸들러에서 새어 나온 예외를 로그 + 상태 텍스트로 처리한다.</summary>
@@ -317,6 +435,9 @@ public partial class MainWindow : Window
     {
         if (_transitionInProgress)
             FinishTransitionNow();
+
+        if (_dragSession is not null)
+            EndCardDrag(cancel: false);
 
         if (_displayMode == OverlayDisplayMode.MiniBar && _attached is not null)
             CloseAttached();
@@ -1483,6 +1604,14 @@ public partial class MainWindow : Window
     // 판정은 OverlayShortcutPolicy에 두고, None이면 텍스트 입력을 삼키지 않도록 Handled를 건드리지 않는다.
     private async void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (_dragSession is not null && e.Key == Key.Escape)
+        {
+            // 끌기 중 Esc는 시작 위치로 되돌리고 끝낸다. 숨기기로 이어지지 않는다.
+            EndCardDrag(true);
+            e.Handled = true;
+            return;
+        }
+
         try
         {
             var action = OverlayShortcutPolicy.Resolve(
@@ -1676,155 +1805,81 @@ public partial class MainWindow : Window
     private void SystemEvents_DisplaySettingsChanged(object? sender, EventArgs e) =>
         _ = Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea));
 
+    // 창 메시지. WM_GETMINMAXINFO는 최대 추적 크기를 키우고(R1), WM_DPICHANGED는 카드 왼쪽 위를 보존해 다시 배치한다.
+    // 끌기(WM_ENTERSIZEMOVE·WM_MOVING·WM_EXITSIZEMOVE)는 마우스 캡처로 직접 처리하므로 여기서 다루지 않는다.
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        const int WmEnterSizeMove = 0x0231;
-        const int WmExitSizeMove = 0x0232;
-        const int WmMoving = 0x0216;
+        const int WmGetMinMaxInfo = 0x0024;
         const int WmDpiChanged = 0x02E0;
-        if (msg == WmEnterSizeMove)
+        if (msg == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            OnEnterSizeMove();
-        }
-        else if (msg == WmExitSizeMove)
-        {
-            OnExitSizeMove();
+            // OS 기본 최대 추적 크기(가상 화면 높이 안팎)가 고정 캔버스 높이를 자르지 않게 키운다. handled는 false로 둔다.
+            try
+            {
+                var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+                info.PtMaxTrackSize.X = Math.Max(info.PtMaxTrackSize.X, MaxTrackSizePx);
+                info.PtMaxTrackSize.Y = Math.Max(info.PtMaxTrackSize.Y, MaxTrackSizePx);
+                Marshal.StructureToPtr(info, lParam, false);
+            }
+            catch (Exception ex)
+            {
+                ReportHandlerFailure("ui.layout", ex);
+            }
         }
         else if (msg == WmDpiChanged)
         {
-            _ = Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea));
-            // 이동 중 다른 배율의 모니터로 넘어가면 OS가 창 크기와 잡은 지점을 새 배율로 다시 잡는다.
-            // 이전 기준선으로 계속 더하면 어긋나므로 제안 사각형과 현재 커서로 기준선을 다시 잡는다.
-            if (_dragSession is not null)
-            {
-                try
-                {
-                    if (lParam != IntPtr.Zero && TryGetCursorPx() is PixelPoint cursor)
-                    {
-                        var s = Marshal.PtrToStructure<NativeRect>(lParam);
-                        var suggested = new PixelRect(s.Left, s.Top, s.Right, s.Bottom);
-                        _dragSession = OverlayDragSnap.Begin(suggested, cursor);
-                    }
-                    else
-                    {
-                        _dragSession = null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _dragSession = null;
-                    ReportHandlerFailure("ui.snap", ex);
-                }
-            }
-        }
-        else if (msg == WmMoving && _snapEnabled && !_positionLocked && !_transitionInProgress &&
-                 _attached is null && lParam != IntPtr.Zero)
-        {
-            if (TrySnapMoving(lParam))
-            {
-                handled = true;
-                return (IntPtr)1;
-            }
-
-            handled = false;
+            // 이 시점은 아직 이전 배율 상태이므로 카드 사각형을 미리 읽어 두고, 배율이 적용된 뒤 왼쪽 위를 보존해 다시 배치한다.
+            var cardBefore = GetCardRectPx();
+            _ = Dispatcher.BeginInvoke(new Action(() => ReplaceAfterDpiChange(cardBefore)));
         }
 
         return IntPtr.Zero;
     }
 
-    // 이동 루프 시작. 스냅 조건과 무관하게 세션을 만든다(끝 로그용). 메시지는 처리하지 않은 것으로 둔다.
-    private void OnEnterSizeMove()
+    // 배율이 바뀐 뒤 카드 왼쪽 위(px)를 보존해 쉬는 배치를 새 배율로 다시 계산한다.
+    // 전환 중이면 먼저 끝내고, 붙인 목록은 뗀다. 끌기 중이면 새 카드 사각형과 현재 커서로 기준선을 다시 잡는다.
+    private void ReplaceAfterDpiChange(PixelRect? cardBefore)
     {
         try
         {
-            _dragSession = GetWindowRectPx() is PixelRect rect && TryGetCursorPx() is PixelPoint cursor
-                ? OverlayDragSnap.Begin(rect, cursor)
-                : null;
-        }
-        catch (Exception ex)
-        {
-            _dragSession = null;
-            ReportHandlerFailure("ui.snap", ex);
-        }
-    }
+            if (_transitionInProgress)
+                FinishTransitionNow();
 
-    // WM_MOVING의 lParam(RECT*)을 스냅한 사각형으로 되쓴다. 처리했으면 true, 예외로 건너뛰었으면 false다.
-    private bool TrySnapMoving(IntPtr lParam)
-    {
-        try
-        {
-            var r = Marshal.PtrToStructure<NativeRect>(lParam);
-            var lp = new PixelRect(r.Left, r.Top, r.Right, r.Bottom);
-            // 세션이 있으면 lParam에서는 크기만 쓴다. lParam 위치는 OS가 이전 되쓰기 위에 커서 이동량을 누적한 값이라
-            // 그대로 쓰면 스냅으로 밀린 만큼 잡은 지점과 커서가 어긋난다.
-            // Propose는 폭·높이 0 이하에서 예외를 던지므로 그때는 lp(기존 동작)를 쓴다.
-            var proposed = _dragSession is DragSnapSession session &&
-                           lp.Width > 0 && lp.Height > 0 &&
-                           TryGetCursorPx() is PixelPoint cursor
-                ? OverlayDragSnap.Propose(session, cursor, lp.Width, lp.Height)
-                : lp;
-            // 배율은 모니터를 넘나들며 바뀔 수 있으므로 메시지마다 다시 읽는다.
-            // 가로·세로 배율이 다를 수 있어도 DpiScaleX 하나로 임계값을 환산한다.
-            var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-            // 작업 영역은 현재 창이 아니라 제안 사각형이 걸친 모니터 기준이다.
-            var work = GetWorkAreaPx(proposed);
-            var snapped = OverlaySnap.Snap(
-                proposed,
-                work,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.SnapThresholdDip, scale));
-            // 비교 대상은 lp다. 스냅이 없는 프레임에서도 커서 기준 위치를 되써야 OS 누적이 사라진다.
-            if (snapped != lp)
+            if (_attached is not null)
+                CloseAttached();
+
+            var scale = GetDpiScale();
+            var m = CanvasMetrics.FromScale(scale);
+            if ((cardBefore ?? GetCardRectPx()) is not PixelRect card)
+                return;
+
+            var tl = new PixelPoint(card.Left, card.Top);
+            var cardHeight = _displayMode == OverlayDisplayMode.MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx;
+            var work = GetWorkAreaPx(new PixelRect(tl.X, tl.Y, tl.X + m.WidthPx, tl.Y + cardHeight));
+            ApplyRestingLayout(OverlayLayoutPlanner.PlanRestingLayout(tl, _displayMode, work, m), scale);
+
+            if (GetWindowRectPx() is PixelRect win && win.Height < m.HeightPx)
+                LogService.Warn("ui.layout", $"창 캔버스 높이 부족: 요구={m.HeightPx} 실제={win.Height}");
+
+            if (_dragSession is not null)
             {
-                var native = new NativeRect
-                {
-                    Left = snapped.Left,
-                    Top = snapped.Top,
-                    Right = snapped.Right,
-                    Bottom = snapped.Bottom
-                };
-                Marshal.StructureToPtr(native, lParam, false);
+                if (GetCardRectPx() is PixelRect newCard && TryGetCursorPx() is PixelPoint cursor)
+                    _dragSession = OverlayDragSnap.Begin(newCard, cursor);
+                else
+                    EndCardDrag(false);
             }
-
-            return true;
         }
         catch (Exception ex)
         {
-            // 세션 기준선을 더 믿을 수 없으므로 이 드래그의 나머지는 OS lParam(기존 동작)으로 둔다.
+            var wasDragging = _dragSession is not null;
             _dragSession = null;
+            if (wasDragging && IsMouseCaptured)
+                ReleaseMouseCapture();
             ReportHandlerFailure("ui.snap", ex);
-            return false;
         }
     }
 
-    // 이동 루프 끝. 세션이 있었고 창이 실제로 움직였으면(ShouldLogDragEnd) 최종 창과 붙은 변을 1줄 남기고, 어떤 경로든 세션을 비운다.
-    // 클릭만 하고 움직이지 않은 드래그는 로그가 없다. 예외로 세션이 먼저 비워진 드래그는 끝 로그 대신 ReportHandlerFailure 1건이 기록이다.
-    private void OnExitSizeMove()
-    {
-        try
-        {
-            if (_dragSession is not DragSnapSession session || GetWindowRectPx() is not PixelRect r)
-                return;
-
-            // 빈 영역을 클릭만 해도 DragMove가 이동 루프를 열어 이 메시지가 온다. 창이 그대로면 남기지 않는다.
-            if (!OverlayDragSnap.ShouldLogDragEnd(session.StartRect, r))
-                return;
-
-            var w = GetWorkAreaPx(r);
-            var edges = OverlaySnap.DetectEdges(r, w, 0);
-            var snapOn = _snapEnabled && !_positionLocked && _attached is null;
-            LogService.Info("ui.snap", $"드래그 끝: 창=({r.Left},{r.Top},{r.Right},{r.Bottom}) 작업영역=({w.Left},{w.Top},{w.Right},{w.Bottom}) 붙은 변={OverlaySnap.DescribeEdges(edges)} 스냅={(snapOn ? "켜짐" : "꺼짐")}");
-        }
-        catch (Exception ex)
-        {
-            ReportHandlerFailure("ui.snap", ex);
-        }
-        finally
-        {
-            _dragSession = null;
-        }
-    }
-
-    // PerMonitorV2 매니페스트라 GetWindowRect·WM_MOVING lParam과 같은 물리 px다. 실패하면 null.
+    // PerMonitorV2 매니페스트라 GetWindowRect와 같은 가상 화면 물리 px다. 실패하면 null.
     private static PixelPoint? TryGetCursorPx() =>
         GetCursorPos(out var point) ? new PixelPoint(point.X, point.Y) : null;
 
@@ -1877,6 +1932,20 @@ public partial class MainWindow : Window
         public int Right;
         public int Bottom;
     }
+
+    // Win32 MINMAXINFO. 필드 순서가 Win32 정의(ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize)와 같아야 한다.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint PtReserved;
+        public NativePoint PtMaxSize;
+        public NativePoint PtMaxPosition;
+        public NativePoint PtMinTrackSize;
+        public NativePoint PtMaxTrackSize;
+    }
+
+    // WM_GETMINMAXINFO에서 최대 추적 크기를 이 값 이상으로 키운다. 150%에서 필요한 캔버스 높이 1242 px가 OS 기본값에 잘리는 것을 막는다.
+    private const int MaxTrackSizePx = 16384;
 
     private void StartClock()
     {

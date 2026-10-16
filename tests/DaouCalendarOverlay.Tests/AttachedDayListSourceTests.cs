@@ -196,15 +196,15 @@ public sealed class AttachedDayListSourceTests
 
     /// <summary>
     /// 전환 중 CloseAttached가 억제를 풀면 최소화 상태와 펼친 창의 위치가 따로 저장될 수 있다(불변 조건 4).
-    /// 그래서 CloseAttached를 부르는 곳을 4곳으로 고정하고, 어느 곳도 전환 중에는 닿지 않게 한다.
+    /// 그래서 CloseAttached를 부르는 곳을 5곳으로 고정하고, 어느 곳도 전환 중에는 닿지 않게 한다.
     /// </summary>
     [Fact]
     public void CloseAttached_IsNeverReachedDuringTransition()
     {
         var source = CodeBehind();
 
-        // 호출부: HideOverlay, DetachIfAllOverlaysClosed, OnMiniBarLeaving, MiniAgenda_MouseLeftButtonUp.
-        Assert.Equal(4, CountOf(source, "CloseAttached();"));
+        // 호출부: HideOverlay, DetachIfAllOverlaysClosed, OnMiniBarLeaving, MiniAgenda_MouseLeftButtonUp, ReplaceAfterDpiChange.
+        Assert.Equal(5, CountOf(source, "CloseAttached();"));
 
         // 펼치기는 전환 플래그를 세우기 전에 떼고, OnMiniBarLeaving은 이곳에서만 부른다.
         Assert.Equal(1, CountOf(source, "OnMiniBarLeaving();"));
@@ -214,11 +214,14 @@ public sealed class AttachedDayListSourceTests
         var stop = expand.IndexOf("_saveBoundsTimer?.Stop();", StringComparison.Ordinal);
         Assert.True(leave >= 0 && flag > leave && stop > flag, "떼기 → 전환 플래그 → 떼기가 예약한 저장 취소 순서여야 한다");
 
-        // 숨기기는 전환을 먼저 끝낸 뒤 뗀다.
+        // 숨기기는 전환을 먼저 끝내고, 끌기를 끝낸 뒤 뗀다.
         var hide = MethodBody(source, "public void HideOverlay()");
+        var hideFinish = hide.IndexOf("FinishTransitionNow();", StringComparison.Ordinal);
+        var hideEnd = hide.IndexOf("EndCardDrag(cancel: false);", StringComparison.Ordinal);
+        var hideClose = hide.IndexOf("CloseAttached();", StringComparison.Ordinal);
         Assert.True(
-            hide.IndexOf("FinishTransitionNow();", StringComparison.Ordinal) <
-            hide.IndexOf("CloseAttached();", StringComparison.Ordinal));
+            hideFinish >= 0 && hideEnd > hideFinish && hideClose > hideEnd,
+            "HideOverlay는 FinishTransitionNow → EndCardDrag → CloseAttached 순서여야 한다");
 
         // 클릭 처리기와 붙이기 모두 전환 중이면 아무것도 하지 않는다. 그러면 전환 중 _attached는 항상 null이라
         // DetachIfAllOverlaysClosed도 전환 중에는 CloseAttached에 닿지 않는다.
@@ -385,8 +388,8 @@ public sealed class AttachedDayListSourceTests
     }
 
     /// <summary>
-    /// ApplyWindowRectPx를 부르는 곳은 끌기·클램프·쉬는 배치뿐이다. 정의 1회를 뺀 출현 수가 허용 메서드 본문의 출현 합과 같아야 한다.
-    /// 아직 없는 메서드는 0으로 친다.
+    /// ApplyWindowRectPx를 부르는 곳은 끌기·클램프·쉬는 배치뿐이다. 출현은 정의 1회와 호출 4회로 총 5회이고,
+    /// 네 허용 메서드가 모두 있으며 각 본문에 1회 이상, 합 4회다.
     /// </summary>
     [Fact]
     public void ApplyWindowRectPx_CalledOnlyFromAllowedMethods()
@@ -400,12 +403,16 @@ public sealed class AttachedDayListSourceTests
             "private void ApplyRestingLayout(",
         };
 
-        var inAllowed = allowed
-            .Where(signature => source.Contains(signature, StringComparison.Ordinal))
-            .Sum(signature => CountOf(MethodBody(source, signature), "ApplyWindowRectPx("));
+        var counts = allowed.Select(signature =>
+        {
+            Assert.True(source.Contains(signature, StringComparison.Ordinal), $"허용 메서드가 없다: {signature}");
+            return CountOf(MethodBody(source, signature), "ApplyWindowRectPx(");
+        }).ToArray();
 
+        Assert.All(counts, count => Assert.True(count >= 1, "허용 메서드 본문에 ApplyWindowRectPx 호출이 1회 이상 있어야 한다"));
+        Assert.Equal(4, counts.Sum());
         Assert.Equal(1, CountOf(source, "private void ApplyWindowRectPx("));
-        Assert.Equal(CountOf(source, "ApplyWindowRectPx(") - 1, inAllowed);
+        Assert.Equal(5, CountOf(source, "ApplyWindowRectPx("));
         Assert.Equal(1, CountOf(source, "private static extern bool SetWindowPos("));
         Assert.Equal(1, CountOf(source, "SetWindowPos(hwnd"));
     }
@@ -644,121 +651,130 @@ public sealed class AttachedDayListSourceTests
     }
 
     /// <summary>
-    /// 이동 루프는 OS가 누적한 lParam 위치가 아니라 드래그 시작 사각형과 커서 이동량으로 매번 다시 계산해 되쓴다.
-    /// 스냅이 없는 프레임에서도 커서 기준 위치를 써야 하므로 되쓰기 비교는 lp 기준이다.
-    /// 세션은 이동 루프가 끝나면 finally에서 반드시 비우고, 드래그 하나에 로그는 1줄이다.
+    /// 끌기는 마우스 캡처로 직접 구현한다. 시작에서 캡처와 세션을 만들고, 이동마다 GetCursorPos(물리 px)로 카드 위치를 다시 계산하며,
+    /// 끝에서는 세션을 먼저 비운 뒤 캡처를 풀어(R9 재진입) 끝 클램프와 로그가 1회만 일어나게 한다.
     /// </summary>
     [Fact]
-    public void MoveLoop_UsesCursorBasedSnap_AndLogsOncePerDrag()
+    public void CardDrag_UsesCaptureAndCursorBasedSnap()
     {
         var source = CodeBehind();
-        const string wndProcSignature =
-            "private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)";
-        var wndProc = MethodBody(source, wndProcSignature);
-        var enter = MethodBody(source, "private void OnEnterSizeMove()");
-        var moving = MethodBody(source, "private bool TrySnapMoving(IntPtr lParam)");
-        var exit = MethodBody(source, "private void OnExitSizeMove()");
-        var cursor = MethodBody(source, "private static PixelPoint? TryGetCursorPx()");
-        var loop = wndProcSignature + wndProc + enter + moving + exit + cursor;
 
-        foreach (var token in new[]
-                 {
-                     "GetCursorPos", "OverlayDragSnap.Begin", "OverlayDragSnap.Propose",
-                     "WmEnterSizeMove", "WmExitSizeMove", "WmDpiChanged",
-                     "_dragSession = null", "snapped != lp", "finally"
-                 })
-            Assert.Contains(token, loop, StringComparison.Ordinal);
+        var down = MethodBody(source, "private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)");
+        Assert.Contains("BeginCardDrag()", down, StringComparison.Ordinal);
+        Assert.Contains("_dragSession is not null", down, StringComparison.Ordinal);
 
-        // 비교 대상이 proposed면 스냅이 없는 프레임에서 OS 누적 위치가 그대로 남는다.
-        Assert.DoesNotContain("snapped != proposed", loop, StringComparison.Ordinal);
-        Assert.Equal(1, CountOf(loop, "LogService.Info(\"ui.snap\""));
-        Assert.True(CountOf(loop, "ReportHandlerFailure(\"ui.snap\"") >= 1);
+        var begin = MethodBody(source, "private bool BeginCardDrag(");
+        Assert.Contains("CaptureMouse()", begin, StringComparison.Ordinal);
+        Assert.Contains("OverlayDragSnap.Begin(", begin, StringComparison.Ordinal);
+        Assert.Contains("ReportHandlerFailure(\"ui.snap\", ex)", begin, StringComparison.Ordinal);
 
-        // WndProc가 메시지마다 해당 메서드를 부른다.
-        Assert.Contains("OnEnterSizeMove();", wndProc, StringComparison.Ordinal);
-        Assert.Contains("TrySnapMoving(lParam)", wndProc, StringComparison.Ordinal);
-        Assert.Contains("OnExitSizeMove();", wndProc, StringComparison.Ordinal);
-
-        // 커서는 시작과 매 WM_MOVING에서 같은 헬퍼로 읽는다.
-        Assert.Contains("TryGetCursorPx()", enter, StringComparison.Ordinal);
-        Assert.Contains("TryGetCursorPx()", moving, StringComparison.Ordinal);
-        Assert.Contains("OverlayDragSnap.Begin", enter, StringComparison.Ordinal);
-        Assert.Contains("OverlayDragSnap.Propose", moving, StringComparison.Ordinal);
-
-        // 로그는 끝 메서드에만 있고, 세션 정리는 finally 안이다.
-        Assert.Equal(1, CountOf(exit, "LogService.Info(\"ui.snap\""));
-        var finallyAt = exit.IndexOf("finally", StringComparison.Ordinal);
-        Assert.True(finallyAt >= 0, "OnExitSizeMove에 finally가 있어야 한다");
+        var cont = MethodBody(source, "private void ContinueCardDrag(");
+        Assert.Contains("TryGetCursorPx()", cont, StringComparison.Ordinal);
+        Assert.Contains("OverlayDragSnap.Step(", cont, StringComparison.Ordinal);
+        Assert.Contains("WindowForCard(", cont, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetPosition(", cont, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClampToVisibleWorkArea", cont, StringComparison.Ordinal);
+        var contCatch = cont.LastIndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        Assert.True(contCatch >= 0, "ContinueCardDrag에 catch (Exception ex)가 있어야 한다");
+        var contTail = cont.Substring(contCatch);
+        var contClear = contTail.IndexOf("_dragSession = null;", StringComparison.Ordinal);
+        var contRelease = contTail.IndexOf("ReleaseMouseCapture();", StringComparison.Ordinal);
+        var contReport = contTail.IndexOf("ReportHandlerFailure(\"ui.snap\", ex)", StringComparison.Ordinal);
         Assert.True(
-            exit.IndexOf("_dragSession = null", finallyAt, StringComparison.Ordinal) > finallyAt,
-            "OnExitSizeMove의 _dragSession = null은 finally 뒤에 있어야 한다");
+            contClear >= 0 && contRelease > contClear && contReport > contRelease,
+            "ContinueCardDrag의 catch는 세션 비우기 → 캡처 해제 → 보고 순서여야 한다");
+        Assert.Equal(0, CountOf(cont, "LogService.Info(\"ui.snap\""));
 
-        Assert.Equal(1, CountOf(source, "private static extern bool GetCursorPos("));
-
-        // 스냅 진입 조건은 기존과 같다.
-        Assert.Contains(
-            "msg == WmMoving && _snapEnabled && !_positionLocked && !_transitionInProgress &&\n                 _attached is null && lParam != IntPtr.Zero",
-            wndProc.Replace("\r\n", "\n"),
-            StringComparison.Ordinal);
-        // WM_DPICHANGED는 기존 클램프를 유지하고, 세션이 있을 때만 기준선을 다시 잡는다.
-        Assert.Contains("Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea))", wndProc, StringComparison.Ordinal);
-        Assert.Contains("OverlayDragSnap.Begin(suggested, cursor)", wndProc, StringComparison.Ordinal);
-
-        // 경로 독립: TrySnapMoving은 lParam에서 크기만 읽고 위치(Left/Top/Right/Bottom)는 Propose에 넘기지 않는다.
-        Assert.Contains("OverlayDragSnap.Propose(session, cursor, lp.Width, lp.Height)", moving, StringComparison.Ordinal);
-        foreach (var position in new[] { "lp.Left", "lp.Top", "lp.Right", "lp.Bottom" })
-            Assert.DoesNotContain(position, moving, StringComparison.Ordinal);
-        Assert.Equal(1, CountOf(moving, "if (snapped != lp)"));
-
-        // 로그 형식은 spec 문자열과 같다. 스냅 켜짐은 종료 시점의 조건으로 평가한다.
-        Assert.Contains(
-            "LogService.Info(\"ui.snap\", $\"드래그 끝: 창=({r.Left},{r.Top},{r.Right},{r.Bottom}) 작업영역=({w.Left},{w.Top},{w.Right},{w.Bottom}) 붙은 변={OverlaySnap.DescribeEdges(edges)} 스냅={(snapOn ? \"켜짐\" : \"꺼짐\")}\");",
-            exit,
-            StringComparison.Ordinal);
-        Assert.Contains("var snapOn = _snapEnabled && !_positionLocked && _attached is null;", exit, StringComparison.Ordinal);
-        Assert.Contains("OverlaySnap.DetectEdges(r, w, 0)", exit, StringComparison.Ordinal);
-
-        // 시작 단계의 예외도 세션을 비운다.
-        var enterCatch = enter.IndexOf("catch", StringComparison.Ordinal);
-        Assert.True(enterCatch >= 0, "OnEnterSizeMove에 catch가 있어야 한다");
+        var replace = MethodBody(source, "private void ReplaceAfterDpiChange(");
+        var replaceCatch = replace.LastIndexOf("catch (Exception ex)", StringComparison.Ordinal);
+        Assert.True(replaceCatch >= 0, "ReplaceAfterDpiChange에 catch (Exception ex)가 있어야 한다");
+        var replaceTail = replace.Substring(replaceCatch);
+        var replaceClear = replaceTail.IndexOf("_dragSession = null;", StringComparison.Ordinal);
+        var replaceRelease = replaceTail.IndexOf("ReleaseMouseCapture();", StringComparison.Ordinal);
+        var replaceReport = replaceTail.IndexOf("ReportHandlerFailure(\"ui.snap\", ex)", StringComparison.Ordinal);
         Assert.True(
-            enter.IndexOf("_dragSession = null", enterCatch, StringComparison.Ordinal) > enterCatch,
-            "OnEnterSizeMove의 catch에서 _dragSession = null이어야 한다");
+            replaceClear >= 0 && replaceRelease > replaceClear && replaceReport > replaceRelease,
+            "ReplaceAfterDpiChange의 catch는 세션 비우기 → 캡처 해제 → 보고 순서여야 한다");
 
-        // 불변 조건 4: 예외 경로 3곳(WM_ENTERSIZEMOVE·WM_MOVING·WM_DPICHANGED) 모두에서 세션을 비운다.
-        var movingCatch = moving.LastIndexOf("catch (Exception ex)", StringComparison.Ordinal);
-        Assert.True(movingCatch >= 0, "TrySnapMoving에 catch (Exception ex)가 있어야 한다");
-        var movingCatchTail = moving.Substring(movingCatch);
-        var movingClear = movingCatchTail.IndexOf("_dragSession = null;", StringComparison.Ordinal);
-        var movingReport = movingCatchTail.IndexOf("ReportHandlerFailure(\"ui.snap\", ex)", StringComparison.Ordinal);
-        Assert.True(movingClear >= 0, "TrySnapMoving의 catch에서 _dragSession = null;이어야 한다");
-        Assert.True(movingReport >= 0, "TrySnapMoving의 catch에서 ReportHandlerFailure(\"ui.snap\", ex)를 불러야 한다");
+        var end = MethodBody(source, "private void EndCardDrag(");
+        var clear = end.IndexOf("_dragSession = null;", StringComparison.Ordinal);
+        var release = end.IndexOf("ReleaseMouseCapture()", StringComparison.Ordinal);
+        Assert.True(clear >= 0 && release > clear, "EndCardDrag에서 _dragSession = null;이 ReleaseMouseCapture()보다 먼저여야 한다");
+        Assert.Contains("ShouldLogDragEnd(", end, StringComparison.Ordinal);
+        Assert.Contains("드래그 끝: 카드=(", end, StringComparison.Ordinal);
+        Assert.Contains("ClampToVisibleWorkArea();", end, StringComparison.Ordinal);
+        Assert.Equal(1, CountOf(end, "LogService.Info(\"ui.snap\""));
+        Assert.Contains("var snapOn = _snapEnabled && !_positionLocked && _attached is null;", end, StringComparison.Ordinal);
+        Assert.Contains("OverlaySnap.DetectEdges(f, w, 0)", end, StringComparison.Ordinal);
+        Assert.Contains("ReportHandlerFailure(\"ui.snap\", ex)", end, StringComparison.Ordinal);
+
+        var up = MethodBody(source, "private void Window_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)");
+        Assert.Contains("EndCardDrag(false);", up, StringComparison.Ordinal);
+        Assert.Contains("e.Handled = true;", up, StringComparison.Ordinal);
+
+        var lost = MethodBody(source, "private void Window_LostMouseCapture(object sender, MouseEventArgs e)");
+        Assert.Contains("ReferenceEquals(e.OriginalSource, this)", lost, StringComparison.Ordinal);
+        Assert.Contains("_dragSession is not null", lost, StringComparison.Ordinal);
+        Assert.Contains("EndCardDrag(false);", lost, StringComparison.Ordinal);
+
+        // Esc는 PreviewKeyDown 본문의 첫 if에서 처리하고 숨기기로 이어지지 않는다.
+        var keyDown = MethodBody(source, "private async void Window_PreviewKeyDown(object sender, WpfKeyEventArgs e)");
+        var firstIf = keyDown.IndexOf("if (", StringComparison.Ordinal);
+        Assert.True(firstIf >= 0);
+        var firstIfLine = keyDown.Substring(firstIf, keyDown.IndexOf('\n', firstIf) - firstIf);
+        Assert.Contains("_dragSession is not null", firstIfLine, StringComparison.Ordinal);
+        Assert.Contains("Key.Escape", firstIfLine, StringComparison.Ordinal);
         Assert.True(
-            movingClear < movingReport,
-            "TrySnapMoving의 catch에서 _dragSession = null;은 ReportHandlerFailure보다 앞이어야 한다");
+            keyDown.IndexOf("EndCardDrag(true);", StringComparison.Ordinal) <
+            keyDown.IndexOf("OverlayShortcutPolicy.Resolve(", StringComparison.Ordinal),
+            "Esc 끌기 취소는 단축키 해석보다 먼저여야 한다");
 
-        // Propose는 폭·높이 0 이하에서 예외를 던지므로 크기 가드가 정확히 한 번 있어야 한다.
-        Assert.True(
-            CountOf(moving, "lp.Width > 0 && lp.Height > 0") == 1,
-            "TrySnapMoving에 lp.Width > 0 && lp.Height > 0 가드가 정확히 1회 있어야 한다");
-
-        var enterCatchEx = enter.IndexOf("catch (Exception ex)", StringComparison.Ordinal);
-        Assert.True(enterCatchEx >= 0, "OnEnterSizeMove에 catch (Exception ex)가 있어야 한다");
-        Assert.True(
-            enter.IndexOf("_dragSession = null;", enterCatchEx, StringComparison.Ordinal) > enterCatchEx,
-            "OnEnterSizeMove의 catch 뒤에 _dragSession = null;이 있어야 한다");
-
-        var dpiBegin = wndProc.IndexOf("OverlayDragSnap.Begin(suggested, cursor)", StringComparison.Ordinal);
-        Assert.True(dpiBegin >= 0, "WndProc의 WM_DPICHANGED 분기에 OverlayDragSnap.Begin(suggested, cursor)가 있어야 한다");
-        var dpiCatch = wndProc.IndexOf("catch (Exception ex)", dpiBegin, StringComparison.Ordinal);
-        Assert.True(dpiCatch > dpiBegin, "WM_DPICHANGED 기준선 재설정 뒤에 catch (Exception ex)가 있어야 한다");
-        Assert.True(
-            wndProc.IndexOf("_dragSession = null;", dpiCatch, StringComparison.Ordinal) > dpiCatch,
-            "WM_DPICHANGED의 catch 뒤에 _dragSession = null;이 있어야 한다");
-
-        // 읽지 않는 로그용 플래그 필드는 두지 않는다.
-        Assert.DoesNotContain("_dragSnapUsed", source, StringComparison.Ordinal);
+        Assert.Equal(1, CountOf(source, "private static extern bool GetWindowRect"));
+        Assert.Equal(1, CountOf(source, "private static extern bool SetWindowPos"));
+        Assert.Equal(1, CountOf(source, "private static extern bool GetCursorPos"));
         Assert.Equal(1, CountOf(source, "private DragSnapSession? _dragSession;"));
+        Assert.DoesNotContain("_dragSnapUsed", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// DragMove와 WM_MOVING 이동 루프는 없어졌다. WndProc는 WM_GETMINMAXINFO(최대 추적 크기)와 WM_DPICHANGED(BeginInvoke 재배치)만 다루고,
+    /// XAML에는 끌기 이벤트 세 개가 연결돼 있다.
+    /// </summary>
+    [Fact]
+    public void MoveLoop_Removed()
+    {
+        var source = CodeBehind();
+        foreach (var removed in new[]
+                 {
+                     "DragMove(", "WmMoving", "WmEnterSizeMove", "WmExitSizeMove",
+                     "TrySnapMoving", "OnEnterSizeMove", "OnExitSizeMove",
+                 })
+        {
+            Assert.DoesNotContain(removed, source, StringComparison.Ordinal);
+        }
+
+        var wndProc = MethodBody(source, "private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)");
+        Assert.Contains("0x0024", wndProc, StringComparison.Ordinal);
+        Assert.Contains("MaxTrackSizePx", wndProc, StringComparison.Ordinal);
+        Assert.Contains("ReplaceAfterDpiChange", wndProc, StringComparison.Ordinal);
+        Assert.Contains("0x02E0", wndProc, StringComparison.Ordinal);
+        Assert.Contains("GetCardRectPx()", wndProc, StringComparison.Ordinal);
+        Assert.DoesNotContain("handled = true", wndProc, StringComparison.Ordinal);
+        Assert.Contains("ReportHandlerFailure(\"ui.layout\", ex)", wndProc, StringComparison.Ordinal);
+        Assert.Contains("private const int MaxTrackSizePx = 16384;", source, StringComparison.Ordinal);
+
+        // MINMAXINFO 필드 순서는 Win32 정의와 같다.
+        var info = MethodBody(source, "private struct MinMaxInfo");
+        var order = new[] { "PtReserved", "PtMaxSize", "PtMaxPosition", "PtMinTrackSize", "PtMaxTrackSize" }
+            .Select(name => info.IndexOf(name, StringComparison.Ordinal))
+            .ToArray();
+        Assert.All(order, index => Assert.True(index >= 0));
+        Assert.Equal(order.OrderBy(i => i).ToArray(), order);
+
+        var xaml = File.ReadAllText(RepositoryPaths.Combine("DaouCalendarOverlay", "Views", "MainWindow.xaml"));
+        Assert.Contains("PreviewMouseMove=\"Window_PreviewMouseMove\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("PreviewMouseLeftButtonUp=\"Window_PreviewMouseLeftButtonUp\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("LostMouseCapture=\"Window_LostMouseCapture\"", xaml, StringComparison.Ordinal);
     }
 
     // marker가 있는 여는 태그를 다음 '>'까지 돌려준다.
