@@ -5,136 +5,9 @@ namespace DaouCalendarOverlay.Tests;
 
 public sealed class OverlayLayoutPlannerTests
 {
-    private const int Tol = 2;
-    private const int Seed = 20261015;
-    private const int Cases = 500;
-
-    private static readonly double[] Scales = { 1.0, 1.25, 1.5, 1.75, 2.0 };
     private static readonly PixelRect Work = new(0, 0, 1920, 1040);
 
     private static PixelRect Win(int left, int top, int width, int height) => new(left, top, left + width, top + height);
-
-    // ChooseResizeAnchor
-
-    [Theory]
-    [InlineData(0, VerticalAnchor.Bottom)]
-    [InlineData(2, VerticalAnchor.Bottom)]
-    [InlineData(-2, VerticalAnchor.Bottom)]
-    [InlineData(3, VerticalAnchor.Top)]
-    public void ChooseResizeAnchor_BottomEdgeDistance_UsesTolerance(int gap, VerticalAnchor expected)
-    {
-        // 창 아래 변이 work.Bottom - gap에 있고, 새 높이(48)는 위쪽 고정으로도 들어간다.
-        var window = new PixelRect(100, Work.Bottom - gap - 48, 400, Work.Bottom - gap);
-
-        var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(window, Work, 48, Tol);
-
-        Assert.Equal(expected, anchor);
-    }
-
-    [Fact]
-    public void ChooseResizeAnchor_DoesNotFitWhenTopAnchored_ReturnsBottom()
-    {
-        // 아래 변과 거리 100px이지만 위쪽 고정으로 426px를 늘리면 work.Bottom을 넘는다.
-        var window = new PixelRect(100, 900 - 48, 400, 900);
-
-        var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(window, Work, 426, Tol);
-
-        Assert.Equal(VerticalAnchor.Bottom, anchor);
-    }
-
-    [Fact]
-    public void ChooseResizeAnchor_FitsWhenTopAnchored_ReturnsTop()
-    {
-        var window = new PixelRect(100, 200, 400, 248);
-
-        var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(window, Work, 426, Tol);
-
-        Assert.Equal(VerticalAnchor.Top, anchor);
-    }
-
-    // ResizeWindow
-
-    [Fact]
-    public void ResizeWindow_TopAnchor_KeepsTopAndHorizontalExtent()
-    {
-        var window = Win(100, 200, 311, 48);
-
-        var result = OverlayLayoutPlanner.ResizeWindow(window, 426, VerticalAnchor.Top, Work);
-
-        Assert.Equal(new PixelRect(100, 200, 411, 626), result);
-    }
-
-    [Fact]
-    public void ResizeWindow_BottomAnchor_KeepsBottomAndHorizontalExtent()
-    {
-        var window = Win(100, 500, 311, 48);
-
-        var result = OverlayLayoutPlanner.ResizeWindow(window, 426, VerticalAnchor.Bottom, Work);
-
-        Assert.Equal(new PixelRect(100, 122, 411, 548), result);
-    }
-
-    [Fact]
-    public void ResizeWindow_OutsideBounds_ClampsTopAnchorIntoBounds()
-    {
-        // bounds = work = (0,0,1920,1040). Top 고정이면 Top 900 + 426 > 1040이므로 위로 밀린다.
-        var window = Win(100, 900, 311, 48);
-
-        var result = OverlayLayoutPlanner.ResizeWindow(window, 426, VerticalAnchor.Top, Work);
-
-        Assert.Equal(1040, result.Bottom);
-        Assert.Equal(426, result.Height);
-    }
-
-    [Fact]
-    public void ResizeWindow_OutsideBounds_ClampsBottomAnchorIntoBounds()
-    {
-        // Bottom 고정이면 top = 86 - 426 = -340 이라 work.Top(0) 밑으로 내려온다.
-        var window = Win(100, 38, 311, 48);
-
-        var result = OverlayLayoutPlanner.ResizeWindow(window, 426, VerticalAnchor.Bottom, Work);
-
-        Assert.Equal(Work.Top, result.Top);
-        Assert.Equal(426, result.Height);
-    }
-
-    [Fact]
-    public void ResizeWindow_HeightAtLeastBoundsHeight_PinsToBoundsTop()
-    {
-        var window = Win(100, 500, 311, 48);
-
-        var result = OverlayLayoutPlanner.ResizeWindow(window, Work.Height + 50, VerticalAnchor.Bottom, Work);
-
-        Assert.Equal(Work.Top, result.Top);
-    }
-
-    [Fact]
-    public void ResizeWindow_FlushToBottom_CollapseKeepsWindowBottom()
-    {
-        // 아래 변이 work.Bottom에 붙은 창을 접으면 아래 변이 그대로다.
-        var window = new PixelRect(500, Work.Bottom - 426, 811, Work.Bottom);
-        var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(window, Work, 48, Tol);
-
-        var collapsed = OverlayLayoutPlanner.ResizeWindow(window, 48, anchor, Work);
-
-        Assert.Equal(VerticalAnchor.Bottom, anchor);
-        Assert.Equal(window.Bottom, collapsed.Bottom);
-        Assert.Equal(48, collapsed.Height);
-    }
-
-    [Fact]
-    public void ResizeWindow_InvalidArguments_Throw()
-    {
-        var window = Win(0, 0, 311, 48);
-
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            OverlayLayoutPlanner.ResizeWindow(window, 0, VerticalAnchor.Top, Work));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            OverlayLayoutPlanner.ResizeWindow(window, -5, VerticalAnchor.Top, Work));
-        // 예전 inset 인자 검사 자리. 남은 높이 검사를 Bottom 기준·하한 극값으로도 확인한다.
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            OverlayLayoutPlanner.ResizeWindow(window, int.MinValue, VerticalAnchor.Bottom, Work));
-    }
 
     // ClampWindowToWorkArea
 
@@ -229,264 +102,398 @@ public sealed class OverlayLayoutPlannerTests
         Assert.Equal(AttachDirection.Below, OverlayLayoutPlanner.ChooseAttachDirection(window, Work, 600));
     }
 
-    [Fact]
-    public void ToAnchor_BelowIsTopAndAboveIsBottom()
+    // 고정 캔버스: CanvasMetrics
+
+    [Theory]
+    [InlineData(1.0, 311, 390, 48, 426, 390, 2, 828, 12)]
+    [InlineData(1.25, 389, 488, 60, 532, 488, 2, 1036, 16)]
+    [InlineData(1.5, 466, 585, 72, 639, 585, 3, 1242, 18)]
+    public void CanvasMetrics_FromScale_MatchesTable(
+        double scale, int width, int slotOffset, int mini, int expanded, int attachRegion, int edgeTol, int height, int upOffset)
     {
-        Assert.Equal(VerticalAnchor.Top, OverlayLayoutPlanner.ToAnchor(AttachDirection.Below));
-        Assert.Equal(VerticalAnchor.Bottom, OverlayLayoutPlanner.ToAnchor(AttachDirection.Above));
-    }
+        var m = CanvasMetrics.FromScale(scale);
 
-    // 왕복 속성
-
-    // 창이 work 안에 있도록 무작위 위치를 고른다. 세로: 20%는 아래 변 flush, 10%는 위 변 flush.
-    private static PixelRect RandomWindow(Random rng, int width, int height)
-    {
-        var left = rng.Next(Work.Left, Work.Right - width + 1);
-        var kind = rng.NextDouble();
-        int top;
-        if (kind < 0.20)
-            top = Work.Bottom - height;
-        else if (kind < 0.30)
-            top = Work.Top;
-        else
-            top = rng.Next(Work.Top, Work.Bottom - height + 1);
-        return new PixelRect(left, top, left + width, top + height);
-    }
-
-    [Fact]
-    public void RoundTrip_CollapseThenExpand_RestoresOriginalWindow()
-    {
-        var rng = new Random(Seed);
-
-        for (var i = 0; i < Cases; i++)
-        {
-            var scale = Scales[rng.Next(Scales.Length)];
-            int Px(double dip) => OverlayLayoutMetrics.DipToPx(dip, scale);
-            var expandedHeight = Px(OverlayLayoutMetrics.ExpandedWindowHeightDip);
-            var width = Px(OverlayLayoutMetrics.WindowWidthDip);
-
-            var win = RandomWindow(rng, width, expandedHeight);
-
-            var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(
-                win, Work, Px(OverlayLayoutMetrics.MiniWindowHeightDip), Px(OverlayLayoutMetrics.EdgeToleranceDip));
-            var mini = OverlayLayoutPlanner.ResizeWindow(win, Px(OverlayLayoutMetrics.MiniWindowHeightDip), anchor, Work);
-
-            var anchor2 = OverlayLayoutPlanner.ChooseResizeAnchor(
-                mini, Work, Px(OverlayLayoutMetrics.ExpandedWindowHeightDip), Px(OverlayLayoutMetrics.EdgeToleranceDip));
-            var back = OverlayLayoutPlanner.ResizeWindow(mini, Px(OverlayLayoutMetrics.ExpandedWindowHeightDip), anchor2, Work);
-
-            Assert.True(win == back, $"case {i} scale {scale}: win={win} mini={mini} back={back}");
-        }
-    }
-
-    [Fact]
-    public void RoundTrip_AttachThenDetach_RestoresBarWhenNotClamped()
-    {
-        var rng = new Random(Seed);
-        var checkedCount = 0;
-
-        for (var i = 0; i < Cases; i++)
-        {
-            var scale = Scales[rng.Next(Scales.Length)];
-            int Px(double dip) => OverlayLayoutMetrics.DipToPx(dip, scale);
-            var miniHeight = Px(OverlayLayoutMetrics.MiniWindowHeightDip);
-            var width = Px(OverlayLayoutMetrics.WindowWidthDip);
-
-            var mini = RandomWindow(rng, width, miniHeight);
-
-            var dir = OverlayLayoutPlanner.ChooseAttachDirection(
-                mini, Work, Px(OverlayLayoutMetrics.AttachedRegionHeightDip));
-            var anchor = OverlayLayoutPlanner.ToAnchor(dir);
-            var attached = OverlayLayoutPlanner.ResizeWindow(
-                mini,
-                Px(OverlayLayoutMetrics.MiniWindowHeightDip + OverlayLayoutMetrics.AttachedRegionHeightDip),
-                anchor, Work);
-
-            var notClamped = anchor == VerticalAnchor.Top
-                ? attached.Top == mini.Top
-                : attached.Bottom == mini.Bottom;
-            if (!notClamped)
-                continue;
-
-            checkedCount++;
-            var detached = OverlayLayoutPlanner.ResizeWindow(attached, miniHeight, anchor, Work);
-            Assert.True(mini == detached, $"case {i} scale {scale}: mini={mini} attached={attached} detached={detached}");
-        }
-
-        Assert.True(checkedCount >= 250, $"검사된 건수 {checkedCount}");
-    }
-
-    // PlanTransition / TransitionMemo
-
-    private static readonly PixelRect TaskbarWork = new(0, 0, 1920, 1032);
-
-    // 막대를 작업 영역 안 임의 위치에 둔다. 세로: 20%는 아래 변 flush, 10%는 위 변 flush.
-    private static PixelRect RandomBar(Random rng, PixelRect work, int width, int height)
-    {
-        var left = rng.Next(work.Left, work.Right - width + 1);
-        var kind = rng.NextDouble();
-        int top;
-        if (kind < 0.20)
-            top = work.Bottom - height;
-        else if (kind < 0.30)
-            top = work.Top;
-        else
-            top = rng.Next(work.Top, work.Bottom - height + 1);
-        return new PixelRect(left, top, left + width, top + height);
-    }
-
-    [Fact]
-    public void RoundTrip_FromMiniBar_ExpandThenCollapse_RestoresOriginalBar()
-    {
-        var rng = new Random(Seed);
-        var total = 0;
-
-        foreach (var scale in Scales)
-        {
-            int Px(double dip) => OverlayLayoutMetrics.DipToPx(dip, scale);
-            var barWidth = Px(OverlayLayoutMetrics.WindowWidthDip);
-            var barHeight = Px(OverlayLayoutMetrics.MiniWindowHeightDip);
-            var expandedHeight = Px(OverlayLayoutMetrics.ExpandedWindowHeightDip);
-            var tol = Px(OverlayLayoutMetrics.EdgeToleranceDip);
-
-            for (var i = 0; i < Cases; i++)
-            {
-                var bar = RandomBar(rng, TaskbarWork, barWidth, barHeight);
-
-                var plan1 = OverlayLayoutPlanner.PlanTransition(bar, TaskbarWork, expandedHeight, tol, null);
-                var after = plan1.TargetWindow;
-                var memo = new OverlayLayoutPlanner.TransitionMemo(bar, after, TaskbarWork, plan1.Anchor);
-                var plan2 = OverlayLayoutPlanner.PlanTransition(after, TaskbarWork, barHeight, tol, memo);
-
-                Assert.False(plan1.RestoredFromMemo);
-                Assert.True(
-                    plan2.TargetWindow == bar && plan2.RestoredFromMemo,
-                    $"case {i} scale {scale}: bar={bar} after={after} back={plan2.TargetWindow} restored={plan2.RestoredFromMemo}");
-                total++;
-            }
-        }
-
-        Assert.Equal(Cases * Scales.Length, total);
-    }
-
-    [Fact]
-    public void RoundTrip_NearBottomBar_FailsWithoutMemo_RestoresWithMemo()
-    {
-        // 배율 1.0, 막대 아래 변이 work.Bottom보다 50 px 위. 허용 오차(2) 밖이라 접을 때 Top이 고른다.
-        var bar = new PixelRect(100, 934, 411, 982);
-        Assert.Equal(TaskbarWork.Bottom - 50, bar.Bottom);
-
-        var plan1 = OverlayLayoutPlanner.PlanTransition(bar, TaskbarWork, 426, Tol, null);
-
-        // 메모 없이 접으면 원래 막대와 다르다(현재 결함 재현).
-        var withoutMemo = OverlayLayoutPlanner.PlanTransition(plan1.TargetWindow, TaskbarWork, 48, Tol, null);
-        Assert.False(withoutMemo.RestoredFromMemo);
-        Assert.NotEqual(bar, withoutMemo.TargetWindow);
-
-        // 메모를 쓰면 같다.
-        var memo = new OverlayLayoutPlanner.TransitionMemo(bar, plan1.TargetWindow, TaskbarWork, plan1.Anchor);
-        var withMemo = OverlayLayoutPlanner.PlanTransition(plan1.TargetWindow, TaskbarWork, 48, Tol, memo);
-        Assert.True(withMemo.RestoredFromMemo);
-        Assert.Equal(bar, withMemo.TargetWindow);
+        Assert.Equal(width, m.WidthPx);
+        Assert.Equal(slotOffset, m.SlotOffsetPx);
+        Assert.Equal(mini, m.MiniHeightPx);
+        Assert.Equal(expanded, m.ExpandedHeightPx);
+        Assert.Equal(attachRegion, m.AttachRegionPx);
+        Assert.Equal(edgeTol, m.EdgeTolerancePx);
+        Assert.Equal(height, m.HeightPx);
+        Assert.Equal(upOffset, m.ExpandedUp.OffsetPx);
     }
 
     [Theory]
-    [InlineData("windowMoved")]
-    [InlineData("workChanged")]
-    [InlineData("beforeHeightMismatch")]
-    [InlineData("beforeWidthMismatch")]
-    public void PlanTransition_InvalidMemo_IsIgnored(string kind)
+    [InlineData(0.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void CanvasMetrics_FromScale_RejectsInvalidScale(double scale)
     {
-        var bar = new PixelRect(100, 300, 411, 348);
-        var after = OverlayLayoutPlanner.PlanTransition(bar, TaskbarWork, 426, Tol, null).TargetWindow;
-        var memo = new OverlayLayoutPlanner.TransitionMemo(bar, after, TaskbarWork, VerticalAnchor.Top);
+        Assert.Throws<ArgumentOutOfRangeException>(() => CanvasMetrics.FromScale(scale));
+    }
 
-        var window = after;
-        var work = TaskbarWork;
-        var newHeight = 48;
-        switch (kind)
+    [Fact]
+    public void Metrics_BarSlotOffset_IsMaxOfExpandedDeltaAndAttachRegion()
+    {
+        var expected = Math.Max(
+            OverlayLayoutMetrics.ExpandedCardHeightDip - OverlayLayoutMetrics.MiniCardHeightDip,
+            OverlayLayoutMetrics.AttachedRegionHeightDip);
+        Assert.Equal(OverlayLayoutMetrics.BarSlotOffsetDip, expected);
+        Assert.Equal(828, OverlayLayoutMetrics.WindowHeightDip);
+    }
+
+    [Fact]
+    public void CanvasMetrics_RegionsFitInsideCanvas_AllScales()
+    {
+        for (var scale = 1.0; scale <= 3.0; scale += 0.25)
         {
-            case "windowMoved":
-                window = after.Offset(1, 0);
-                break;
-            case "workChanged":
-                work = new PixelRect(0, 0, 1920, 1040);
-                break;
-            case "beforeHeightMismatch":
-                newHeight = 50;
-                break;
-            case "beforeWidthMismatch":
-                memo = memo with { WindowBefore = new PixelRect(bar.Left, bar.Top, bar.Left + 300, bar.Bottom) };
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+            var m = CanvasMetrics.FromScale(scale);
+
+            Assert.True(m.ExpandedUp.OffsetPx >= 0, $"scale {scale}: ExpandedUp.OffsetPx={m.ExpandedUp.OffsetPx}");
+            Assert.True(m.SlotOffsetPx - m.AttachRegionPx >= 0, $"scale {scale}: Above 영역이 창 위로 나감");
+            Assert.True(
+                m.ExpandedDown.OffsetPx + m.ExpandedHeightPx <= m.HeightPx,
+                $"scale {scale}: ExpandedDown이 창 아래로 나감");
+            Assert.True(
+                m.SlotOffsetPx + m.MiniHeightPx + m.AttachRegionPx <= m.HeightPx,
+                $"scale {scale}: Below 영역이 창 아래로 나감");
+        }
+    }
+
+    // PlanExpandedPlacement
+
+    private static readonly PixelRect Work1032 = new(0, 0, 1920, 1032);
+
+    // 100% 캔버스에서 막대 칸 위 변이 slotTop인 창.
+    private static PixelRect WindowWithSlotTop(int left, int slotTop, CanvasMetrics m) =>
+        new(left, slotTop - m.SlotOffsetPx, left + m.WidthPx, slotTop - m.SlotOffsetPx + m.HeightPx);
+
+    [Fact]
+    public void PlanExpandedPlacement_Cases()
+    {
+        var m = CanvasMetrics.FromScale(1.0);
+
+        // 아래로 자람: 막대 칸 위 변 100(창 위 변 -290).
+        var down = WindowWithSlotTop(100, 100, m);
+        Assert.Equal(-290, down.Top);
+        var downPlacement = OverlayLayoutPlanner.PlanExpandedPlacement(down, Work1032, m);
+        Assert.Equal(390, downPlacement.OffsetPx);
+        var downCard = downPlacement.InWindow(down);
+        Assert.Equal(100, downCard.Top);
+        Assert.Equal(526, downCard.Bottom);
+
+        // 위로 자람: 막대 칸 아래 변 1032(창 위 변 594).
+        var up = WindowWithSlotTop(100, 984, m);
+        Assert.Equal(594, up.Top);
+        var upPlacement = OverlayLayoutPlanner.PlanExpandedPlacement(up, Work1032, m);
+        Assert.Equal(12, upPlacement.OffsetPx);
+        var upCard = upPlacement.InWindow(up);
+        Assert.Equal(606, upCard.Top);
+        Assert.Equal(1032, upCard.Bottom);
+
+        // 대체 규칙(아래 맞춤): work 아래 변 700, 막대 칸 위 변 300(창 -90).
+        var shortWork = new PixelRect(0, 0, 1920, 700);
+        var fit = WindowWithSlotTop(100, 300, m);
+        Assert.Equal(-90, fit.Top);
+        var fitPlacement = OverlayLayoutPlanner.PlanExpandedPlacement(fit, shortWork, m);
+        Assert.Equal(364, fitPlacement.OffsetPx);
+        var fitCard = fitPlacement.InWindow(fit);
+        Assert.Equal(274, fitCard.Top);
+        Assert.Equal(700, fitCard.Bottom);
+
+        // 대체 규칙(카드가 work보다 큼): work 높이 400.
+        var tinyWork = new PixelRect(0, 0, 1920, 400);
+        var big = WindowWithSlotTop(100, 100, m);
+        Assert.Equal(-290, big.Top);
+        var bigPlacement = OverlayLayoutPlanner.PlanExpandedPlacement(big, tinyWork, m);
+        Assert.Equal(290, bigPlacement.OffsetPx);
+        var bigCard = bigPlacement.InWindow(big);
+        Assert.Equal(0, bigCard.Top);
+        Assert.Equal(426, bigCard.Bottom);
+
+        // 음수 좌표 모니터.
+        var negWork = new PixelRect(-1920, -200, 0, 880);
+        var neg = WindowWithSlotTop(-1500, -150, m);
+        Assert.Equal(-540, neg.Top);
+        Assert.Equal(390, OverlayLayoutPlanner.PlanExpandedPlacement(neg, negWork, m).OffsetPx);
+    }
+
+    [Fact]
+    public void PlanExpandedPlacement_Property_CardContainsSlotAndStaysInCanvas()
+    {
+        var rng = new Random(7404);
+        double[] scales = { 1.0, 1.25, 1.5 };
+
+        for (var i = 0; i < 10_000; i++)
+        {
+            var m = CanvasMetrics.FromScale(scales[i % scales.Length]);
+            var workLeft = rng.Next(-3840, 3841);
+            var workTop = rng.Next(-1200, 1201);
+            var work = new PixelRect(
+                workLeft, workTop, workLeft + rng.Next(800, 3841), workTop + rng.Next(300, 2161));
+            var slotTop = rng.Next(work.Top - 200, work.Bottom + 201);
+            var window = WindowWithSlotTop(rng.Next(-3840, 3841), slotTop, m);
+            var slot = m.Slot.InWindow(window);
+            var e = m.ExpandedHeightPx;
+
+            var result = OverlayLayoutPlanner.PlanExpandedPlacement(window, work, m);
+
+            var context = $"case {i}: work={work} window={window} result={result}";
+            Assert.True(result.OffsetPx >= m.ExpandedUp.OffsetPx && result.OffsetPx <= m.ExpandedDown.OffsetPx, context);
+            Assert.True(result.HeightPx == e, context);
+
+            var card = result.InWindow(window);
+            Assert.True(card.Top <= slot.Top && card.Bottom >= slot.Bottom, context);
+            Assert.True(card.Top >= window.Top && card.Bottom <= window.Bottom, context);
+
+            if (slot.Top + e <= work.Bottom)
+                Assert.True(result == m.ExpandedDown, context);
+            else if (slot.Bottom - e >= work.Top)
+                Assert.True(result == m.ExpandedUp, context);
+        }
+    }
+
+    // PlanRestingExpandedPlacement
+
+    [Fact]
+    public void PlanRestingExpandedPlacement_BottomEdgeTolerance()
+    {
+        var m = CanvasMetrics.FromScale(1.0);
+
+        PixelRect CardWithBottom(int bottom) => new(100, bottom - 426, 411, bottom);
+
+        Assert.Equal(m.ExpandedUp, OverlayLayoutPlanner.PlanRestingExpandedPlacement(CardWithBottom(1032), Work1032, m));
+        Assert.Equal(m.ExpandedUp, OverlayLayoutPlanner.PlanRestingExpandedPlacement(CardWithBottom(1030), Work1032, m));
+        Assert.Equal(m.ExpandedDown, OverlayLayoutPlanner.PlanRestingExpandedPlacement(CardWithBottom(1029), Work1032, m));
+
+        // card.Top + 48 > work.Bottom (카드가 작업 영역 밖으로 걸침)
+        var overhang = new PixelRect(100, 990, 411, 990 + 426);
+        Assert.True(overhang.Top + m.MiniHeightPx > Work1032.Bottom);
+        Assert.Equal(m.ExpandedUp, OverlayLayoutPlanner.PlanRestingExpandedPlacement(overhang, Work1032, m));
+    }
+
+    // PlanRestingLayout
+
+    [Fact]
+    public void PlanRestingLayout_Cases()
+    {
+        var m = CanvasMetrics.FromScale(1.0);
+
+        var bar = OverlayLayoutPlanner.PlanRestingLayout(new PixelPoint(100, 984), OverlayDisplayMode.MiniBar, Work1032, m);
+        Assert.Equal(m.Slot, bar.Placement);
+        Assert.Equal(594, bar.Window.Top);
+        Assert.Equal(311, bar.Window.Width);
+        Assert.Equal(828, bar.Window.Height);
+
+        var up = OverlayLayoutPlanner.PlanRestingLayout(new PixelPoint(100, 606), OverlayDisplayMode.Expanded, Work1032, m);
+        Assert.Equal(m.ExpandedUp, up.Placement);
+        Assert.Equal(594, up.Window.Top);
+        Assert.Equal(311, up.Window.Width);
+        Assert.Equal(828, up.Window.Height);
+
+        var down = OverlayLayoutPlanner.PlanRestingLayout(new PixelPoint(100, 20), OverlayDisplayMode.Expanded, Work1032, m);
+        Assert.Equal(m.ExpandedDown, down.Placement);
+        Assert.Equal(-370, down.Window.Top);
+        Assert.Equal(311, down.Window.Width);
+        Assert.Equal(828, down.Window.Height);
+
+        var far = OverlayLayoutPlanner.PlanRestingLayout(new PixelPoint(5000, 5000), OverlayDisplayMode.MiniBar, Work1032, m);
+        Assert.Equal(m.Slot, far.Placement);
+        Assert.Equal(1609, far.Window.Left);
+        Assert.Equal(594, far.Window.Top);
+        Assert.Equal(311, far.Window.Width);
+        Assert.Equal(828, far.Window.Height);
+        Assert.Equal(new PixelRect(1609, 984, 1920, 1032), far.Placement.InWindow(far.Window));
+    }
+
+    // 저장·복원 왕복
+
+    [Fact]
+    public void SaveRestore_RoundTrip_ExactPx()
+    {
+        foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
+        {
+            foreach (var px in new[] { -1920, -1, 0, 1, 987, 3839 })
+            {
+                Assert.Equal(px, OverlayLayoutMetrics.DipToPx(px / scale, scale));
+            }
+        }
+    }
+
+    private static readonly PixelRect[] RoundTripWorks =
+    {
+        new(0, 0, 1920, 1032),
+        new(1920, 4, 3840, 1084),
+        new(-1920, -200, 0, 880),
+    };
+
+    public static IEnumerable<object[]> RoundTripCases()
+    {
+        foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
+            foreach (var mode in new[] { OverlayDisplayMode.MiniBar, OverlayDisplayMode.Expanded })
+                for (var work = 0; work < RoundTripWorks.Length; work++)
+                    yield return new object[] { scale, mode, work };
+    }
+
+    /// <summary>
+    /// 저장 → 복원 왕복(같은 배율). 저장 값은 쉬는 배치의 카드 px 왼쪽 위 ÷ 배율(MainWindow.GetCardTopLeftDip와 같은 식)이고,
+    /// 복원은 DipToPx로 px를 직접 만든 뒤 PlanRestingLayout을 다시 거친다(MainWindow.ApplyInitialPlacement와 같은 경로).
+    /// 결과 창 사각형과 카드 배치가 px까지 같아야 재시작마다 위치가 밀리지 않는다(R5).
+    /// 카드 왼쪽 위는 작업 영역의 네 변에 0px로 붙은 위치, 아래 가장자리 허용 오차 경계, 안쪽 위치, 밖으로 나간 위치(클램프)를 포함한다.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RoundTripCases))]
+    public void PlanRestingLayout_SaveRestore_RoundTrip_SameScale(double scale, OverlayDisplayMode mode, int workIndex)
+    {
+        var work = RoundTripWorks[workIndex];
+        var m = CanvasMetrics.FromScale(scale);
+        var cardHeight = mode == OverlayDisplayMode.MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx;
+        var maxLeft = work.Right - m.WidthPx;
+        var maxTop = work.Bottom - cardHeight;
+        var xs = new[] { work.Left, work.Left + 1, work.Left + 333, maxLeft - 1, maxLeft, work.Left - 50, work.Right + 7 };
+        var ys = new[]
+        {
+            work.Top, work.Top + 1, work.Top + 287, maxTop - m.EdgeTolerancePx - 1, maxTop - m.EdgeTolerancePx,
+            maxTop - 1, maxTop, work.Top - 999, work.Bottom + 3,
+        };
+
+        var cases = 0;
+        foreach (var x in xs)
+        {
+            foreach (var y in ys)
+            {
+                var layout = OverlayLayoutPlanner.PlanRestingLayout(new PixelPoint(x, y), mode, work, m);
+                var card = layout.Placement.InWindow(layout.Window);
+
+                // 쉬는 배치는 카드를 작업 영역 안에 두고 창 크기는 캔버스 크기다.
+                Assert.Equal(m.WidthPx, layout.Window.Width);
+                Assert.Equal(m.HeightPx, layout.Window.Height);
+                Assert.Equal(cardHeight, card.Height);
+                Assert.True(card.Left >= work.Left && card.Right <= work.Right && card.Top >= work.Top && card.Bottom <= work.Bottom,
+                    $"카드 {card}가 작업 영역 {work} 밖이다(scale={scale}, mode={mode}, tl=({x},{y}))");
+
+                // 저장: 카드 px ÷ 배율(DIP, double 그대로).
+                var savedLeft = card.Left / scale;
+                var savedTop = card.Top / scale;
+
+                // 복원: DipToPx로 px를 직접 만든다.
+                var restored = new PixelPoint(
+                    OverlayLayoutMetrics.DipToPx(savedLeft, scale),
+                    OverlayLayoutMetrics.DipToPx(savedTop, scale));
+                Assert.Equal(new PixelPoint(card.Left, card.Top), restored);
+
+                var again = OverlayLayoutPlanner.PlanRestingLayout(restored, mode, work, m);
+                Assert.Equal(layout, again);
+
+                // 두 번째 왕복도 같다(재시작을 거듭해도 밀리지 않는다).
+                var card2 = again.Placement.InWindow(again.Window);
+                var third = OverlayLayoutPlanner.PlanRestingLayout(
+                    new PixelPoint(
+                        OverlayLayoutMetrics.DipToPx(card2.Left / scale, scale),
+                        OverlayLayoutMetrics.DipToPx(card2.Top / scale, scale)),
+                    mode, work, m);
+                Assert.Equal(layout, third);
+                cases++;
+            }
         }
 
-        var plan = OverlayLayoutPlanner.PlanTransition(window, work, newHeight, Tol, memo);
-
-        var expectedAnchor = OverlayLayoutPlanner.ChooseResizeAnchor(window, work, newHeight, Tol);
-        var expectedWindow = OverlayLayoutPlanner.ResizeWindow(window, newHeight, expectedAnchor, work);
-        Assert.False(plan.RestoredFromMemo);
-        Assert.Equal(expectedAnchor, plan.Anchor);
-        Assert.Equal(expectedWindow, plan.TargetWindow);
+        Assert.Equal(xs.Length * ys.Length, cases);
     }
 
-    [Fact]
-    public void PlanTransition_NonPositiveHeight_Throws()
+    /// <summary>
+    /// 설정창 저장 경로(MainWindow.ApplySettings의 핸들 있는 분기)와 같은 식. 저장 값 = 카드 px ÷ 배율이면,
+    /// DipToPx로 만든 카드 px에 현재 배치를 그대로 두고 WindowForCard로 얻은 창이 원래 창과 px까지 같다(창 호출 0회, 위치 변화 0px).
+    /// 배치는 막대 칸, 위·아래로 자란 펼침, 규칙 (3)의 중간 오프셋을 모두 포함한다. 창 위 변이 음수인 경우도 넣는다.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(1.75)]
+    public void SettingsReapply_SameScale_KeepsWindowExactly(double scale)
     {
-        var window = Win(100, 300, 311, 48);
+        var m = CanvasMetrics.FromScale(scale);
+        var placements = new List<CardPlacement> { m.Slot, m.ExpandedUp, m.ExpandedDown };
+        for (var offset = m.ExpandedUp.OffsetPx + 1; offset < m.ExpandedDown.OffsetPx; offset += 7)
+            placements.Add(new CardPlacement(offset, m.ExpandedHeightPx));
 
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            OverlayLayoutPlanner.PlanTransition(window, TaskbarWork, 0, Tol, null));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            OverlayLayoutPlanner.PlanTransition(window, TaskbarWork, -1, Tol, null));
+        foreach (var placement in placements)
+        {
+            foreach (var (left, top) in new[] { (0, 0), (1609, 594), (1920, -386), (-1920, -200), (-311, 4), (3529, 1), (987, -1) })
+            {
+                var win = new PixelRect(left, top, left + m.WidthPx, top + m.HeightPx);
+                var card = placement.InWindow(win);
+                var savedLeft = card.Left / scale;
+                var savedTop = card.Top / scale;
+
+                var x = OverlayLayoutMetrics.DipToPx(savedLeft, scale);
+                var y = OverlayLayoutMetrics.DipToPx(savedTop, scale);
+                var cardPx = new PixelRect(x, y, x + win.Width, y + placement.HeightPx);
+                Assert.Equal(card, cardPx);
+                Assert.Equal(win, OverlayLayoutPlanner.WindowForCard(cardPx, placement, win.Width, win.Height));
+            }
+        }
     }
 
-    // AnchorEdgeShiftPx
-
-    [Fact]
-    public void AnchorEdgeShiftPx_NoClamp_ReturnsZero()
+    /// <summary>
+    /// 7.4.0b(창 = 카드)는 WPF Left/Top(창 왼쪽 위 px ÷ 배율)을 저장했다. 같은 값을 카드 왼쪽 위로 읽으면
+    /// 작업 영역 안에 있던 카드는 같은 px에 복원되고, 창은 그 카드에서 막대 칸 오프셋(막대) 또는 펼침 배치 오프셋만큼 위에 놓인다.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(1.75)]
+    public void PlanRestingLayout_Reads740bValuesAsCardTopLeft(double scale)
     {
-        var topBar = Win(100, 300, 311, 48);
-        var topTarget = OverlayLayoutPlanner.ResizeWindow(topBar, 426, VerticalAnchor.Top, TaskbarWork);
-        Assert.Equal(0, OverlayLayoutPlanner.AnchorEdgeShiftPx(topBar, topTarget, VerticalAnchor.Top));
+        var m = CanvasMetrics.FromScale(scale);
+        var work = new PixelRect(0, 0, 1920, 1032);
+        foreach (var mode in new[] { OverlayDisplayMode.MiniBar, OverlayDisplayMode.Expanded })
+        {
+            var cardHeight = mode == OverlayDisplayMode.MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx;
+            foreach (var (left, top) in new[] { (1000, 20), (0, 0), (1920 - m.WidthPx, 1032 - cardHeight), (700, 200) })
+            {
+                // 7.4.0b 창 사각형 = 카드 사각형. 저장 값은 WPF Left/Top = 창 px ÷ 배율.
+                var saved740b = (Left: left / scale, Top: top / scale);
+                var tl = new PixelPoint(OverlayLayoutMetrics.DipToPx(saved740b.Left, scale), OverlayLayoutMetrics.DipToPx(saved740b.Top, scale));
+                var layout = OverlayLayoutPlanner.PlanRestingLayout(tl, mode, work, m);
+                var card = layout.Placement.InWindow(layout.Window);
 
-        var bottomBar = Win(100, 500, 311, 48);
-        var bottomTarget = OverlayLayoutPlanner.ResizeWindow(bottomBar, 426, VerticalAnchor.Bottom, TaskbarWork);
-        Assert.Equal(0, OverlayLayoutPlanner.AnchorEdgeShiftPx(bottomBar, bottomTarget, VerticalAnchor.Bottom));
+                Assert.Equal(new PixelRect(left, top, left + m.WidthPx, top + cardHeight), card);
+                Assert.Equal(top - layout.Placement.OffsetPx, layout.Window.Top);
+                if (mode == OverlayDisplayMode.MiniBar)
+                    Assert.Equal(m.Slot, layout.Placement);
+            }
+        }
     }
 
-    [Fact]
-    public void AnchorEdgeShiftPx_BottomAnchorClampedAtTop_IsPositive()
-    {
-        // Bottom 고정이면 Top이 -340이 되어 work.Top(0)으로 밀리므로 아래 변이 340 px 내려간다.
-        var bar = Win(100, 38, 311, 48);
-        var target = OverlayLayoutPlanner.ResizeWindow(bar, 426, VerticalAnchor.Bottom, TaskbarWork);
+    // AttachRegion
 
-        Assert.Equal(0, target.Top);
-        Assert.Equal(340, OverlayLayoutPlanner.AnchorEdgeShiftPx(bar, target, VerticalAnchor.Bottom));
+    [Fact]
+    public void AttachRegion_Cases()
+    {
+        var m100 = CanvasMetrics.FromScale(1.0);
+        Assert.Equal(new CardPlacement(438, 390), OverlayLayoutPlanner.AttachRegion(AttachDirection.Below, m100));
+        Assert.Equal(new CardPlacement(0, 390), OverlayLayoutPlanner.AttachRegion(AttachDirection.Above, m100));
+
+        var m125 = CanvasMetrics.FromScale(1.25);
+        var below = OverlayLayoutPlanner.AttachRegion(AttachDirection.Below, m125);
+        Assert.Equal(new CardPlacement(548, 488), below);
+        Assert.Equal(new CardPlacement(0, 488), OverlayLayoutPlanner.AttachRegion(AttachDirection.Above, m125));
+        Assert.Equal(m125.HeightPx, below.OffsetPx + below.HeightPx);
+        Assert.Equal(1036, m125.HeightPx);
     }
 
-    [Fact]
-    public void AnchorEdgeShiftPx_TopAnchorClampedAtBottom_IsNegative()
-    {
-        // Top 고정이면 Bottom이 1326이 되어 work.Bottom(1032)에 맞게 위로 밀리므로 위 변이 294 px 올라간다.
-        var bar = Win(100, 900, 311, 48);
-        var target = OverlayLayoutPlanner.ResizeWindow(bar, 426, VerticalAnchor.Top, TaskbarWork);
-
-        Assert.Equal(TaskbarWork.Bottom, target.Bottom);
-        Assert.Equal(-294, OverlayLayoutPlanner.AnchorEdgeShiftPx(bar, target, VerticalAnchor.Top));
-    }
+    // WindowForCard
 
     [Fact]
-    public void AnchorEdgeShiftPx_MemoRestore_ReportsAnchorEdgeMovement()
+    public void WindowForCard_AllowsNegativeWindowTop()
     {
-        var bar = new PixelRect(100, 934, 411, 982);
-        var plan1 = OverlayLayoutPlanner.PlanTransition(bar, TaskbarWork, 426, Tol, null);
-        var memo = new OverlayLayoutPlanner.TransitionMemo(bar, plan1.TargetWindow, TaskbarWork, plan1.Anchor);
-        var plan2 = OverlayLayoutPlanner.PlanTransition(plan1.TargetWindow, TaskbarWork, 48, Tol, memo);
+        var m = CanvasMetrics.FromScale(1.0);
 
-        // 복원 대상의 Bottom은 원래 막대의 Bottom이고, 접기 전 창의 Bottom과 같다.
-        Assert.Equal(0, OverlayLayoutPlanner.AnchorEdgeShiftPx(plan1.TargetWindow, plan2.TargetWindow, plan1.Anchor));
+        var window = OverlayLayoutPlanner.WindowForCard(new PixelRect(0, 0, 311, 48), m.Slot, 311, 828);
+
+        Assert.Equal(new PixelRect(0, -390, 311, 438), window);
     }
 }

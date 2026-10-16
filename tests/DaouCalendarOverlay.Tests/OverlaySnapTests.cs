@@ -290,8 +290,8 @@ public sealed class OverlaySnapTests
         double[] scales = { 1.0, 1.25, 1.5, 1.75, 2.0 };
         double[] heightsDip =
         {
-            OverlayLayoutMetrics.ExpandedWindowHeightDip,
-            OverlayLayoutMetrics.MiniWindowHeightDip
+            OverlayLayoutMetrics.ExpandedCardHeightDip,
+            OverlayLayoutMetrics.MiniCardHeightDip
         };
 
         // 반복 수는 기존 1000건 그대로다(spec의 최소 500건 이상).

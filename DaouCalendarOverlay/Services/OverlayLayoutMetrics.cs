@@ -7,13 +7,6 @@ public enum OverlayDisplayMode
     MiniBar
 }
 
-/// <summary>창 크기를 바꿀 때 고정되는 쪽.</summary>
-public enum VerticalAnchor
-{
-    Top,
-    Bottom
-}
-
 /// <summary>막대를 기준으로 목록이 붙는 쪽.</summary>
 public enum AttachDirection
 {
@@ -24,14 +17,14 @@ public enum AttachDirection
 /// <summary>오버레이 창 배치에 쓰는 크기·시간 상수와 DIP-px 변환. 크기 상수는 DIP, 시간은 ms 또는 초다.</summary>
 public static class OverlayLayoutMetrics
 {
-    /// <summary>창 폭. 창 사각형이 곧 카드 사각형이다.</summary>
+    /// <summary>창 폭 = 카드 폭. 창은 이 폭의 고정 캔버스이고 폭을 바꾸지 않는다.</summary>
     public const double WindowWidthDip = 311;
 
-    /// <summary>펼침 창 높이(= 카드 높이).</summary>
-    public const double ExpandedWindowHeightDip = 426;
+    /// <summary>펼친 카드 높이.</summary>
+    public const double ExpandedCardHeightDip = 426;
 
-    /// <summary>막대 창 높이(= 막대 카드 높이, 테두리 포함).</summary>
-    public const double MiniWindowHeightDip = 48;
+    /// <summary>막대 카드 높이(테두리 포함).</summary>
+    public const double MiniCardHeightDip = 48;
 
     public const double MiniBarLineHeightDip = 17;
 
@@ -40,6 +33,12 @@ public static class OverlayLayoutMetrics
 
     /// <summary>막대에 붙는 목록 영역의 고정 높이(AttachGapDip 6 + 상세 카드 MaxHeight 380 + 여유 4).</summary>
     public const double AttachedRegionHeightDip = 390;
+
+    /// <summary>창 위 변 → 막대 칸 위 변. = max(ExpandedCardHeightDip - MiniCardHeightDip, AttachedRegionHeightDip) = max(378, 390).</summary>
+    public const double BarSlotOffsetDip = 390;
+
+    /// <summary>창 높이(XAML 초기값). = MiniCardHeightDip + 2 * BarSlotOffsetDip = 828.</summary>
+    public const double WindowHeightDip = MiniCardHeightDip + 2 * BarSlotOffsetDip;
 
     public const double SnapThresholdDip = 12;
 

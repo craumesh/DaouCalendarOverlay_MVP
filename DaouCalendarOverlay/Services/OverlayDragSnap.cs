@@ -2,8 +2,11 @@ using DaouCalendarOverlay.Models;
 
 namespace DaouCalendarOverlay.Services;
 
-/// <summary>드래그를 시작한 순간의 창 사각형과 커서 위치. 이동 루프 동안 바뀌지 않는다.</summary>
-public readonly record struct DragSnapSession(PixelRect StartWindow, PixelPoint StartCursor);
+/// <summary>
+/// 드래그를 시작한 순간의 기준 사각형과 커서 위치. 이동 루프 동안 바뀌지 않는다.
+/// 기준 사각형은 보이는 카드 사각형이고, Propose/Step의 폭·높이는 카드 폭·높이다.
+/// </summary>
+public readonly record struct DragSnapSession(PixelRect StartRect, PixelPoint StartCursor);
 
 /// <summary>
 /// 창 드래그 중 커서 이동량으로 제안 사각형을 계산하고 작업 영역에 붙이는 순수 로직.
@@ -28,8 +31,8 @@ public static class OverlayDragSnap
         if (heightPx <= 0)
             throw new ArgumentOutOfRangeException(nameof(heightPx), heightPx, "창 높이는 0보다 커야 합니다.");
 
-        var left = session.StartWindow.Left + (cursor.X - session.StartCursor.X);
-        var top = session.StartWindow.Top + (cursor.Y - session.StartCursor.Y);
+        var left = session.StartRect.Left + (cursor.X - session.StartCursor.X);
+        var top = session.StartRect.Top + (cursor.Y - session.StartCursor.Y);
         return new PixelRect(left, top, left + widthPx, top + heightPx);
     }
 

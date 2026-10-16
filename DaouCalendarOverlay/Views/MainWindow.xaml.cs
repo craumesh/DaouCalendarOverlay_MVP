@@ -56,13 +56,12 @@ public partial class MainWindow : Window
     private int _tickerGeneration;
     // 전환 애니메이션 중에만 의미가 있다. 아직 적용하지 않은 목표 창은 적용 뒤 null로 돌린다.
     private OverlayDisplayMode _pendingMode = OverlayDisplayMode.Expanded;
-    private PixelRect? _pendingWindowRect;
-    private VerticalAnchor _pendingAnchor = VerticalAnchor.Top;
-    // 직전 전환 메모와 진행 중인 전환의 시작 창. 메모리에만 두고 저장하지 않는다.
-    private OverlayLayoutPlanner.TransitionMemo? _lastTransition;
-    private PixelRect? _pendingWindowBefore;
-    // 목록을 붙이기 직전의 막대 창 사각형(px). 떼기에서 이 값으로 정확히 되돌린다.
-    private PixelRect? _preAttachWindowPx;
+    // 쉬는 상태의 카드 배치(창 위 변 기준 오프셋·높이, 현재 배율 px). ApplyCardPlacement만 바꾼다.
+    private CardPlacement _placement;
+    // 진행 중인 전환의 목표 카드 배치.
+    private CardPlacement? _pendingPlacement;
+    // ApplySettings가 받은 카드 왼쪽 위(DIP = 카드 px ÷ 창 배율, settings.json Left/Top과 같은 의미). 시작 배치에 쓴다.
+    private (double Left, double Top) _savedCardTopLeftDip;
     // 시스템 이동 루프(WM_ENTERSIZEMOVE~WM_EXITSIZEMOVE) 동안만 값이 있다. 시작 창 사각형과 시작 커서(물리 px).
     private DragSnapSession? _dragSession;
 
@@ -131,21 +130,43 @@ public partial class MainWindow : Window
                 OpacitySlider.Value = opacity;
             UpdateOpacityLabel(opacity);
 
-            // 전환 중이거나 목록이 붙어 있을 때 저장된 막대 위치를 다시 대입하면 창이 튄다.
-            if (!_transitionInProgress && _attached is null)
+            // 전환 중, 목록이 붙어 있을 때, 끌기 중에는 저장된 위치를 다시 적용하지 않는다(창이 튄다).
+            var skipPosition = _transitionInProgress || _attached is not null || _dragSession is not null;
+            if (!skipPosition)
             {
-                if (settings.Left is double left && settings.Top is double top &&
-                    double.IsFinite(left) && double.IsFinite(top))
+                // settings.json Left/Top = 보이는 카드의 왼쪽 위(DIP = 카드 px ÷ 창 배율). 7.4.0b(창 = 카드)에서 저장한 값도 같은 의미다.
+                // 저장값이 없으면 주 모니터 작업 영역 오른쪽 위에 카드를 둔다.
+                var (cardLeft, cardTop) =
+                    settings.Left is double left && settings.Top is double top && double.IsFinite(left) && double.IsFinite(top)
+                        ? (left, top)
+                        : (SystemParameters.WorkArea.Right - OverlayLayoutMetrics.WindowWidthDip - 20, SystemParameters.WorkArea.Top + 20);
+                _savedCardTopLeftDip = (cardLeft, cardTop);
+
+                if (_hwndSource is null)
                 {
+                    // 생성자 경로(창 핸들 전): HWND가 카드가 있는 모니터에 만들어지도록 임시 창 위치만 둔다.
+                    // 정확한 px 배치는 SourceInitialized의 ApplyInitialPlacement가 _savedCardTopLeftDip에서 DipToPx로 직접 만든다.
+                    // 이 대입만으로 위치를 정하면 소수 배율에서 재시작마다 1px씩 밀린다(R5).
                     WindowStartupLocation = WindowStartupLocation.Manual;
-                    Left = left;
-                    Top = top;
+                    Left = cardLeft;
+                    Top = cardTop - OverlayLayoutMetrics.BarSlotOffsetDip;
                 }
-                else
+                else if (_saveBoundsTimer is { IsEnabled: true })
                 {
-                    WindowStartupLocation = WindowStartupLocation.Manual;
-                    Left = SystemParameters.WorkArea.Right - Width - 20;
-                    Top = SystemParameters.WorkArea.Top + 20;
+                    // 저장 대기 중이면 메모리 설정값이 현재 카드보다 오래됐다. 대기 중인 저장이 현재 카드를 기록한다.
+                    // (끌기·클램프 뒤 400 ms 안에 설정창 저장이나 항상 위 전환이 오면, 오래된 Left/Top으로 카드가 튀지 않게 한다.)
+                }
+                else if (GetWindowRectPx() is PixelRect win)
+                {
+                    // 핸들이 있으면 카드 배치는 그대로 두고 창만 옮긴다. 설정창 저장은 Left/Top을 보존하므로
+                    // 같은 배율에서는 카드 px가 그대로라(px / scale → DipToPx 왕복) 창 호출이 없다.
+                    var scale = GetDpiScale();
+                    var x = OverlayLayoutMetrics.DipToPx(cardLeft, scale);
+                    var y = OverlayLayoutMetrics.DipToPx(cardTop, scale);
+                    var card = new PixelRect(x, y, x + win.Width, y + _placement.HeightPx);
+                    ApplyRestingLayout(
+                        new RestingLayout(OverlayLayoutPlanner.WindowForCard(card, _placement, win.Width, win.Height), _placement),
+                        scale);
                 }
             }
         }
@@ -304,23 +325,26 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 막대에 오늘 일정 목록을 붙여 연다. 창 위치·크기 변경은 ApplyWindowRectPx 1회뿐이다.
+    /// 막대에 오늘 일정 목록을 붙여 연다. 창은 옮기지 않고 두 오버레이의 Margin·Height만 붙임 영역으로 바꾼다.
     /// 붙인 동안은 위치 저장을 막고(_suppressBoundsSave), 드래그는 오버레이가 보이는 동안 이미 막혀 있다.
     /// </summary>
     private void OpenAttachedDayList()
     {
         // 전환 마무리는 위치 저장 억제를 풀므로, 전환 중에는 열지 않는다(붙인 상태의 위치가 저장되지 않게).
-        if (_transitionInProgress || GetWindowRectPx() is not PixelRect win)
+        if (_transitionInProgress || _dragSession is not null || GetWindowRectPx() is not PixelRect win)
             return;
 
         var scale = GetDpiScale();
-        var work = GetWorkAreaPx(win);
-        var dir = OverlayLayoutPlanner.ChooseAttachDirection(
-            win,
-            work,
-            OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.AttachedRegionHeightDip, scale));
+        var m = CanvasMetrics.FromScale(scale);
+        var bar = _placement.InWindow(win);
+        var dir = OverlayLayoutPlanner.ChooseAttachDirection(bar, GetWorkAreaPx(bar), m.AttachRegionPx);
+        var region = OverlayLayoutPlanner.AttachRegion(dir, m);
 
-        _preAttachWindowPx = win;
+        // 끌기 직후(400 ms 안)에 붙이면 대기 중인 위치 저장을 버리지 않고 지금 기록한다. 붙이기·떼기는 창을 옮기지 않고
+        // 떼기는 저장을 예약하지 않으므로, 버리면 메모리 설정값이 끌기 전 위치로 남아 다음 ApplySettings·재시작에서 카드가 되돌아간다.
+        if (_saveBoundsTimer is { IsEnabled: true })
+            SaveBoundsTimer_Tick(_saveBoundsTimer, EventArgs.Empty);
+
         _suppressBoundsSave = true;
         _saveBoundsTimer?.Stop();
         if (_tickerAnimating)
@@ -329,88 +353,63 @@ public partial class MainWindow : Window
             _miniTickerTimer?.Stop();
         _attached = dir;
 
-        var row = dir == AttachDirection.Below ? 2 : 0;
-        var attachRow = dir == AttachDirection.Below ? AttachBelowRow : AttachAboveRow;
-        attachRow.Height = new GridLength(OverlayLayoutMetrics.AttachedRegionHeightDip);
-        Grid.SetRow(DayEventsOverlay, row);
-        Grid.SetRow(EventDetailsOverlay, row);
-        // 막대 카드와 붙인 목록 카드 사이 간격은 막대 쪽 변에만 둔다.
+        // 두 오버레이는 붙임 영역에 둔다. 막대 카드와 목록 카드 사이 간격은 막대 쪽 변(Below=위, Above=아래)에만 둔다.
+        var regionTop = region.OffsetPx / scale;
+        var regionHeight = region.HeightPx / scale - OverlayLayoutMetrics.AttachGapDip;
         var margin = dir == AttachDirection.Below
-            ? new Thickness(0, OverlayLayoutMetrics.AttachGapDip, 0, 0)
-            : new Thickness(0, 0, 0, OverlayLayoutMetrics.AttachGapDip);
+            ? new Thickness(0, regionTop + OverlayLayoutMetrics.AttachGapDip, 0, 0)
+            : new Thickness(0, regionTop, 0, 0);
         DayEventsOverlay.Margin = margin;
         EventDetailsOverlay.Margin = margin;
+        DayEventsOverlay.Height = regionHeight;
+        EventDetailsOverlay.Height = regionHeight;
         // 알파 0 픽셀은 레이어드 창에서 클릭이 통과한다.
         DayEventsBackdrop.Background = Brushes.Transparent;
         EventDetailsBackdrop.Background = Brushes.Transparent;
         var cardAlignment = dir == AttachDirection.Below ? VerticalAlignment.Top : VerticalAlignment.Bottom;
         DayEventsCard.VerticalAlignment = cardAlignment;
         EventDetailsCard.VerticalAlignment = cardAlignment;
-
-        // 높이는 막대 창과 붙인 영역을 합친 DIP를 한 번에 환산한다(떼기 왕복이 px 단위로 맞게).
-        ApplyWindowRectPx(OverlayLayoutPlanner.ResizeWindow(
-            win,
-            OverlayLayoutMetrics.DipToPx(
-                OverlayLayoutMetrics.MiniWindowHeightDip + OverlayLayoutMetrics.AttachedRegionHeightDip, scale),
-            OverlayLayoutPlanner.ToAnchor(dir),
-            work));
+        // 그림자는 카드 바깥에 알파가 0이 아닌 픽셀을 남기므로 붙인 동안은 없앤다.
+        DayEventsCard.Effect = null;
+        EventDetailsCard.Effect = null;
 
         // 끝난 일정을 포함하고 숨긴 캘린더만 제외한다. 검색 필터는 적용하지 않는다.
         ShowDayEvents(DateTime.Today, _vm.GetUnfilteredEventChipsForDate(DateTime.Today));
     }
 
     /// <summary>
-    /// 막대에 붙은 목록을 떼고 오버레이 배치를 펼침 모드 값으로 되돌린다.
-    /// 창은 붙이기 직전 사각형으로 ApplyWindowRectPx 1회에 복원한다(붙인 동안은 드래그가 막혀 위치가 바뀌지 않는다).
+    /// 막대에 붙은 목록을 떼고 오버레이 배치를 카드 사각형 값으로 되돌린다. 창은 옮기지 않는다.
     /// 전환 중에는 불리지 않는다. 펼치기는 전환 플래그를 세우기 전에 OnMiniBarLeaving에서 먼저 떼고,
     /// HideOverlay는 FinishTransitionNow 뒤에 부르며, 전환 중에는 목록을 붙이지 않는다.
     /// </summary>
     private void CloseAttached()
     {
-        if (_attached is not AttachDirection dir)
+        if (_attached is null)
             return;
 
         _returnToDayListAfterDetails = false;
         DayEventsOverlay.Visibility = Visibility.Collapsed;
         EventDetailsOverlay.Visibility = Visibility.Collapsed;
-
-        if (_preAttachWindowPx is PixelRect pre)
-        {
-            ApplyWindowRectPx(pre);
-        }
-        else if (GetWindowRectPx() is PixelRect win)
-        {
-            var scale = GetDpiScale();
-            ApplyWindowRectPx(OverlayLayoutPlanner.ResizeWindow(
-                win,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.MiniWindowHeightDip, scale),
-                OverlayLayoutPlanner.ToAnchor(dir),
-                GetWorkAreaPx(win)));
-        }
-
-        AttachBelowRow.Height = new GridLength(0);
-        AttachAboveRow.Height = new GridLength(0);
         RestoreOverlayPlacement();
 
         _attached = null;
-        _preAttachWindowPx = null;
         _suppressBoundsSave = false;
-        ScheduleBoundsSave();
-        ClampToVisibleWorkArea();
         UpdateTickerState();
     }
 
-    // 목록·상세 오버레이를 펼침 모드의 배치(Row 1, 여백 9, 어두운 배경판, 가운데 정렬)로 되돌린다.
+    // 목록·상세 오버레이를 카드 사각형(Margin·Height = RootChrome), 어두운 배경판, 가운데 정렬, 그림자로 되돌린다.
     private void RestoreOverlayPlacement()
     {
-        Grid.SetRow(DayEventsOverlay, 1);
-        Grid.SetRow(EventDetailsOverlay, 1);
-        DayEventsOverlay.Margin = new Thickness(9);
-        EventDetailsOverlay.Margin = new Thickness(9);
+        DayEventsOverlay.Margin = RootChrome.Margin;
+        EventDetailsOverlay.Margin = RootChrome.Margin;
+        DayEventsOverlay.Height = RootChrome.Height;
+        EventDetailsOverlay.Height = RootChrome.Height;
         DayEventsBackdrop.Background = CreateBackdropBrush();
         EventDetailsBackdrop.Background = CreateBackdropBrush();
         DayEventsCard.VerticalAlignment = VerticalAlignment.Center;
         EventDetailsCard.VerticalAlignment = VerticalAlignment.Center;
+        DayEventsCard.Effect = DayEventsCardShadow;
+        EventDetailsCard.Effect = EventDetailsCardShadow;
     }
 
     private static SolidColorBrush CreateBackdropBrush()
@@ -525,7 +524,8 @@ public partial class MainWindow : Window
 
     private static UIElement CreateMiniRow(EventChipViewModel chip)
     {
-        var row = new Grid { Height = OverlayLayoutMetrics.MiniBarLineHeightDip };
+        var row = new Grid();
+        row.Height = OverlayLayoutMetrics.MiniBarLineHeightDip;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -680,15 +680,15 @@ public partial class MainWindow : Window
     /// <summary>생성자에서 한 번만 부른다. 저장된 최소화 상태를 애니메이션 없이 적용한다.</summary>
     private void ApplyInitialDisplayMode(bool minimized)
     {
-        // 창 사각형이 곧 카드 사각형이다. 쉬는 상태의 카드는 두 모드 모두 높이를 비워(NaN) CardRow를 꽉 채운다.
-        RootChrome.Height = double.NaN;
+        // 창은 311x828 고정 캔버스다. 카드는 막대 칸 위 변(BarSlotOffsetDip)에 두고 높이만 모드별로 정한다.
+        // 정확한 px 배치는 SourceInitialized의 ApplyInitialPlacement가 맡는다.
+        RootChrome.Margin = new Thickness(0, OverlayLayoutMetrics.BarSlotOffsetDip, 0, 0);
+        RootChrome.Height = minimized
+            ? OverlayLayoutMetrics.MiniCardHeightDip
+            : OverlayLayoutMetrics.ExpandedCardHeightDip;
         if (!minimized)
-        {
-            Height = OverlayLayoutMetrics.ExpandedWindowHeightDip;
             return;
-        }
 
-        Height = OverlayLayoutMetrics.MiniWindowHeightDip;
         ExpandedContent.Visibility = Visibility.Collapsed;
         MiniBarContent.Visibility = Visibility.Visible;
         _displayMode = OverlayDisplayMode.MiniBar;
@@ -700,31 +700,87 @@ public partial class MainWindow : Window
             _displayMode == OverlayDisplayMode.Expanded ? BeginCollapseAsync() : BeginExpandAsync());
     }
 
-    // 접기·펼치기의 목표 창과 기준 모서리를 정한다. 직전 전환 메모가 지금 창과 맞으면
-    // 직전 전환 앞의 사각형으로 되돌려 왕복이 원래 위치로 돌아오게 한다(맞지 않으면 일반 계산).
-    private OverlayLayoutPlanner.TransitionPlan PlanTransitionFor(PixelRect win, OverlayDisplayMode targetMode)
+    // 쉬는 상태의 카드 사각형(물리 px). 창 사각형에 현재 카드 배치를 적용한다. 창 핸들이 없으면 null.
+    private PixelRect? GetCardRectPx() =>
+        GetWindowRectPx() is PixelRect win ? _placement.InWindow(win) : null;
+
+    // 저장 좌표: 보이는 카드의 왼쪽 위(DIP = 카드 px ÷ 창 배율). 같은 배율에서 DipToPx로 원래 px가 정확히 돌아온다. 핸들이 없으면 null.
+    private (double Left, double Top)? GetCardTopLeftDip()
     {
+        if (GetCardRectPx() is not PixelRect card)
+            return null;
+
         var scale = GetDpiScale();
-        var work = GetWorkAreaPx(win);
-        var newHeight = OverlayLayoutMetrics.DipToPx(
-            targetMode == OverlayDisplayMode.MiniBar
-                ? OverlayLayoutMetrics.MiniWindowHeightDip
-                : OverlayLayoutMetrics.ExpandedWindowHeightDip,
-            scale);
-        return OverlayLayoutPlanner.PlanTransition(
-            win,
-            work,
-            newHeight,
-            OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, scale),
-            _lastTransition);
+        return (card.Left / scale, card.Top / scale);
     }
 
-    // 전환 한 번마다 창 위치·크기 변경은 ApplyWindowRectPx 1회뿐이다.
+    // 쉬는 배치(시작·설정 적용)를 적용한다. 카드 배치를 먼저 정하고, 창은 현재와 다를 때만 1회 옮긴다.
+    private void ApplyRestingLayout(RestingLayout layout, double scale)
+    {
+        ApplyCardPlacement(layout.Placement, scale);
+        if (GetWindowRectPx() != layout.Window)
+            ApplyWindowRectPx(layout.Window);
+    }
+
+    // 시작 배치. SourceInitialized에서 WndProc 훅을 단 뒤 동기로 부른다(창이 보이기 전이라 깜빡이지 않는다).
+    // 저장된 카드 왼쪽 위(DIP)를 창 배율 하나로 px로 바꾸고, 카드가 가장 많이 걸친 모니터의 작업 영역으로 쉬는 배치를 정한다.
+    private void ApplyInitialPlacement()
+    {
+        try
+        {
+            var scale = GetDpiScale();
+            var m = CanvasMetrics.FromScale(scale);
+            var tl = new PixelPoint(
+                OverlayLayoutMetrics.DipToPx(_savedCardTopLeftDip.Left, scale),
+                OverlayLayoutMetrics.DipToPx(_savedCardTopLeftDip.Top, scale));
+            var cardHeight = _displayMode == OverlayDisplayMode.MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx;
+            var work = GetWorkAreaPx(new PixelRect(tl.X, tl.Y, tl.X + m.WidthPx, tl.Y + cardHeight));
+            ApplyRestingLayout(OverlayLayoutPlanner.PlanRestingLayout(tl, _displayMode, work, m), scale);
+
+            // OS가 최대 추적 크기로 창 높이를 잘라 내면 아래쪽 펼치기와 목록 붙이기가 창 밖으로 나간다(R1).
+            if (GetWindowRectPx() is PixelRect win && win.Height < m.HeightPx)
+                LogService.Warn("ui.layout", $"창 캔버스 높이 부족: 요구={m.HeightPx} 실제={win.Height}");
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.layout", ex);
+            // 배치를 정하기 전에 실패하면 _placement가 기본값(0, 0)으로 남아, 화면의 카드(창 위 변 + BarSlotOffsetDip)와
+            // 카드 판정·저장(GetCardRectPx)이 어긋난다. 그대로 저장하면 창 왼쪽 위가 카드 왼쪽 위로 기록돼 다음 시작에서 막대 칸만큼 밀린다.
+            // ApplyInitialDisplayMode가 둔 XAML 배치와 같은 px 배치로 맞추고, 창 위치는 이어지는 카드 기준 클램프에 맡긴다.
+            // 폴백은 창을 옮기지 않는다. 폴백이 다시 던져도 SourceInitialized 밖으로 내보내지 않고 경고로만 남긴다.
+            try
+            {
+                var scale = GetDpiScale();
+                if (_placement == default && double.IsFinite(scale) && scale > 0)
+                {
+                    var m = CanvasMetrics.FromScale(scale);
+                    ApplyCardPlacement(_displayMode == OverlayDisplayMode.MiniBar ? m.Slot : m.ExpandedDown, scale);
+                }
+            }
+            catch (Exception fallbackEx)
+            {
+                LogService.Warn("ui.layout", "시작 배치 폴백 실패", fallbackEx);
+            }
+        }
+    }
+
+    // 카드 배치를 XAML에 적용한다. px를 DIP로 바꿀 때는 px / scale을 그대로 대입해야 WPF 레이아웃 반올림이 원래 px로 돌아온다.
+    // 목록이 붙어 있지 않으면 두 오버레이도 카드 사각형으로 맞춘다.
+    private void ApplyCardPlacement(CardPlacement placement, double scale)
+    {
+        RootChrome.Margin = new Thickness(0, placement.OffsetPx / scale, 0, 0);
+        RootChrome.Height = placement.HeightPx / scale;
+        _placement = placement;
+        if (_attached is null)
+            RestoreOverlayPlacement();
+    }
+
+    // 전환 중에는 창 위치·크기를 바꾸지 않는다. 카드가 고정 캔버스 안에서 Margin·Height만 바뀐다.
     // 전환 버튼은 창이 화면에 있을 때만 눌리므로 창 핸들이 항상 있다. 핸들이 없으면(창 생성 전)
     // 아무 상태도 바꾸지 않고 끝낸다. 그래야 모드, 화면, 저장값이 서로 어긋나지 않는다.
     private Task BeginCollapseAsync()
     {
-        if (_transitionInProgress || GetWindowRectPx() is not PixelRect win)
+        if (_transitionInProgress || _dragSession is not null || GetWindowRectPx() is null)
             return Task.CompletedTask;
 
         _transitionInProgress = true;
@@ -748,17 +804,15 @@ public partial class MainWindow : Window
                 _ = RunGuardedAsync("ui.collapseRefresh", () => ((App)WpfApplication.Current).RefreshAsync(false));
             }
 
-            var plan = PlanTransitionFor(win, OverlayDisplayMode.MiniBar);
+            var target = CanvasMetrics.FromScale(GetDpiScale()).Slot;
 
             _pendingMode = OverlayDisplayMode.MiniBar;
-            _pendingWindowRect = plan.TargetWindow;
-            _pendingAnchor = plan.Anchor;
-            _pendingWindowBefore = win;
+            _pendingPlacement = target;
 
             if (SystemParameters.ClientAreaAnimation)
                 StartCollapseAnimation(_transitionGeneration);
             else
-                ApplyCollapsedState(plan.TargetWindow);
+                ApplyCollapsedState(target);
         }
         catch
         {
@@ -773,11 +827,11 @@ public partial class MainWindow : Window
 
     private Task BeginExpandAsync()
     {
-        if (_transitionInProgress || GetWindowRectPx() is null)
+        if (_transitionInProgress || _dragSession is not null || GetWindowRectPx() is null)
             return Task.CompletedTask;
 
         // 붙인 목록은 전환 플래그를 세우기 전에 먼저 뗀다. 그래야 CloseAttached가 전환 밖에서 끝나고,
-        // 떼기가 예약한 위치 저장은 바로 아래 Stop으로 취소되어 저장은 ApplyExpandedState의 한 번뿐이다(저장 원자성).
+        // 떼기는 위치 저장을 예약하지 않으므로 저장은 ApplyExpandedState의 한 번뿐이다(저장 원자성).
         OnMiniBarLeaving();
 
         _transitionInProgress = true;
@@ -787,24 +841,23 @@ public partial class MainWindow : Window
 
         try
         {
-            // 붙인 목록을 떼면 창 사각형이 바뀌므로 정리 뒤에 다시 읽는다.
+            // 붙인 목록을 뗀 뒤의 창을 다시 읽는다.
             if (GetWindowRectPx() is not PixelRect win)
             {
                 AbortTransition();
                 return Task.CompletedTask;
             }
 
-            var plan = PlanTransitionFor(win, OverlayDisplayMode.Expanded);
+            var m = CanvasMetrics.FromScale(GetDpiScale());
+            var target = OverlayLayoutPlanner.PlanExpandedPlacement(win, GetWorkAreaPx(m.Slot.InWindow(win)), m);
 
             _pendingMode = OverlayDisplayMode.Expanded;
-            _pendingWindowRect = plan.TargetWindow;
-            _pendingAnchor = plan.Anchor;
-            _pendingWindowBefore = win;
+            _pendingPlacement = target;
 
             if (SystemParameters.ClientAreaAnimation)
                 StartExpandAnimation(_transitionGeneration);
             else
-                ApplyExpandedState(plan.TargetWindow);
+                ApplyExpandedState(target);
         }
         catch
         {
@@ -817,9 +870,8 @@ public partial class MainWindow : Window
     }
 
     // 접기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로, 즉시 확정, 애니메이션 꺼짐 경로가 모두 이 메서드로 끝난다.
-    // 첫머리에서 전환 애니메이션을 해제하고 공유 요소 상태(유령 층, 실제 블록 Opacity, 고정 높이)를 되돌린다.
-    // target이 null이면 창은 이미 적용된 것이다.
-    private void ApplyCollapsedState(PixelRect? target)
+    // 첫머리에서 전환 애니메이션을 해제하고 공유 요소 상태(유령 층, 실제 블록 Opacity, 고정 높이, 내용 Margin)를 되돌린다.
+    private void ApplyCollapsedState(CardPlacement target)
     {
         ClearTransitionAnimations();
         ResetSharedElementState();
@@ -827,22 +879,19 @@ public partial class MainWindow : Window
         ExpandedContent.Opacity = 1;
         MiniBarContent.Opacity = 1;
         MiniBarContent.Visibility = Visibility.Visible;
-        if (target is PixelRect rect)
-            ApplyWindowRectPx(rect);
-        _pendingWindowRect = null;
-        // 창 적용 뒤 실제 창을 읽어 왕복 복원 메모로 남긴다. 메모리에만 두고 저장하지 않는다.
-        if (_pendingWindowBefore is PixelRect b && GetWindowRectPx() is PixelRect a)
-            _lastTransition = new OverlayLayoutPlanner.TransitionMemo(b, a, GetWorkAreaPx(a), _pendingAnchor);
-        _pendingWindowBefore = null;
+        ApplyCardPlacement(target, GetDpiScale());
+        _pendingPlacement = null;
 
         _displayMode = OverlayDisplayMode.MiniBar;
         _suppressBoundsSave = false;
         EnsureKeyboardFocus();
 
-        var left = Left;
-        var top = Top;
-        _ = RunGuardedAsync("ui.saveOverlayLayout", () =>
-            ((App)WpfApplication.Current).SaveOverlayLayoutAsync(true, left, top));
+        // 저장 값은 끝 배치를 적용한 뒤의 카드 왼쪽 위(DIP)다. 창 왼쪽 위(WPF Left/Top)가 아니다.
+        if (GetCardTopLeftDip() is { } tl)
+            _ = RunGuardedAsync("ui.saveOverlayLayout", () =>
+                ((App)WpfApplication.Current).SaveOverlayLayoutAsync(true, tl.Left, tl.Top));
+        else
+            LogService.Warn("ui.saveOverlayLayout", "창 핸들이 없어 최소화 상태와 위치를 저장하지 못했습니다.");
 
         OnMiniBarEntered();
         _transitionInProgress = false;
@@ -852,8 +901,7 @@ public partial class MainWindow : Window
 
     // 펼치기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로, 즉시 확정, 애니메이션 꺼짐 경로가 모두 이 메서드로 끝난다.
     // 첫머리에서 전환 애니메이션을 해제하고 공유 요소 상태를 되돌린다.
-    // target이 null이면 창은 이미 적용된 것이다(애니메이션 경로는 단계 B에서 창을 적용했다).
-    private void ApplyExpandedState(PixelRect? target)
+    private void ApplyExpandedState(CardPlacement target)
     {
         ClearTransitionAnimations();
         ResetSharedElementState();
@@ -861,22 +909,19 @@ public partial class MainWindow : Window
         MiniBarContent.Opacity = 1;
         ExpandedContent.Opacity = 1;
         ExpandedContent.Visibility = Visibility.Visible;
-        if (target is PixelRect rect)
-            ApplyWindowRectPx(rect);
-        _pendingWindowRect = null;
-        // 창 적용 뒤 실제 창을 읽어 왕복 복원 메모로 남긴다. 메모리에만 두고 저장하지 않는다.
-        if (_pendingWindowBefore is PixelRect b && GetWindowRectPx() is PixelRect a)
-            _lastTransition = new OverlayLayoutPlanner.TransitionMemo(b, a, GetWorkAreaPx(a), _pendingAnchor);
-        _pendingWindowBefore = null;
+        ApplyCardPlacement(target, GetDpiScale());
+        _pendingPlacement = null;
 
         _displayMode = OverlayDisplayMode.Expanded;
         _suppressBoundsSave = false;
         EnsureKeyboardFocus();
 
-        var left = Left;
-        var top = Top;
-        _ = RunGuardedAsync("ui.saveOverlayLayout", () =>
-            ((App)WpfApplication.Current).SaveOverlayLayoutAsync(false, left, top));
+        // 저장 값은 끝 배치를 적용한 뒤의 카드 왼쪽 위(DIP)다. 창 왼쪽 위(WPF Left/Top)가 아니다.
+        if (GetCardTopLeftDip() is { } tl)
+            _ = RunGuardedAsync("ui.saveOverlayLayout", () =>
+                ((App)WpfApplication.Current).SaveOverlayLayoutAsync(false, tl.Left, tl.Top));
+        else
+            LogService.Warn("ui.saveOverlayLayout", "창 핸들이 없어 최소화 상태와 위치를 저장하지 못했습니다.");
 
         _transitionInProgress = false;
     }
@@ -887,6 +932,12 @@ public partial class MainWindow : Window
         new(from, to, Ms(OverlayLayoutMetrics.ContentFadeMilliseconds));
 
     private static DoubleAnimation CreateHeightAnimation(double from, double to) =>
+        new(from, to, Ms(OverlayLayoutMetrics.HeightAnimationMilliseconds))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        };
+
+    private static ThicknessAnimation CreateThicknessAnimation(Thickness from, Thickness to) =>
         new(from, to, Ms(OverlayLayoutMetrics.HeightAnimationMilliseconds))
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
@@ -916,6 +967,9 @@ public partial class MainWindow : Window
         MiniBarContent.BeginAnimation(OpacityProperty, null);
         RootChrome.BeginAnimation(OpacityProperty, null);
         RootChrome.BeginAnimation(HeightProperty, null);
+        RootChrome.BeginAnimation(MarginProperty, null);
+        ExpandedContent.BeginAnimation(MarginProperty, null);
+        MiniBarContent.BeginAnimation(MarginProperty, null);
         SharedClockGhost.BeginAnimation(Canvas.LeftProperty, null);
         SharedClockGhost.BeginAnimation(Canvas.TopProperty, null);
         SharedClockGhost.BeginAnimation(WidthProperty, null);
@@ -928,7 +982,8 @@ public partial class MainWindow : Window
 
     // 공유 요소 전환이 바꾼 로컬 값을 쉬는 상태로 되돌린다. 애니메이션은 ClearTransitionAnimations로 먼저 해제해야
     // 이 대입이 HoldEnd 값에 가려지지 않는다. 끝나면 유령 층은 접혀 있고, 실제 날짜·시계 블록은 불투명하며,
-    // 카드와 두 내용은 고정 높이 없이 칸을 채운다. 내용의 Visibility는 호출한 쪽이 정한다.
+    // 두 내용은 고정 높이 없이 카드 안을 채우고 Margin이 쉬는 값이다. 카드의 Margin·Height는 ApplyCardPlacement가 맡는다.
+    // 내용의 Visibility는 호출한 쪽이 정한다.
     private void ResetSharedElementState()
     {
         TransitionLayer.Visibility = Visibility.Collapsed;
@@ -940,8 +995,8 @@ public partial class MainWindow : Window
         MiniBarContent.Height = double.NaN;
         MiniBarContent.VerticalAlignment = VerticalAlignment.Stretch;
         MiniBarContent.IsHitTestVisible = true;
-        RootChrome.VerticalAlignment = VerticalAlignment.Stretch;
-        RootChrome.Height = double.NaN;
+        ExpandedContent.Margin = new Thickness(8);
+        MiniBarContent.Margin = new Thickness(6, 4, 6, 4);
     }
 
     // e의 배치 사각형을 root 좌표(DIP)로 잰다. 측정 전에 e가 Visible이고 레이아웃이 끝나 있어야 한다.
@@ -990,54 +1045,51 @@ public partial class MainWindow : Window
         incoming.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration));
     }
 
-    private static VerticalAlignment ToVerticalAlignment(VerticalAnchor anchor) =>
-        anchor == VerticalAnchor.Bottom ? VerticalAlignment.Bottom : VerticalAlignment.Top;
-
-    // 막대 카드(MiniWindowHeightDip) 안에서 막대 내용이 차지하는 높이: 카드 테두리와 내용 Margin의 세로 합을 뺀다.
+    // 막대 카드(MiniCardHeightDip) 안에서 막대 내용이 차지하는 높이: 카드 테두리와 내용 Margin의 세로 합을 뺀다.
     private double MiniBarContentHeightDip() =>
-        OverlayLayoutMetrics.MiniWindowHeightDip
+        OverlayLayoutMetrics.MiniCardHeightDip
         - RootChrome.BorderThickness.Top - RootChrome.BorderThickness.Bottom
         - MiniBarContent.Margin.Top - MiniBarContent.Margin.Bottom;
 
-    // 접기(총 200 ms). t0(동기): 카드와 펼친 내용의 높이를 고정하고, 막대 내용을 보이지 않게 기준 모서리 쪽에 배치한 뒤
-    // 레이아웃을 확정하고 두 날짜·시계 블록을 잰다. 이어서 펼친 내용 페이드아웃(0–120 ms), 카드 높이 축소(0–200 ms),
+    // 접기(총 200 ms). 창은 움직이지 않고 카드가 고정 캔버스 안에서 Margin·Height만 바꾼다.
+    // 기호(DIP): fromTop/fromH = 지금 카드, toTop/toH = 막대 칸, d = toTop - fromTop (0 이상).
+    // t0(동기): 펼친 내용의 높이를 고정하고, 막대 내용을 보이지 않게 카드 위 변에서 d 아래(= 끝 화면 위치)에 배치한 뒤
+    // 레이아웃을 확정하고 두 날짜·시계 블록을 잰다. 창이 그대로라 측정값이 곧 최종 화면 위치다.
+    // 이어서 펼친 내용 페이드아웃(0–120 ms), 카드 높이·위치 이동(0–200 ms), 내용 Margin 보정(0–200 ms, 내용은 화면에서 제자리),
     // 유령 이동(0–200 ms), 막대 내용 페이드인(80–200 ms)을 함께 시작한다.
-    // 창은 이 메서드에서 바꾸지 않고 끝 상태(ApplyCollapsedState)에서 1회 바꾼다.
     private void StartCollapseAnimation(int generation)
     {
-        var target = _pendingWindowRect ?? throw new InvalidOperationException("접기 목표 창이 없습니다.");
-        var win = GetWindowRectPx() ?? throw new InvalidOperationException("창 사각형을 읽지 못했습니다.");
+        var target = _pendingPlacement ?? throw new InvalidOperationException("접기 목표 배치가 없습니다.");
         var scale = GetDpiScale();
-        var alignment = ToVerticalAlignment(_pendingAnchor);
+        var fromTop = _placement.OffsetPx / scale;
+        var fromH = _placement.HeightPx / scale;
+        var toTop = target.OffsetPx / scale;
+        var toH = target.HeightPx / scale;
+        var d = toTop - fromTop;
 
         ClearTransitionAnimations();
 
-        // 1. 카드와 펼친 내용의 높이를 현재 값으로 고정한다. 카드가 줄어도 내용이 다시 배치되지 않고 기준 모서리 쪽에 머문다.
-        var startHeight = RootChrome.ActualHeight;
-        RootChrome.Height = startHeight;
-        RootChrome.VerticalAlignment = alignment;
+        // 1. 펼친 내용의 높이를 현재 값으로 고정한다. 카드가 줄어도 내용이 다시 배치되지 않고 위쪽에 머문다(넘친 부분은 CardContentHost가 자른다).
         ExpandedContent.Height = ExpandedContent.ActualHeight;
-        ExpandedContent.VerticalAlignment = alignment;
+        ExpandedContent.VerticalAlignment = VerticalAlignment.Top;
         ExpandedContent.IsHitTestVisible = false;
 
-        // 2. 막대 내용을 보이지 않게 막대 카드 자리(기준 모서리 쪽)에 미리 배치한다. 측정하려면 Visible이어야 한다.
+        // 2. 막대 내용을 보이지 않게 미리 배치한다. 측정하려면 Visible이어야 한다.
         //    페이드인 동안 지난 막대 세션의 일정 행이 보이지 않게 오늘 일정을 먼저 다시 읽는다(끝 상태에서도 한 번 더 읽는다).
         ReloadTodayVisible();
         MiniBarContent.Opacity = 0;
         MiniBarContent.IsHitTestVisible = false;
         MiniBarContent.Height = MiniBarContentHeightDip();
-        MiniBarContent.VerticalAlignment = alignment;
+        MiniBarContent.VerticalAlignment = VerticalAlignment.Top;
+        MiniBarContent.Margin = new Thickness(6, 4 + d, 6, 4);
         MiniBarContent.Visibility = Visibility.Visible;
 
         // 3. 측정 전에 레이아웃을 확정한다.
         UpdateLayout();
 
-        // 4. 출발·도착 사각형. 도착은 지금 창 좌표로 잰 값이고 창은 끝 상태에서 target으로 바뀐다.
-        //    기준 모서리 변과 왼쪽 변이 옮겨지는 만큼(클램프·메모 복원, 없으면 0) 더해 화면상 도착 위치에 맞춘다.
+        // 4. 출발·도착 사각형. 보정 없음.
         var from = RectIn(ExpandedClockBlock, TransitionLayer);
         var to = RectIn(MiniClockBlock, TransitionLayer);
-        to.Y += OverlayLayoutPlanner.AnchorEdgeShiftPx(win, target, _pendingAnchor) / scale;
-        to.X += (target.Left - win.Left) / scale;
 
         // 5. 실제 블록 두 개를 감추고 유령을 출발 자리에 펼침 서식으로 띄운다.
         ExpandedClockBlock.Opacity = 0;
@@ -1045,28 +1097,35 @@ public partial class MainWindow : Window
         ShowGhostAt(from, true);
 
         var fadeOut = CreateFade(1, 0);
-        var shrink = CreateHeightAnimation(startHeight, OverlayLayoutMetrics.MiniWindowHeightDip);
+        var shrink = CreateHeightAnimation(fromH, toH);
         shrink.Completed += (_, _) => RunTransitionStep(generation, () => ApplyCollapsedState(target));
+        var slide = CreateThicknessAnimation(new Thickness(0, fromTop, 0, 0), new Thickness(0, toTop, 0, 0));
+        var expandedShift = CreateThicknessAnimation(new Thickness(8, 8, 8, 8), new Thickness(8, 8 - d, 8, 8));
+        var miniShift = CreateThicknessAnimation(new Thickness(6, 4 + d, 6, 4), new Thickness(6, 4, 6, 4));
         var incomingFade = CreateFade(0, 1);
         incomingFade.BeginTime = TimeSpan.FromMilliseconds(OverlayLayoutMetrics.IncomingFadeBeginMilliseconds);
 
         ExpandedContent.BeginAnimation(OpacityProperty, fadeOut);
         RootChrome.BeginAnimation(HeightProperty, shrink);
+        RootChrome.BeginAnimation(MarginProperty, slide);
+        ExpandedContent.BeginAnimation(MarginProperty, expandedShift);
+        MiniBarContent.BeginAnimation(MarginProperty, miniShift);
         StartGhostMorph(from, to, true);
         MiniBarContent.BeginAnimation(OpacityProperty, incomingFade);
     }
 
-    // 펼치기(총 320 ms).
+    // 펼치기(총 320 ms). 창은 움직이지 않는다.
     // 단계 A(0–120 ms): 막대 시계 블록 자리에 유령을 막대 서식으로 띄우고 막대 내용을 페이드아웃한다.
-    //   막대 내용은 Visible로 남긴다. 단계 B에서 새 창 기준으로 막대 시계 블록을 다시 재야 한다.
-    // 단계 B(120–320 ms): 카드와 막대 내용을 막대 높이로 고정한 채 창을 1회 키우고(카드는 창보다 커질 수 없다),
-    //   펼친 내용을 보이지 않게 배치해 출발·도착 사각형을 다시 잰 뒤 카드 높이 확대, 유령 이동,
+    //   막대 내용은 Visible로 남긴다. 단계 B에서 막대 시계 블록을 다시 재야 한다.
+    // 단계 B(120–320 ms): 기호(DIP) s = 지금 카드 위 변, t = 목표 카드 위 변, d = s - t (0 이상).
+    //   막대 내용은 막대 높이로 고정하고 펼친 내용은 끝 높이로 고정해 d만큼 위로 어긋나게 배치한다(끝 화면 위치).
+    //   카드 높이·위치 이동, 내용 Margin 보정(내용은 화면에서 제자리), 유령 이동,
     //   펼친 내용 페이드인(80 ms 뒤 시작)을 함께 진행한다.
     private void StartExpandAnimation(int generation)
     {
         ClearTransitionAnimations();
 
-        // 단계 A. 붙인 목록을 막 뗐다면 행 높이가 바뀌었을 수 있으므로 측정 전에 레이아웃을 확정한다.
+        // 단계 A. 붙인 목록을 막 뗐다면 오버레이 배치가 바뀌었을 수 있으므로 측정 전에 레이아웃을 확정한다.
         UpdateLayout();
         MiniClockBlock.Opacity = 0;
         ShowGhostAt(RectIn(MiniClockBlock, TransitionLayer), false);
@@ -1077,57 +1136,51 @@ public partial class MainWindow : Window
         {
             // 단계 B
             var scale = GetDpiScale();
-            var target = _pendingWindowRect ?? throw new InvalidOperationException("펼치기 목표 창이 없습니다.");
-            if (GetWindowRectPx() is PixelRect win)
-            {
-                // Begin 때와 같은 메모·같은 창이므로 결과가 같다. 그 사이 창이 바뀌었으면 새로 계산된다.
-                var plan = PlanTransitionFor(win, OverlayDisplayMode.Expanded);
-                target = plan.TargetWindow;
-                _pendingAnchor = plan.Anchor;
-            }
+            var target = _pendingPlacement ?? throw new InvalidOperationException("펼치기 목표 배치가 없습니다.");
+            var miniH = _placement.HeightPx / scale;
+            var s = _placement.OffsetPx / scale;
+            var t = target.OffsetPx / scale;
+            var d = s - t;
+            var cardHeight = target.HeightPx / scale;
 
-            var alignment = ToVerticalAlignment(_pendingAnchor);
-
-            // 막대 내용은 페이드아웃된 상태(Opacity 0)로 Visible을 유지한다.
+            // 막대 내용은 페이드아웃된 상태(Opacity 0)로 Visible을 유지한다. 높이를 먼저 계산한 뒤 Margin을 쉬는 값으로 둔다.
             MiniBarContent.BeginAnimation(OpacityProperty, null);
             MiniBarContent.Opacity = 0;
-
-            // 창을 키워도 막대 카드가 화면상 제자리에 있도록 카드와 막대 내용을 막대 높이로 고정해 기준 모서리에 붙인다.
-            RootChrome.Height = OverlayLayoutMetrics.MiniWindowHeightDip;
-            RootChrome.VerticalAlignment = alignment;
             MiniBarContent.Height = MiniBarContentHeightDip();
-            MiniBarContent.VerticalAlignment = alignment;
+            MiniBarContent.VerticalAlignment = VerticalAlignment.Top;
+            MiniBarContent.Margin = new Thickness(6, 4, 6, 4);
 
-            _pendingWindowRect = target;
-            ApplyWindowRectPx(target);
-            _pendingWindowRect = null;
-
-            // 펼친 내용을 끝 높이로 고정해 보이지 않게 배치한다. 카드가 커지는 동안 기준 모서리 쪽부터 드러난다.
-            var cardHeight = target.Height / scale;
+            // 펼친 내용을 끝 높이로 고정해 보이지 않게 배치한다. 카드가 커지는 동안 위 변 쪽부터 드러난다.
             ExpandedContent.Opacity = 0;
             ExpandedContent.IsHitTestVisible = false;
             ExpandedContent.Height = Math.Max(
                 0,
                 cardHeight
                 - RootChrome.BorderThickness.Top - RootChrome.BorderThickness.Bottom
-                - ExpandedContent.Margin.Top - ExpandedContent.Margin.Bottom);
-            ExpandedContent.VerticalAlignment = alignment;
+                - 16);
+            ExpandedContent.VerticalAlignment = VerticalAlignment.Top;
+            ExpandedContent.Margin = new Thickness(8, 8 - d, 8, 8);
             ExpandedContent.Visibility = Visibility.Visible;
 
             UpdateLayout();
 
-            // 창이 바뀌었으므로 출발 사각형도 새 창 좌표로 다시 잰다(기준이 아래면 창 위 변이 옮겨졌다).
             var from = RectIn(MiniClockBlock, TransitionLayer);
             var to = RectIn(ExpandedClockBlock, TransitionLayer);
             ExpandedClockBlock.Opacity = 0;
             ShowGhostAt(from, false);
 
-            var grow = CreateHeightAnimation(OverlayLayoutMetrics.MiniWindowHeightDip, cardHeight);
-            grow.Completed += (_, _) => RunTransitionStep(generation, () => ApplyExpandedState(null));
+            var grow = CreateHeightAnimation(miniH, cardHeight);
+            grow.Completed += (_, _) => RunTransitionStep(generation, () => ApplyExpandedState(target));
+            var slide = CreateThicknessAnimation(new Thickness(0, s, 0, 0), new Thickness(0, t, 0, 0));
+            var expandedShift = CreateThicknessAnimation(new Thickness(8, 8 - d, 8, 8), new Thickness(8, 8, 8, 8));
+            var miniShift = CreateThicknessAnimation(new Thickness(6, 4, 6, 4), new Thickness(6, 4 + d, 6, 4));
             var incomingFade = CreateFade(0, 1);
             incomingFade.BeginTime = TimeSpan.FromMilliseconds(OverlayLayoutMetrics.IncomingFadeBeginMilliseconds);
 
             RootChrome.BeginAnimation(HeightProperty, grow);
+            RootChrome.BeginAnimation(MarginProperty, slide);
+            ExpandedContent.BeginAnimation(MarginProperty, expandedShift);
+            MiniBarContent.BeginAnimation(MarginProperty, miniShift);
             StartGhostMorph(from, to, false);
             ExpandedContent.BeginAnimation(OpacityProperty, incomingFade);
         });
@@ -1136,7 +1189,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 진행 중인 전환을 즉시 끝 상태로 확정한다. 숨기기, 자정, 창이 숨겨질 때 부른다.
-    /// 아직 적용하지 않은 목표 창이 있으면 1회 적용하고 저장까지 끝낸다. 늦게 오는 Completed는 generation으로 무효가 된다.
+    /// 목표 배치를 적용하고 저장까지 끝낸다. 늦게 오는 Completed는 generation으로 무효가 된다.
     /// 공유 요소 상태는 끝 상태 메서드 첫머리에서 되돌린다.
     /// </summary>
     private void FinishTransitionNow()
@@ -1149,9 +1202,9 @@ public partial class MainWindow : Window
         {
             ClearTransitionAnimations();
             if (_pendingMode == OverlayDisplayMode.MiniBar)
-                ApplyCollapsedState(_pendingWindowRect);
+                ApplyCollapsedState(_pendingPlacement ?? _placement);
             else
-                ApplyExpandedState(_pendingWindowRect);
+                ApplyExpandedState(_pendingPlacement ?? _placement);
         }
         catch (Exception ex)
         {
@@ -1168,13 +1221,14 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _pendingWindowRect = null;
+            _pendingPlacement = null;
             _suppressBoundsSave = false;
             _transitionInProgress = false;
         }
     }
 
-    // 전환을 되돌리지 않고 멈춘다. 늦은 Completed를 무효화하고 애니메이션 값을 해제한 뒤 공유 요소 상태를 되돌린다.
+    // 전환을 되돌리지 않고 멈춘다. 늦은 Completed를 무효화하고 애니메이션 값을 해제한 뒤 공유 요소 상태를 되돌리고,
+    // 카드를 전환 전 배치(_placement)로 되돌린다.
     // 중단 시점에는 두 내용이 함께 Visible일 수 있으므로 현재 모드(_displayMode) 쪽만 보이게 맞춘다.
     private void AbortTransition()
     {
@@ -1186,12 +1240,12 @@ public partial class MainWindow : Window
         MiniBarContent.Visibility = mini ? Visibility.Visible : Visibility.Collapsed;
         ExpandedContent.Opacity = 1;
         MiniBarContent.Opacity = 1;
-        _pendingWindowRect = null;
-        // 중단된 전환은 창이 어디까지 갔는지 알 수 없으므로 왕복 복원 메모도 버린다.
-        _lastTransition = null;
-        _pendingWindowBefore = null;
+        ApplyCardPlacement(_placement, GetDpiScale());
+        _pendingPlacement = null;
         _suppressBoundsSave = false;
         _transitionInProgress = false;
+        // 전환 시작이 대기 중이던 위치 저장을 멈췄고 중단 경로는 끝 상태 저장을 하지 않는다. 현재 카드 위치를 다시 예약한다.
+        ScheduleBoundsSave();
     }
 
     // 전환으로 포커스를 가진 요소가 접히면 포커스가 사라져 PreviewKeyDown이 오지 않는다(Esc·F5 불능).
@@ -1614,6 +1668,8 @@ public partial class MainWindow : Window
         var hwnd = new WindowInteropHelper(this).Handle;
         _hwndSource = HwndSource.FromHwnd(hwnd);
         _hwndSource?.AddHook(WndProc);
+        // 훅을 단 뒤에 배치한다. 창이 보이기 전에 카드 px 배치와 창 이동·크기 맞춤을 끝낸다.
+        ApplyInitialPlacement();
         Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea));
     }
 
@@ -1750,7 +1806,7 @@ public partial class MainWindow : Window
                 return;
 
             // 빈 영역을 클릭만 해도 DragMove가 이동 루프를 열어 이 메시지가 온다. 창이 그대로면 남기지 않는다.
-            if (!OverlayDragSnap.ShouldLogDragEnd(session.StartWindow, r))
+            if (!OverlayDragSnap.ShouldLogDragEnd(session.StartRect, r))
                 return;
 
             var w = GetWorkAreaPx(r);
@@ -1774,22 +1830,20 @@ public partial class MainWindow : Window
 
     private void ClampToVisibleWorkArea()
     {
-        // 전환 중에는 창이 이미 한 번 바뀌므로 여기서 또 바꾸지 않는다.
-        if (_transitionInProgress)
+        // 전환 중에는 카드 배치가 바뀌는 중이고, 끌기 중 클램프는 모니터 경계에서 카드를 걸리게 하므로 둘 다 건너뛴다.
+        if (_transitionInProgress || _dragSession is not null)
             return;
 
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd == IntPtr.Zero || GetWindowRectPx() is not PixelRect rect)
+        if (GetWindowRectPx() is not PixelRect win)
             return;
 
-        var screenWork = Forms.Screen.FromHandle(hwnd).WorkingArea;
-        var work = new PixelRect(screenWork.Left, screenWork.Top, screenWork.Right, screenWork.Bottom);
-
-        var clamped = OverlayLayoutPlanner.ClampWindowToWorkArea(rect, work);
-        if (clamped == rect)
+        // 기준은 보이는 카드 사각형이고, 모니터도 카드가 가장 많이 걸친 모니터다. 창(캔버스)은 작업 영역 밖으로 나갈 수 있다.
+        var card = _placement.InWindow(win);
+        var clamped = OverlayLayoutPlanner.ClampWindowToWorkArea(card, GetWorkAreaPx(card));
+        if (clamped == card)
             return;
 
-        ApplyWindowRectPx(clamped);
+        ApplyWindowRectPx(win.Offset(clamped.Left - card.Left, clamped.Top - card.Top));
     }
 
     [DllImport("user32.dll")]
@@ -1963,7 +2017,14 @@ public partial class MainWindow : Window
     private async void SaveBoundsTimer_Tick(object? sender, EventArgs e)
     {
         _saveBoundsTimer?.Stop();
-        await RunGuardedAsync("ui.saveBounds", () => ((App)WpfApplication.Current).SaveWindowBoundsAsync(Left, Top));
+        // 저장 값은 보이는 카드의 왼쪽 위(DIP)다. 창 왼쪽 위(WPF Left/Top)가 아니다.
+        if (GetCardTopLeftDip() is not { } tl)
+        {
+            LogService.Warn("ui.saveBounds", "창 핸들이 없어 위치를 저장하지 못했습니다.");
+            return;
+        }
+
+        await RunGuardedAsync("ui.saveBounds", () => ((App)WpfApplication.Current).SaveWindowBoundsAsync(tl.Left, tl.Top));
     }
 
     private static bool IsInteractiveSource(object? source)

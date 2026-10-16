@@ -11,8 +11,8 @@ public sealed class OverlayDragSnapTests
 
     private static readonly double[] HeightsDip =
     {
-        OverlayLayoutMetrics.MiniWindowHeightDip,
-        OverlayLayoutMetrics.ExpandedWindowHeightDip
+        OverlayLayoutMetrics.MiniCardHeightDip,
+        OverlayLayoutMetrics.ExpandedCardHeightDip
     };
 
     // 모니터 하나: Bounds는 배치 판단용이고 Work는 스냅 기준이다.
@@ -454,7 +454,7 @@ public sealed class OverlayDragSnapTests
     }
 
     [Fact]
-    public void Propose_UsesStartWindowPlusCursorDelta_AndGivenSize()
+    public void Propose_UsesStartRectPlusCursorDelta_AndGivenSize()
     {
         var session = OverlayDragSnap.Begin(new PixelRect(100, 200, 411, 626), new PixelPoint(150, 250));
 
@@ -489,5 +489,68 @@ public sealed class OverlayDragSnapTests
         // Left/Top은 그대로이고 Right 또는 Bottom만 달라 크기가 바뀌었다.
         Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 200, 412, 626)));
         Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 200, 411, 248)));
+    }
+
+    [Theory]
+    [InlineData("L")]
+    [InlineData("T")]
+    [InlineData("R")]
+    [InlineData("B")]
+    [InlineData("LT")]
+    [InlineData("TR")]
+    [InlineData("RB")]
+    [InlineData("BL")]
+    public void Step_CardEdgesAndCorners_SnapToZeroGap(string edges)
+    {
+        var work = new PixelRect(0, 0, 1920, 1032);
+        const int w = 311, h = 48, threshold = 12, gap = 7;
+
+        // 기본 위치는 작업 영역 안쪽 한가운데. 지정한 변만 7 px 떨어진 위치로 바꾼다.
+        var left = 800;
+        var top = 500;
+        if (edges.Contains('L')) left = work.Left + gap;
+        if (edges.Contains('R')) left = work.Right - gap - w;
+        if (edges.Contains('T')) top = work.Top + gap;
+        if (edges.Contains('B')) top = work.Bottom - gap - h;
+
+        var startCard = new PixelRect(400, 300, 400 + w, 300 + h);
+        var startCursor = new PixelPoint(450, 320);
+        var session = OverlayDragSnap.Begin(startCard, startCursor);
+        var cursor = new PixelPoint(startCursor.X + (left - startCard.Left), startCursor.Y + (top - startCard.Top));
+
+        var proposed = OverlayDragSnap.Propose(session, cursor, w, h);
+        Assert.Equal(new PixelRect(left, top, left + w, top + h), proposed);
+
+        var card = OverlayDragSnap.Step(session, cursor, w, h, work, threshold);
+
+        Assert.Equal(w, card.Width);
+        Assert.Equal(h, card.Height);
+        if (edges.Contains('L')) Assert.Equal(0, card.Left - work.Left);
+        else if (edges.Contains('R')) Assert.Equal(0, work.Right - card.Right);
+        else Assert.Equal(left, card.Left);
+        if (edges.Contains('T')) Assert.Equal(0, card.Top - work.Top);
+        else if (edges.Contains('B')) Assert.Equal(0, work.Bottom - card.Bottom);
+        else Assert.Equal(top, card.Top);
+    }
+
+    [Fact]
+    public void Step_BarAtTopEdge_WindowTopNegative()
+    {
+        var work = new PixelRect(0, 0, 1920, 1032);
+        var m = CanvasMetrics.FromScale(1.0);
+        var startCard = new PixelRect(400, 300, 711, 348);
+        var startCursor = new PixelPoint(450, 320);
+        var session = OverlayDragSnap.Begin(startCard, startCursor);
+
+        // 제안 카드 위 변이 7 px
+        var cursor = new PixelPoint(450, 320 + (7 - 300));
+        var card = OverlayDragSnap.Step(session, cursor, 311, 48, work, 12);
+
+        Assert.Equal(0, card.Top);
+        Assert.Equal(48, card.Height);
+
+        var window = OverlayLayoutPlanner.WindowForCard(card, m.Slot, 311, 828);
+
+        Assert.Equal(-390, window.Top);
     }
 }

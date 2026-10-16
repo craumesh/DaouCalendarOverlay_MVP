@@ -2,52 +2,55 @@ using DaouCalendarOverlay.Models;
 
 namespace DaouCalendarOverlay.Services;
 
+/// <summary>창(고정 캔버스) 안 카드의 세로 배치. OffsetPx = 창 위 변 → 카드 위 변, HeightPx = 카드 높이.</summary>
+public readonly record struct CardPlacement(int OffsetPx, int HeightPx)
+{
+    /// <summary>창 사각형 안에서 이 배치가 가리키는 카드 사각형.</summary>
+    public PixelRect InWindow(PixelRect window) =>
+        new(window.Left, window.Top + OffsetPx, window.Right, window.Top + OffsetPx + HeightPx);
+}
+
+/// <summary>창의 현재 배율로 환산한 캔버스 치수(물리 px).</summary>
+public readonly record struct CanvasMetrics(
+    int WidthPx, int SlotOffsetPx, int MiniHeightPx, int ExpandedHeightPx, int AttachRegionPx, int EdgeTolerancePx)
+{
+    /// <summary>
+    /// 각 DIP 상수를 DipToPx(…, dpiScale)로 환산한다.
+    /// dpiScale이 부적합하면 DipToPx가 ArgumentOutOfRangeException을 던진다.
+    /// </summary>
+    public static CanvasMetrics FromScale(double dpiScale) => new(
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowWidthDip, dpiScale),
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.BarSlotOffsetDip, dpiScale),
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.MiniCardHeightDip, dpiScale),
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.ExpandedCardHeightDip, dpiScale),
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.AttachedRegionHeightDip, dpiScale),
+        OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, dpiScale));
+
+    /// <summary>창 높이(px). DipToPx(828)이 아니다. 반올림 때문에 영역이 창을 1px 넘는 것을 막는다.</summary>
+    public int HeightPx => SlotOffsetPx + Math.Max(MiniHeightPx + AttachRegionPx, ExpandedHeightPx);
+
+    /// <summary>막대 칸. 막대 모드의 카드 배치.</summary>
+    public CardPlacement Slot => new(SlotOffsetPx, MiniHeightPx);
+
+    /// <summary>막대 칸 위 변에서 아래로 자라는 펼친 카드.</summary>
+    public CardPlacement ExpandedDown => new(SlotOffsetPx, ExpandedHeightPx);
+
+    /// <summary>막대 칸 아래 변에서 위로 자라는 펼친 카드.</summary>
+    public CardPlacement ExpandedUp => new(SlotOffsetPx + MiniHeightPx - ExpandedHeightPx, ExpandedHeightPx);
+}
+
+/// <summary>쉬는 상태의 창 사각형과 카드 배치.</summary>
+public readonly record struct RestingLayout(PixelRect Window, CardPlacement Placement);
+
 /// <summary>
-/// 접기·펼치기 기준 모서리, 목록을 붙일 방향, 새 창 사각형(작업 영역 클램프 포함)을 정하는 순수 로직.
+/// 고정 캔버스 안 카드 배치(접기·펼치기·시작·DPI 변경), 목록을 붙일 방향·영역, 카드 사각형의 작업 영역 클램프를 정하는 순수 로직.
 /// 모든 값은 물리 px이고 Right/Bottom은 배타다. WPF·WinForms 타입을 참조하지 않는다.
-/// 창 사각형이 곧 카드 사각형이므로 클램프 기준은 작업 영역 그대로다.
+/// 창은 고정 캔버스이고 카드는 창 안에서만 움직이므로 접기·펼치기·붙이기에서 창을 옮기지 않는다.
 /// </summary>
 public static class OverlayLayoutPlanner
 {
     /// <summary>
-    /// 접기·펼치기의 기준 모서리를 정한다.
-    /// (a) |window.Bottom - work.Bottom| &lt;= edgeTolerancePx 이거나
-    /// (b) window.Top + newHeightPx &gt; work.Bottom (위쪽 고정으로는 안 들어감)이면 Bottom, 아니면 Top이다.
-    /// </summary>
-    public static VerticalAnchor ChooseResizeAnchor(PixelRect window, PixelRect work, int newHeightPx, int edgeTolerancePx)
-    {
-        if (Math.Abs(window.Bottom - work.Bottom) <= edgeTolerancePx)
-            return VerticalAnchor.Bottom;
-
-        if (window.Top + newHeightPx > work.Bottom)
-            return VerticalAnchor.Bottom;
-
-        return VerticalAnchor.Top;
-    }
-
-    /// <summary>
-    /// 가로는 그대로 두고 anchor 쪽 변을 고정해 높이를 newHeightPx로 바꾼다.
-    /// 그다음 세로를 work 안으로 클램프한다.
-    /// newHeightPx가 work 높이 이상이면 Top은 work.Top이다.
-    /// </summary>
-    public static PixelRect ResizeWindow(PixelRect window, int newHeightPx, VerticalAnchor anchor, PixelRect work)
-    {
-        if (newHeightPx <= 0)
-            throw new ArgumentOutOfRangeException(nameof(newHeightPx), newHeightPx, "창 높이는 0보다 커야 합니다.");
-
-        var top = anchor == VerticalAnchor.Top ? window.Top : window.Bottom - newHeightPx;
-
-        if (newHeightPx >= work.Height)
-            top = work.Top;
-        else
-            top = Math.Clamp(top, work.Top, work.Bottom - newHeightPx);
-
-        return new PixelRect(window.Left, top, window.Right, top + newHeightPx);
-    }
-
-    /// <summary>
-    /// 창 크기를 보존한 채 평행 이동해 창이 작업 영역 안에 들어오게 한다.
-    /// 창이 작업 영역보다 크면 work의 Left/Top에 맞춘다.
+    /// 카드 사각형에 적용한다. 크기 보존 평행 이동, 사각형이 작업 영역보다 크면 work.Left/Top.
     /// </summary>
     public static PixelRect ClampWindowToWorkArea(PixelRect window, PixelRect work)
     {
@@ -62,63 +65,88 @@ public static class OverlayLayoutPlanner
     }
 
     /// <summary>
-    /// 막대 아래에 attachPx가 들어가면 Below, 아니고 위에 들어가면 Above다.
+    /// 막대 카드 아래에 attachPx가 들어가면 Below, 아니고 위에 들어가면 Above다.
     /// 둘 다 안 들어가면 남은 공간이 큰 쪽이고 같으면 Below다.
     /// </summary>
-    public static AttachDirection ChooseAttachDirection(PixelRect window, PixelRect work, int attachPx)
+    public static AttachDirection ChooseAttachDirection(PixelRect bar, PixelRect work, int attachPx)
     {
-        if (window.Bottom + attachPx <= work.Bottom)
+        if (bar.Bottom + attachPx <= work.Bottom)
             return AttachDirection.Below;
 
-        if (window.Top - attachPx >= work.Top)
+        if (bar.Top - attachPx >= work.Top)
             return AttachDirection.Above;
 
-        var spaceBelow = work.Bottom - window.Bottom;
-        var spaceAbove = window.Top - work.Top;
+        var spaceBelow = work.Bottom - bar.Bottom;
+        var spaceAbove = bar.Top - work.Top;
         return spaceAbove > spaceBelow ? AttachDirection.Above : AttachDirection.Below;
     }
 
-    /// <summary>직전 전환 기록. WindowBefore: 전환 시작 때 창, WindowAfter: 전환 뒤 실제 창.</summary>
-    public readonly record struct TransitionMemo(PixelRect WindowBefore, PixelRect WindowAfter, PixelRect WorkArea, VerticalAnchor Anchor);
-
-    /// <summary>전환 계획. RestoredFromMemo가 true이면 TargetWindow는 메모의 WindowBefore다.</summary>
-    public readonly record struct TransitionPlan(PixelRect TargetWindow, VerticalAnchor Anchor, bool RestoredFromMemo);
-
     /// <summary>
-    /// 창 높이를 newHeightPx로 바꾸는 전환을 계획한다. newHeightPx가 0 이하이면 ArgumentOutOfRangeException.
-    /// (1) last가 있고 window == last.WindowAfter, work == last.WorkArea,
-    ///     last.WindowBefore.Height == newHeightPx, last.WindowBefore.Width == window.Width를 모두 만족하면
-    ///     직전 전환 앞의 사각형으로 정확히 되돌린다. 높이 검사는 다른 배율에서 만든 메모로
-    ///     잘못된 크기를 복원하는 일을 막으므로 빼지 않는다.
-    /// (2) 그 외에는 ChooseResizeAnchor와 ResizeWindow로 계산한다.
+    /// 막대(창의 Slot)에서 펼친 카드 배치를 정한다. slot = m.Slot.InWindow(window), E = m.ExpandedHeightPx.
+    /// (1) slot.Top + E &lt;= work.Bottom 이면 m.ExpandedDown.
+    /// (2) 아니고 slot.Bottom - E &gt;= work.Top 이면 m.ExpandedUp.
+    /// (3) 둘 다 아니면 카드 위 변 t = Math.Clamp(E &lt; work.Height ? work.Bottom - E : work.Top, slot.Bottom - E, slot.Top),
+    ///     OffsetPx = t - window.Top.
+    /// 결과는 항상 m.ExpandedUp.OffsetPx &lt;= OffsetPx &lt;= m.ExpandedDown.OffsetPx (카드가 막대 칸을 포함하고 창 안에 있다).
     /// </summary>
-    public static TransitionPlan PlanTransition(PixelRect window, PixelRect work, int newHeightPx, int edgeTolerancePx, TransitionMemo? last)
+    public static CardPlacement PlanExpandedPlacement(PixelRect window, PixelRect work, CanvasMetrics m)
     {
-        if (newHeightPx <= 0)
-            throw new ArgumentOutOfRangeException(nameof(newHeightPx), newHeightPx, "창 높이는 0보다 커야 합니다.");
+        var slot = m.Slot.InWindow(window);
+        var e = m.ExpandedHeightPx;
 
-        if (last is TransitionMemo memo
-            && window == memo.WindowAfter
-            && work == memo.WorkArea
-            && memo.WindowBefore.Height == newHeightPx
-            && memo.WindowBefore.Width == window.Width)
-        {
-            return new TransitionPlan(memo.WindowBefore, memo.Anchor, true);
-        }
+        if (slot.Top + e <= work.Bottom)
+            return m.ExpandedDown;
 
-        var anchor = ChooseResizeAnchor(window, work, newHeightPx, edgeTolerancePx);
-        return new TransitionPlan(ResizeWindow(window, newHeightPx, anchor, work), anchor, false);
+        if (slot.Bottom - e >= work.Top)
+            return m.ExpandedUp;
+
+        var t = Math.Clamp(e < work.Height ? work.Bottom - e : work.Top, slot.Bottom - e, slot.Top);
+        return new CardPlacement(t - window.Top, e);
     }
 
     /// <summary>
-    /// 기준 모서리 쪽 변이 current에서 target으로 옮겨진 거리(px).
-    /// Top이면 target.Top - current.Top, Bottom이면 target.Bottom - current.Bottom이다.
-    /// 클램프나 메모 복원이 없으면 0이다.
+    /// 카드 사각형이 정해진 펼침 상태(시작·DPI 변경)에서 막대 칸을 카드 위 끝 또는 아래 끝에 둔다.
+    /// |card.Bottom - work.Bottom| &lt;= m.EdgeTolerancePx 이거나 card.Top + m.MiniHeightPx &gt; work.Bottom 이면 m.ExpandedUp,
+    /// 아니면 m.ExpandedDown이다.
     /// </summary>
-    public static int AnchorEdgeShiftPx(PixelRect current, PixelRect target, VerticalAnchor anchor) =>
-        anchor == VerticalAnchor.Top ? target.Top - current.Top : target.Bottom - current.Bottom;
+    public static CardPlacement PlanRestingExpandedPlacement(PixelRect card, PixelRect work, CanvasMetrics m)
+    {
+        if (Math.Abs(card.Bottom - work.Bottom) <= m.EdgeTolerancePx)
+            return m.ExpandedUp;
 
-    /// <summary>Below는 Top 고정, Above는 Bottom 고정에 대응한다.</summary>
-    public static VerticalAnchor ToAnchor(AttachDirection direction) =>
-        direction == AttachDirection.Below ? VerticalAnchor.Top : VerticalAnchor.Bottom;
+        if (card.Top + m.MiniHeightPx > work.Bottom)
+            return m.ExpandedUp;
+
+        return m.ExpandedDown;
+    }
+
+    /// <summary>카드 사각형과 배치에서 창 사각형을 얻는다. 창 위 변은 음수나 작업 영역 밖일 수 있다(클램프하지 않는다).</summary>
+    public static PixelRect WindowForCard(PixelRect card, CardPlacement placement, int windowWidthPx, int windowHeightPx) =>
+        new(card.Left, card.Top - placement.OffsetPx, card.Left + windowWidthPx, card.Top - placement.OffsetPx + windowHeightPx);
+
+    /// <summary>
+    /// 저장된 카드 왼쪽 위(px)에서 쉬는 배치를 만든다.
+    /// card = (cardTopLeft, 폭 m.WidthPx, 높이 = MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx)
+    /// → ClampWindowToWorkArea(card, work)
+    /// → placement = MiniBar ? m.Slot : PlanRestingExpandedPlacement(clamped, work, m)
+    /// → Window = WindowForCard(clamped, placement, m.WidthPx, m.HeightPx).
+    /// </summary>
+    public static RestingLayout PlanRestingLayout(PixelPoint cardTopLeft, OverlayDisplayMode mode, PixelRect work, CanvasMetrics m)
+    {
+        var cardHeight = mode == OverlayDisplayMode.MiniBar ? m.MiniHeightPx : m.ExpandedHeightPx;
+        var card = new PixelRect(cardTopLeft.X, cardTopLeft.Y, cardTopLeft.X + m.WidthPx, cardTopLeft.Y + cardHeight);
+        var clamped = ClampWindowToWorkArea(card, work);
+        var placement = mode == OverlayDisplayMode.MiniBar ? m.Slot : PlanRestingExpandedPlacement(clamped, work, m);
+        return new RestingLayout(WindowForCard(clamped, placement, m.WidthPx, m.HeightPx), placement);
+    }
+
+    /// <summary>
+    /// 붙인 목록 영역(창 위 변 기준).
+    /// Below: (m.SlotOffsetPx + m.MiniHeightPx, m.AttachRegionPx).
+    /// Above: (m.SlotOffsetPx - m.AttachRegionPx, m.AttachRegionPx).
+    /// </summary>
+    public static CardPlacement AttachRegion(AttachDirection direction, CanvasMetrics m) =>
+        direction == AttachDirection.Below
+            ? new CardPlacement(m.SlotOffsetPx + m.MiniHeightPx, m.AttachRegionPx)
+            : new CardPlacement(m.SlotOffsetPx - m.AttachRegionPx, m.AttachRegionPx);
 }

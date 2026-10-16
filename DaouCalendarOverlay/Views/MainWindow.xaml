@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:DaouCalendarOverlay.Models"
         Title="Daou Calendar Overlay"
-        Width="311" Height="426"
+        Width="311" Height="828"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -307,21 +307,19 @@
         </ContextMenu>
     </Window.ContextMenu>
 
+    <!-- 창은 311x828 DIP 고정 캔버스다. 카드(RootChrome)와 두 오버레이는 Margin과 Height로 창 안에서만 움직인다.
+         투명 영역은 알파 0이라 레이어드 창에서 클릭이 통과한다. -->
     <Grid x:Name="WindowLayout">
-        <Grid.RowDefinitions>
-            <RowDefinition x:Name="AttachAboveRow" Height="0"/>
-            <RowDefinition x:Name="CardRow" Height="*"/>
-            <RowDefinition x:Name="AttachBelowRow" Height="0"/>
-        </Grid.RowDefinitions>
-
         <Border x:Name="RootChrome"
-                Grid.Row="1"
+                VerticalAlignment="Top"
+                Margin="0,390,0,0"
+                Height="426"
                 Background="#FF1A1C21"
                 BorderBrush="#36FFFFFF"
                 BorderThickness="1"
                 CornerRadius="16"
                 Padding="0">
-            <Grid>
+            <Grid x:Name="CardContentHost" ClipToBounds="True">
                 <Grid x:Name="ExpandedContent" Margin="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -700,11 +698,13 @@
 
         <!-- 날짜를 클릭하면 해당 날짜의 모든 일정을 한 번에 볼 수 있다. -->
         <Grid x:Name="DayEventsOverlay"
-              Grid.Row="1"
-              Margin="9"
+              VerticalAlignment="Top"
+              Margin="0,390,0,0"
+              Height="426"
+              ClipToBounds="True"
               Panel.ZIndex="90"
               Visibility="Collapsed">
-            <Border x:Name="DayEventsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="DayEventsBackdrop_MouseLeftButtonUp"/>
+            <Border x:Name="DayEventsBackdrop" Margin="9" Background="#9A080A0E" MouseLeftButtonUp="DayEventsBackdrop_MouseLeftButtonUp"/>
             <Border x:Name="DayEventsCard"
                     Width="285"
                     MaxHeight="370"
@@ -716,7 +716,7 @@
                     CornerRadius="12"
                     Padding="12">
                 <Border.Effect>
-                    <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
+                    <DropShadowEffect x:Name="DayEventsCardShadow" BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
                 </Border.Effect>
                 <Grid>
                     <Grid.RowDefinitions>
@@ -842,11 +842,13 @@
 
         <!-- 일정 상세는 별도 윈도우가 아니라 오버레이 카드로 표시한다. -->
         <Grid x:Name="EventDetailsOverlay"
-              Grid.Row="1"
-              Margin="9"
+              VerticalAlignment="Top"
+              Margin="0,390,0,0"
+              Height="426"
+              ClipToBounds="True"
               Panel.ZIndex="100"
               Visibility="Collapsed">
-            <Border x:Name="EventDetailsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="EventDetailsBackdrop_MouseLeftButtonUp"/>
+            <Border x:Name="EventDetailsBackdrop" Margin="9" Background="#9A080A0E" MouseLeftButtonUp="EventDetailsBackdrop_MouseLeftButtonUp"/>
             <Border x:Name="EventDetailsCard"
                     Width="285"
                     MaxHeight="380"
@@ -858,7 +860,7 @@
                     CornerRadius="12"
                     Padding="12">
                 <Border.Effect>
-                    <DropShadowEffect BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
+                    <DropShadowEffect x:Name="EventDetailsCardShadow" BlurRadius="28" ShadowDepth="5" Opacity="0.45"/>
                 </Border.Effect>
                 <Grid>
                     <Grid.RowDefinitions>
@@ -949,7 +951,7 @@
         <!-- 접기·펼치기 공유 요소 전환 층. 날짜·시계 블록의 유령이 출발 블록 사각형에서 도착 블록 사각형으로
              옮겨 가며 두 층(펼침 서식, 막대 서식)을 교차 페이드한다. 쉬는 상태에서는 접혀 있다.
              글자는 실제 TextBlock을 ElementName으로 따라가므로 전환 중에도 시계가 갱신된다. -->
-        <Canvas x:Name="TransitionLayer" Grid.RowSpan="3" IsHitTestVisible="False" Visibility="Collapsed">
+        <Canvas x:Name="TransitionLayer" IsHitTestVisible="False" Visibility="Collapsed">
             <Border x:Name="SharedClockGhost" Background="#0BFFFFFF" CornerRadius="7">
                 <Grid ClipToBounds="True">
                     <StackPanel x:Name="GhostExpandedClock" HorizontalAlignment="Center" VerticalAlignment="Center">
