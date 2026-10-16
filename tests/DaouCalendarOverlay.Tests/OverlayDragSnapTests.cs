@@ -462,4 +462,32 @@ public sealed class OverlayDragSnapTests
 
         Assert.Equal(new PixelRect(90, 250, 290, 298), proposed);
     }
+
+    [Fact]
+    public void ShouldLogDragEnd_SameRect_ReturnsFalse()
+    {
+        var start = new PixelRect(100, 200, 411, 626);
+
+        Assert.False(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 200, 411, 626)));
+    }
+
+    [Fact]
+    public void ShouldLogDragEnd_PositionOnlyDiffers_ReturnsTrue()
+    {
+        var start = new PixelRect(100, 200, 411, 626);
+
+        // 같은 크기(311x426)로 위치만 옮겼다.
+        Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(101, 200, 412, 626)));
+        Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 199, 411, 625)));
+    }
+
+    [Fact]
+    public void ShouldLogDragEnd_SizeOnlyDiffers_ReturnsTrue()
+    {
+        var start = new PixelRect(100, 200, 411, 626);
+
+        // Left/Top은 그대로이고 Right 또는 Bottom만 달라 크기가 바뀌었다.
+        Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 200, 412, 626)));
+        Assert.True(OverlayDragSnap.ShouldLogDragEnd(start, new PixelRect(100, 200, 411, 248)));
+    }
 }

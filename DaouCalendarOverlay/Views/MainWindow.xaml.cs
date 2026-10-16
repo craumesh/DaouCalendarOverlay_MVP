@@ -1740,13 +1740,17 @@ public partial class MainWindow : Window
         }
     }
 
-    // 이동 루프 끝. 세션이 있었으면 최종 창과 붙은 변을 1줄 남기고, 어떤 경로든 세션을 비운다.
-    // 예외로 세션이 먼저 비워진 드래그는 끝 로그 대신 ReportHandlerFailure 1건이 기록이다(1줄 규칙은 정상 종료 세션에 적용).
+    // 이동 루프 끝. 세션이 있었고 창이 실제로 움직였으면(ShouldLogDragEnd) 최종 창과 붙은 변을 1줄 남기고, 어떤 경로든 세션을 비운다.
+    // 클릭만 하고 움직이지 않은 드래그는 로그가 없다. 예외로 세션이 먼저 비워진 드래그는 끝 로그 대신 ReportHandlerFailure 1건이 기록이다.
     private void OnExitSizeMove()
     {
         try
         {
-            if (_dragSession is null || GetWindowRectPx() is not PixelRect r)
+            if (_dragSession is not DragSnapSession session || GetWindowRectPx() is not PixelRect r)
+                return;
+
+            // 빈 영역을 클릭만 해도 DragMove가 이동 루프를 열어 이 메시지가 온다. 창이 그대로면 남기지 않는다.
+            if (!OverlayDragSnap.ShouldLogDragEnd(session.StartWindow, r))
                 return;
 
             var w = GetWorkAreaPx(r);

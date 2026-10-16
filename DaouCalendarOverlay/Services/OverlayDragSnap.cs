@@ -33,6 +33,12 @@ public static class OverlayDragSnap
         return new PixelRect(left, top, left + widthPx, top + heightPx);
     }
 
+    /// <summary>
+    /// 드래그 끝 로그를 남길지 판정한다. 시작 사각형과 최종 사각형이 같으면(창이 움직이지 않은 클릭) false,
+    /// 위치나 크기가 하나라도 다르면 true다. 빈 영역을 클릭해도 DragMove가 이동 루프를 열기 때문에 필요하다.
+    /// </summary>
+    public static bool ShouldLogDragEnd(PixelRect start, PixelRect final) => start != final;
+
     /// <summary>Snap(Propose(...), workArea, thresholdPx)와 같다.</summary>
     public static PixelRect Step(
         DragSnapSession session,
