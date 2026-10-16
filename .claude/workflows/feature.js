@@ -575,7 +575,9 @@ async function verify(task, changedFiles, implTier, tag) {
   })
 
   const l1Fails = l1.criteria.filter(c => c.verdict === 'fail')
-  if (l1.gate.result === 'fail' || l1Fails.length > 0 || l1.overall === 'fail' || l1.spec_gaps.length > 0) {
+  // spec_gaps만으로는 실패시키지 않는다. 1단계가 확신하지 못한 것은 2단계가 판정한다(l2Reasons의 l1-spec-gaps).
+  // 검증자가 이 칸에 "선행 태스크의 미커밋 변경이라 확인 못 함" 같은 메모를 적어 정상 구현이 재시도·승격되던 문제를 막는다.
+  if (l1.gate.result === 'fail' || l1Fails.length > 0 || l1.overall === 'fail') {
     return { pass: false, level: 1, failure: describeL1(l1) }
   }
 
@@ -608,6 +610,7 @@ function l2Reasons(task, changedFiles, implTier, l1) {
   if (hits.length > 0) r.push(`risk-path:${hits.slice(0, 5).join(',')}`)
   if (task.acceptance.some(a => a.decided_by === 2)) r.push('criteria-decided-by-2')
   if (l1.overall === 'unsure' || l1.criteria.some(c => c.verdict === 'unsure')) r.push('l1-unsure')
+  if ((l1.spec_gaps || []).length > 0) r.push('l1-spec-gaps')
   if (l1.gate.result !== 'pass') r.push(`gate-${l1.gate.result}`)
   if ((l1.unexpected_files || []).length > 0) r.push('unexpected-files')
   return r
