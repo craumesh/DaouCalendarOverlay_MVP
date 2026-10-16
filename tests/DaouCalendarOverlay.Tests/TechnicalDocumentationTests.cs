@@ -1060,6 +1060,89 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("결과를 적을 계획이다", testing, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 7.4.0: §11.5·§14.2 코드 발췌가 현재 소스의 메서드 경계와 글자 단위로 같은지 고정한다.
+    /// 소스에서는 <c>"    " + signature</c>와 정확히 같은 줄부터 그 뒤 첫 <c>"    }"</c> 줄까지를,
+    /// 문서에서는 앞의 <c>&lt;pre&gt;&lt;code&gt;</c> 태그를 지운 줄이 <c>"    " + signature</c>로 시작하는 줄부터
+    /// 끝의 <c>&lt;/code&gt;&lt;/pre&gt;</c>를 지운 결과가 <c>"    }"</c>인 첫 줄까지를 HTML 디코드해 비교한다.
+    /// 공백 정규화는 하지 않고 줄 끝 '\r'만 지운다.
+    /// </summary>
+    [Theory]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void OnEnterSizeMove()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private bool TrySnapMoving(IntPtr lParam)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void OnExitSizeMove()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ClampToVisibleWorkArea()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialDisplayMode(bool minimized)")]
+    [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static PixelRect ClampWindowToWorkArea(PixelRect window, PixelRect work)")]
+    public void TechnicalDoc_LayoutExcerptsMatchCurrentSource(string relativeSourcePath, string signature)
+    {
+        const string indent = "    ";
+        const string closingLine = "    }";
+        var head = indent + signature;
+
+        // (1) 소스: 시그니처 줄부터 그 뒤 첫 "    }" 줄까지(포함).
+        var sourceLines = SplitLines(File.ReadAllText(RepoLayout.Path(relativeSourcePath.Split('/'))));
+        var sourceStarts = Enumerable.Range(0, sourceLines.Length)
+            .Where(i => string.Equals(sourceLines[i], head, StringComparison.Ordinal))
+            .ToList();
+        Assert.True(sourceStarts.Count == 1,
+            $"{relativeSourcePath}에서 시그니처 줄 '{signature}'가 정확히 1개여야 하는데 {sourceStarts.Count}개다.");
+
+        var sourceBlock = new List<string>();
+        var sourceClosed = false;
+        for (var i = sourceStarts[0]; i < sourceLines.Length; i++)
+        {
+            sourceBlock.Add(sourceLines[i]);
+            if (string.Equals(sourceLines[i], closingLine, StringComparison.Ordinal))
+            {
+                sourceClosed = true;
+                break;
+            }
+        }
+
+        Assert.True(sourceClosed, $"{relativeSourcePath}에서 '{signature}' 뒤의 닫는 중괄호 줄을 찾지 못했다.");
+
+        // (2) 문서: 접두 태그를 지운 줄이 시그니처로 시작하는 줄부터, 접미 태그를 지우고 TrimEnd한 결과가 "    }"인 첫 줄까지.
+        var docLines = SplitLines(File.ReadAllText(TechnicalDocPath));
+        var docStarts = Enumerable.Range(0, docLines.Length)
+            .Where(i => StripPreCodePrefix(docLines[i]).StartsWith(head, StringComparison.Ordinal))
+            .ToList();
+        Assert.True(docStarts.Count == 1,
+            $"기술 문서에서 시그니처 '{signature}'로 시작하는 발췌 줄이 정확히 1개여야 하는데 {docStarts.Count}개다.");
+
+        var docBlock = new List<string>();
+        var docClosed = false;
+        for (var i = docStarts[0]; i < docLines.Length; i++)
+        {
+            var line = i == docStarts[0] ? StripPreCodePrefix(docLines[i]) : docLines[i];
+            var withoutSuffix = PreCodeSuffixPattern.Replace(line, string.Empty);
+            if (string.Equals(withoutSuffix.TrimEnd(), closingLine, StringComparison.Ordinal))
+            {
+                docBlock.Add(withoutSuffix);
+                docClosed = true;
+                break;
+            }
+
+            docBlock.Add(line);
+        }
+
+        Assert.True(docClosed, $"기술 문서에서 '{signature}' 발췌의 닫는 중괄호 줄을 찾지 못했다.");
+
+        var decoded = docBlock.Select(System.Net.WebUtility.HtmlDecode);
+
+        // (3) 비교: 공백 정규화 없이 글자 단위로 같아야 한다.
+        Assert.Equal(expected: string.Join("\n", sourceBlock), actual: string.Join("\n", decoded));
+    }
+
+    private static readonly Regex PreCodePrefixPattern = new("^<pre><code[^>]*>", RegexOptions.CultureInvariant);
+    private static readonly Regex PreCodeSuffixPattern = new("</code></pre>$", RegexOptions.CultureInvariant);
+
+    private static string StripPreCodePrefix(string line) => PreCodePrefixPattern.Replace(line, string.Empty);
+
+    /// <summary>"\r\n"과 "\n" 기준으로 줄을 나눈다. 줄 끝 '\r'만 지우고 다른 공백은 그대로 둔다.</summary>
+    private static string[] SplitLines(string text) => text.Split(["\r\n", "\n"], StringSplitOptions.None);
+
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)
     {

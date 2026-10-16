@@ -41,6 +41,24 @@ public sealed class AppTests
         Assert.Contains("SetLoginRequired(false)", defaultSection, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void OpenSettingsAsync_PreservesOverlayStateViaMerge()
+    {
+        var source = File.ReadAllText(RepositoryPaths.Combine("DaouCalendarOverlay", "App.xaml.cs"));
+        var start = IndexOrFail(source, "public async Task OpenSettingsAsync()", 0);
+        var end = IndexOrFail(source, "public void OpenDaouOffice()", start);
+        var method = source.Substring(start, end - start);
+
+        var merge = IndexOrFail(method, "SettingsDialogMerge.PreserveOverlayState(dialog.Result, _settings)", 0);
+        var save = IndexOrFail(method, "await SaveSettingsAsync();", 0);
+        var apply = IndexOrFail(method, "ApplySettings(_settings)", 0);
+
+        Assert.True(merge < save, "병합은 저장보다 앞에 있어야 한다.");
+        Assert.True(merge < apply, "병합은 ApplySettings보다 앞에 있어야 한다.");
+        Assert.DoesNotContain("_settings = dialog.Result;", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("_settings.OverlayMinimized =", method, StringComparison.Ordinal);
+    }
+
     private static string ReadSyncCompletedHandler()
     {
         var source = File.ReadAllText(RepositoryPaths.Combine("DaouCalendarOverlay", "App.xaml.cs"));

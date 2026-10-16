@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:DaouCalendarOverlay.Models"
         Title="Daou Calendar Overlay"
-        Width="325" Height="440"
+        Width="311" Height="426"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -20,10 +20,10 @@
 
         <!-- 최상단 월 이동/도구 버튼 전용: 본문용 HeaderButtonStyle보다 낮고 컴팩트하게 유지한다. -->
         <Style x:Key="TopHeaderButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource HeaderButtonStyle}">
-            <Setter Property="Height" Value="24"/>
-            <Setter Property="MinHeight" Value="24"/>
-            <Setter Property="Padding" Value="5,2"/>
-            <Setter Property="Margin" Value="1.5"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="1,0,0,0"/>
         </Style>
 
         <!-- 필터 드롭다운을 앱의 어두운 글래스 UI와 동일한 톤으로 렌더링한다. -->
@@ -316,14 +316,13 @@
 
         <Border x:Name="RootChrome"
                 Grid.Row="1"
-                Margin="7"
                 Background="#FF1A1C21"
                 BorderBrush="#36FFFFFF"
                 BorderThickness="1"
                 CornerRadius="16"
-                Padding="8">
+                Padding="0">
             <Grid>
-                <Grid x:Name="ExpandedContent">
+                <Grid x:Name="ExpandedContent" Margin="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -340,7 +339,7 @@
                             Background="Transparent"
                             CornerRadius="15"/>
 
-                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid x:Name="HeaderBar" Grid.Row="0" Margin="0,0,0,6">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -352,19 +351,19 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="PrevMonth_Click" ToolTip="이전 달 (Page Up)">
+                            <Button Width="22" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="PrevMonth_Click" ToolTip="이전 달 (Page Up)">
                                 <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 6,1 L 1,6 L 6,11"/>
                             </Button>
-                            <Button Content="이번달" Width="48" Style="{StaticResource TopHeaderButtonStyle}" Click="Today_Click" ToolTip="이번달 (Home)"/>
-                            <Button Width="24" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="NextMonth_Click" ToolTip="다음 달 (Page Down)">
+                            <Button Content="이번달" Width="38" FontSize="11" Style="{StaticResource TopHeaderButtonStyle}" Click="Today_Click" ToolTip="이번달 (Home)"/>
+                            <Button Width="22" Padding="0" Style="{StaticResource TopHeaderButtonStyle}" Click="NextMonth_Click" ToolTip="다음 달 (Page Down)">
                                 <Path Width="7" Height="12" Stretch="Fill" Stroke="#F4F4F4" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 1,1 L 6,6 L 1,11"/>
                             </Button>
                         </StackPanel>
 
-                        <!-- 헤더 오른쪽 버튼이 4개라 이 열은 80 DIP다. "2026년 12월"(81 DIP)이 잘리지 않도록
-                             양옆 버튼의 바깥 여백(Margin 1.5)만큼만 배치 폭을 넓힌다(83 DIP). 버튼 면적은 침범하지 않는다. -->
+                        <!-- 버튼은 22x22, 간격 1(Margin 1,0,0,0)이다. 왼쪽 무리 23+39+23=85, 오른쪽 무리 4x23=92, 합 177이고
+                             헤더 폭 293(=311-테두리 2-내용 Margin 16)에서 이 열은 116 DIP다. "2026년 12월"이 잘리지 않는다. -->
                         <TextBlock Grid.Row="0" Grid.Column="1"
-                                   Margin="-1.5,0"
+                                   Margin="0"
                                    Text="{Binding MonthTitle}"
                                    Foreground="#F8F8FA"
                                    FontSize="14"
@@ -373,10 +372,10 @@
                                    VerticalAlignment="Center"/>
 
                         <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="↻" Width="24" ToolTip="새로고침 (F5)" Style="{StaticResource TopHeaderButtonStyle}" Click="Refresh_Click" FontSize="15"/>
-                            <Button Content="⚙" Width="24" ToolTip="설정" Style="{StaticResource TopHeaderButtonStyle}" Click="Settings_Click" FontSize="11.5"/>
-                            <Button x:Name="MinimizeToggleButton" Content="—" Width="24" ToolTip="막대로 최소화" Style="{StaticResource TopHeaderButtonStyle}" Click="ToggleDisplayMode_Click" FontSize="11.5"/>
-                            <Button Content="✕" Width="24" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
+                            <Button Content="↻" Width="22" ToolTip="새로고침 (F5)" Style="{StaticResource TopHeaderButtonStyle}" Click="Refresh_Click" FontSize="15"/>
+                            <Button Content="⚙" Width="22" ToolTip="설정" Style="{StaticResource TopHeaderButtonStyle}" Click="Settings_Click" FontSize="11.5"/>
+                            <Button x:Name="MinimizeToggleButton" Content="—" Width="22" ToolTip="막대로 최소화" Style="{StaticResource TopHeaderButtonStyle}" Click="ToggleDisplayMode_Click" FontSize="11.5"/>
+                            <Button Content="✕" Width="22" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
                         </StackPanel>
 
                         <!-- 날짜/시간과 필터를 한 줄의 좌/우 절반에 배치하여 세로 공간을 줄인다. -->
@@ -387,7 +386,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <Border Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="4,2">
+                            <Border x:Name="ExpandedClockBlock" Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="4,2">
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock x:Name="TodayDateText"
                                                Foreground="#E7EAF0"
@@ -629,16 +628,16 @@
                 </Grid>
 
                 <!-- 최소화 막대: 날짜·시각 칸, 남은 일정 2줄, 동기화 오류 점, 펼치기/숨기기 버튼. -->
-                <Grid x:Name="MiniBarContent" Visibility="Collapsed">
+                <Grid x:Name="MiniBarContent" Margin="6,4" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="6"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="6"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="6,2" VerticalAlignment="Center">
+                    <Border x:Name="MiniClockBlock" Grid.Column="0" Background="#0BFFFFFF" CornerRadius="7" Padding="6,2" VerticalAlignment="Stretch">
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock x:Name="MiniDateText"
                                        Foreground="#E7EAF0"
@@ -653,46 +652,45 @@
                         </StackPanel>
                     </Border>
 
-                    <Border x:Name="MiniAgendaArea"
-                            Grid.Column="2"
-                            Tag="NoDrag"
-                            Background="Transparent"
-                            ClipToBounds="True"
-                            Cursor="Hand"
-                            Height="34"
-                            VerticalAlignment="Center"
-                            MouseLeftButtonUp="MiniAgenda_MouseLeftButtonUp"
-                            MouseEnter="MiniAgenda_MouseEnter"
-                            MouseLeave="MiniAgenda_MouseLeave">
-                        <Grid>
-                            <!-- Canvas로 감싸 StackPanel이 슬롯(34 DIP)보다 커도 레이아웃 클립을 받지 않게 한다.
-                                 클립은 RenderTransform과 함께 움직여 슬라이드 중 들어오는 3번째 행을 가린다.
-                                 잘라내기는 MiniAgendaArea의 ClipToBounds가 맡는다. -->
-                            <Canvas x:Name="MiniAgendaCanvas">
-                                <StackPanel x:Name="MiniAgendaRows"
-                                            Width="{Binding ActualWidth, ElementName=MiniAgendaCanvas}">
-                                    <StackPanel.RenderTransform>
-                                        <TranslateTransform x:Name="MiniAgendaShift"/>
-                                    </StackPanel.RenderTransform>
-                                </StackPanel>
-                            </Canvas>
-                            <TextBlock x:Name="MiniAgendaEmptyText"
-                                       Text="남은 일정 없음"
-                                       Foreground="#7C818B"
-                                       FontSize="11.5"
-                                       VerticalAlignment="Center"/>
-                        </Grid>
+                    <Border x:Name="MiniAgendaZone" Grid.Column="2" Background="#0BFFFFFF" CornerRadius="7" Padding="6,0" VerticalAlignment="Stretch">
+                        <Border x:Name="MiniAgendaArea"
+                                Tag="NoDrag"
+                                Background="Transparent"
+                                ClipToBounds="True"
+                                Cursor="Hand"
+                                Height="34"
+                                VerticalAlignment="Center"
+                                MouseLeftButtonUp="MiniAgenda_MouseLeftButtonUp"
+                                MouseEnter="MiniAgenda_MouseEnter"
+                                MouseLeave="MiniAgenda_MouseLeave">
+                            <Grid>
+                                <!-- Canvas로 감싸 StackPanel이 슬롯(34 DIP)보다 커도 레이아웃 클립을 받지 않게 한다.
+                                     클립은 RenderTransform과 함께 움직여 슬라이드 중 들어오는 3번째 행을 가린다.
+                                     잘라내기는 MiniAgendaArea의 ClipToBounds가 맡는다. -->
+                                <Canvas x:Name="MiniAgendaCanvas">
+                                    <StackPanel x:Name="MiniAgendaRows"
+                                                Width="{Binding ActualWidth, ElementName=MiniAgendaCanvas}">
+                                        <StackPanel.RenderTransform>
+                                            <TranslateTransform x:Name="MiniAgendaShift"/>
+                                        </StackPanel.RenderTransform>
+                                    </StackPanel>
+                                </Canvas>
+                                <TextBlock x:Name="MiniAgendaEmptyText"
+                                           Text="남은 일정 없음"
+                                           Foreground="#7C818B"
+                                           FontSize="11.5"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
                     </Border>
 
-                    <Ellipse Grid.Column="3"
-                             Width="6" Height="6"
-                             Margin="4,0"
-                             VerticalAlignment="Center"
-                             Fill="{Binding StatusForeground}"
-                             Visibility="{Binding StatusIsError, Converter={StaticResource BoolToVisibility}}"
-                             ToolTip="{Binding StatusText}"/>
-
-                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel x:Name="MiniButtonsZone" Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse Width="6" Height="6"
+                                 Margin="0,0,4,0"
+                                 VerticalAlignment="Center"
+                                 Fill="{Binding StatusForeground}"
+                                 Visibility="{Binding StatusIsError, Converter={StaticResource BoolToVisibility}}"
+                                 ToolTip="{Binding StatusText}"/>
                         <Button x:Name="MiniExpandButton" Content="□" Width="22" ToolTip="펼치기" Style="{StaticResource TopHeaderButtonStyle}" Click="ToggleDisplayMode_Click" FontSize="11.5"/>
                         <Button Content="✕" Width="22" ToolTip="숨기기 (Esc)" Style="{StaticResource TopHeaderButtonStyle}" Click="Hide_Click" FontSize="11.5"/>
                     </StackPanel>
@@ -703,7 +701,7 @@
         <!-- 날짜를 클릭하면 해당 날짜의 모든 일정을 한 번에 볼 수 있다. -->
         <Grid x:Name="DayEventsOverlay"
               Grid.Row="1"
-              Margin="16"
+              Margin="9"
               Panel.ZIndex="90"
               Visibility="Collapsed">
             <Border x:Name="DayEventsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="DayEventsBackdrop_MouseLeftButtonUp"/>
@@ -845,7 +843,7 @@
         <!-- 일정 상세는 별도 윈도우가 아니라 오버레이 카드로 표시한다. -->
         <Grid x:Name="EventDetailsOverlay"
               Grid.Row="1"
-              Margin="16"
+              Margin="9"
               Panel.ZIndex="100"
               Visibility="Collapsed">
             <Border x:Name="EventDetailsBackdrop" Background="#9A080A0E" MouseLeftButtonUp="EventDetailsBackdrop_MouseLeftButtonUp"/>
@@ -947,5 +945,48 @@
                 </Grid>
             </Border>
         </Grid>
+
+        <!-- 접기·펼치기 공유 요소 전환 층. 날짜·시계 블록의 유령이 출발 블록 사각형에서 도착 블록 사각형으로
+             옮겨 가며 두 층(펼침 서식, 막대 서식)을 교차 페이드한다. 쉬는 상태에서는 접혀 있다.
+             글자는 실제 TextBlock을 ElementName으로 따라가므로 전환 중에도 시계가 갱신된다. -->
+        <Canvas x:Name="TransitionLayer" Grid.RowSpan="3" IsHitTestVisible="False" Visibility="Collapsed">
+            <Border x:Name="SharedClockGhost" Background="#0BFFFFFF" CornerRadius="7">
+                <Grid ClipToBounds="True">
+                    <StackPanel x:Name="GhostExpandedClock" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Text, ElementName=TodayDateText}"
+                                   Foreground="#E7EAF0"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   LineHeight="16"
+                                   TextAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,1,0,0">
+                            <TextBlock Text="{Binding Text, ElementName=TodayWeekdayText}"
+                                       Foreground="#AFB5C0"
+                                       FontSize="11.5"
+                                       FontWeight="SemiBold"
+                                       LineHeight="15"/>
+                            <TextBlock Text="  " FontSize="11.5"/>
+                            <TextBlock Text="{Binding Text, ElementName=CurrentTimeText}"
+                                       Foreground="#F5F7FA"
+                                       FontSize="11.5"
+                                       FontWeight="Bold"
+                                       LineHeight="15"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="GhostMiniClock" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Text, ElementName=MiniDateText}"
+                                   Foreground="#E7EAF0"
+                                   FontSize="11.5"
+                                   FontWeight="SemiBold"
+                                   TextAlignment="Center"/>
+                        <TextBlock Text="{Binding Text, ElementName=MiniTimeText}"
+                                   Foreground="#F5F7FA"
+                                   FontSize="12"
+                                   FontWeight="Bold"
+                                   TextAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Canvas>
     </Grid>
 </Window>

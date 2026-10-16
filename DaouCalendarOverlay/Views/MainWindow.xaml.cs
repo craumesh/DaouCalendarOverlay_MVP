@@ -58,8 +58,13 @@ public partial class MainWindow : Window
     private OverlayDisplayMode _pendingMode = OverlayDisplayMode.Expanded;
     private PixelRect? _pendingWindowRect;
     private VerticalAnchor _pendingAnchor = VerticalAnchor.Top;
+    // 직전 전환 메모와 진행 중인 전환의 시작 창. 메모리에만 두고 저장하지 않는다.
+    private OverlayLayoutPlanner.TransitionMemo? _lastTransition;
+    private PixelRect? _pendingWindowBefore;
     // 목록을 붙이기 직전의 막대 창 사각형(px). 떼기에서 이 값으로 정확히 되돌린다.
     private PixelRect? _preAttachWindowPx;
+    // 시스템 이동 루프(WM_ENTERSIZEMOVE~WM_EXITSIZEMOVE) 동안만 값이 있다. 시작 창 사각형과 시작 커서(물리 px).
+    private DragSnapSession? _dragSession;
 
     private static readonly SolidColorBrush MiniTimeBrush = CreateFrozenBrush(0xB8, 0xBD, 0xC8);
     private static readonly SolidColorBrush MiniTitleBrush = CreateFrozenBrush(0xE7, 0xEA, 0xF0);
@@ -309,10 +314,9 @@ public partial class MainWindow : Window
             return;
 
         var scale = GetDpiScale();
-        var inset = OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale);
         var work = GetWorkAreaPx(win);
         var dir = OverlayLayoutPlanner.ChooseAttachDirection(
-            win.Deflate(inset),
+            win,
             work,
             OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.AttachedRegionHeightDip, scale));
 
@@ -330,7 +334,10 @@ public partial class MainWindow : Window
         attachRow.Height = new GridLength(OverlayLayoutMetrics.AttachedRegionHeightDip);
         Grid.SetRow(DayEventsOverlay, row);
         Grid.SetRow(EventDetailsOverlay, row);
-        var margin = new Thickness(OverlayLayoutMetrics.WindowMarginDip, 0, OverlayLayoutMetrics.WindowMarginDip, 0);
+        // 막대 카드와 붙인 목록 카드 사이 간격은 막대 쪽 변에만 둔다.
+        var margin = dir == AttachDirection.Below
+            ? new Thickness(0, OverlayLayoutMetrics.AttachGapDip, 0, 0)
+            : new Thickness(0, 0, 0, OverlayLayoutMetrics.AttachGapDip);
         DayEventsOverlay.Margin = margin;
         EventDetailsOverlay.Margin = margin;
         // 알파 0 픽셀은 레이어드 창에서 클릭이 통과한다.
@@ -346,8 +353,7 @@ public partial class MainWindow : Window
             OverlayLayoutMetrics.DipToPx(
                 OverlayLayoutMetrics.MiniWindowHeightDip + OverlayLayoutMetrics.AttachedRegionHeightDip, scale),
             OverlayLayoutPlanner.ToAnchor(dir),
-            work,
-            inset));
+            work));
 
         // 끝난 일정을 포함하고 숨긴 캘린더만 제외한다. 검색 필터는 적용하지 않는다.
         ShowDayEvents(DateTime.Today, _vm.GetUnfilteredEventChipsForDate(DateTime.Today));
@@ -379,8 +385,7 @@ public partial class MainWindow : Window
                 win,
                 OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.MiniWindowHeightDip, scale),
                 OverlayLayoutPlanner.ToAnchor(dir),
-                GetWorkAreaPx(win),
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale)));
+                GetWorkAreaPx(win)));
         }
 
         AttachBelowRow.Height = new GridLength(0);
@@ -395,13 +400,13 @@ public partial class MainWindow : Window
         UpdateTickerState();
     }
 
-    // 목록·상세 오버레이를 펼침 모드의 배치(Row 1, 여백 16, 어두운 배경판, 가운데 정렬)로 되돌린다.
+    // 목록·상세 오버레이를 펼침 모드의 배치(Row 1, 여백 9, 어두운 배경판, 가운데 정렬)로 되돌린다.
     private void RestoreOverlayPlacement()
     {
         Grid.SetRow(DayEventsOverlay, 1);
         Grid.SetRow(EventDetailsOverlay, 1);
-        DayEventsOverlay.Margin = new Thickness(16);
-        EventDetailsOverlay.Margin = new Thickness(16);
+        DayEventsOverlay.Margin = new Thickness(9);
+        EventDetailsOverlay.Margin = new Thickness(9);
         DayEventsBackdrop.Background = CreateBackdropBrush();
         EventDetailsBackdrop.Background = CreateBackdropBrush();
         DayEventsCard.VerticalAlignment = VerticalAlignment.Center;
@@ -675,12 +680,15 @@ public partial class MainWindow : Window
     /// <summary>생성자에서 한 번만 부른다. 저장된 최소화 상태를 애니메이션 없이 적용한다.</summary>
     private void ApplyInitialDisplayMode(bool minimized)
     {
+        // 창 사각형이 곧 카드 사각형이다. 쉬는 상태의 카드는 두 모드 모두 높이를 비워(NaN) CardRow를 꽉 채운다.
+        RootChrome.Height = double.NaN;
         if (!minimized)
+        {
+            Height = OverlayLayoutMetrics.ExpandedWindowHeightDip;
             return;
+        }
 
         Height = OverlayLayoutMetrics.MiniWindowHeightDip;
-        RootChrome.Height = OverlayLayoutMetrics.MiniCardHeightDip;
-        RootChrome.Padding = new Thickness(8, 4, 8, 4);
         ExpandedContent.Visibility = Visibility.Collapsed;
         MiniBarContent.Visibility = Visibility.Visible;
         _displayMode = OverlayDisplayMode.MiniBar;
@@ -690,6 +698,25 @@ public partial class MainWindow : Window
     {
         _ = RunGuardedAsync("ui.toggleDisplayMode", () =>
             _displayMode == OverlayDisplayMode.Expanded ? BeginCollapseAsync() : BeginExpandAsync());
+    }
+
+    // 접기·펼치기의 목표 창과 기준 모서리를 정한다. 직전 전환 메모가 지금 창과 맞으면
+    // 직전 전환 앞의 사각형으로 되돌려 왕복이 원래 위치로 돌아오게 한다(맞지 않으면 일반 계산).
+    private OverlayLayoutPlanner.TransitionPlan PlanTransitionFor(PixelRect win, OverlayDisplayMode targetMode)
+    {
+        var scale = GetDpiScale();
+        var work = GetWorkAreaPx(win);
+        var newHeight = OverlayLayoutMetrics.DipToPx(
+            targetMode == OverlayDisplayMode.MiniBar
+                ? OverlayLayoutMetrics.MiniWindowHeightDip
+                : OverlayLayoutMetrics.ExpandedWindowHeightDip,
+            scale);
+        return OverlayLayoutPlanner.PlanTransition(
+            win,
+            work,
+            newHeight,
+            OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, scale),
+            _lastTransition);
     }
 
     // 전환 한 번마다 창 위치·크기 변경은 ApplyWindowRectPx 1회뿐이다.
@@ -721,29 +748,17 @@ public partial class MainWindow : Window
                 _ = RunGuardedAsync("ui.collapseRefresh", () => ((App)WpfApplication.Current).RefreshAsync(false));
             }
 
-            var scale = GetDpiScale();
-            var inset = OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale);
-            var work = GetWorkAreaPx(win);
-            var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(
-                win.Deflate(inset),
-                work,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.MiniCardHeightDip, scale),
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, scale));
-            var target = OverlayLayoutPlanner.ResizeWindow(
-                win,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.MiniWindowHeightDip, scale),
-                anchor,
-                work,
-                inset);
+            var plan = PlanTransitionFor(win, OverlayDisplayMode.MiniBar);
 
             _pendingMode = OverlayDisplayMode.MiniBar;
-            _pendingWindowRect = target;
-            _pendingAnchor = anchor;
+            _pendingWindowRect = plan.TargetWindow;
+            _pendingAnchor = plan.Anchor;
+            _pendingWindowBefore = win;
 
             if (SystemParameters.ClientAreaAnimation)
                 StartCollapseAnimation(_transitionGeneration);
             else
-                ApplyCollapsedState(target);
+                ApplyCollapsedState(plan.TargetWindow);
         }
         catch
         {
@@ -779,29 +794,17 @@ public partial class MainWindow : Window
                 return Task.CompletedTask;
             }
 
-            var scale = GetDpiScale();
-            var inset = OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale);
-            var work = GetWorkAreaPx(win);
-            var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(
-                win.Deflate(inset),
-                work,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.ExpandedCardHeightDip, scale),
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, scale));
-            var target = OverlayLayoutPlanner.ResizeWindow(
-                win,
-                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.ExpandedWindowHeightDip, scale),
-                anchor,
-                work,
-                inset);
+            var plan = PlanTransitionFor(win, OverlayDisplayMode.Expanded);
 
             _pendingMode = OverlayDisplayMode.Expanded;
-            _pendingWindowRect = target;
-            _pendingAnchor = anchor;
+            _pendingWindowRect = plan.TargetWindow;
+            _pendingAnchor = plan.Anchor;
+            _pendingWindowBefore = win;
 
             if (SystemParameters.ClientAreaAnimation)
                 StartExpandAnimation(_transitionGeneration);
             else
-                ApplyExpandedState(target);
+                ApplyExpandedState(plan.TargetWindow);
         }
         catch
         {
@@ -813,27 +816,24 @@ public partial class MainWindow : Window
         return Task.CompletedTask;
     }
 
-    // 접기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로도 마지막에 이 메서드를 쓴다.
-    // target이 null이면 창은 이미 적용된 것이다. fadeIn이면 막대 내용을 0에서 1로 띄운다.
-    private void ApplyCollapsedState(PixelRect? target, bool fadeIn = false)
+    // 접기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로, 즉시 확정, 애니메이션 꺼짐 경로가 모두 이 메서드로 끝난다.
+    // 첫머리에서 전환 애니메이션을 해제하고 공유 요소 상태(유령 층, 실제 블록 Opacity, 고정 높이)를 되돌린다.
+    // target이 null이면 창은 이미 적용된 것이다.
+    private void ApplyCollapsedState(PixelRect? target)
     {
+        ClearTransitionAnimations();
+        ResetSharedElementState();
         ExpandedContent.Visibility = Visibility.Collapsed;
         ExpandedContent.Opacity = 1;
-        RootChrome.Height = OverlayLayoutMetrics.MiniCardHeightDip;
-        RootChrome.VerticalAlignment = VerticalAlignment.Stretch;
-        RootChrome.Padding = new Thickness(8, 4, 8, 4);
+        MiniBarContent.Opacity = 1;
+        MiniBarContent.Visibility = Visibility.Visible;
         if (target is PixelRect rect)
             ApplyWindowRectPx(rect);
         _pendingWindowRect = null;
-        if (fadeIn)
-        {
-            FadeIn(MiniBarContent);
-        }
-        else
-        {
-            MiniBarContent.Opacity = 1;
-            MiniBarContent.Visibility = Visibility.Visible;
-        }
+        // 창 적용 뒤 실제 창을 읽어 왕복 복원 메모로 남긴다. 메모리에만 두고 저장하지 않는다.
+        if (_pendingWindowBefore is PixelRect b && GetWindowRectPx() is PixelRect a)
+            _lastTransition = new OverlayLayoutPlanner.TransitionMemo(b, a, GetWorkAreaPx(a), _pendingAnchor);
+        _pendingWindowBefore = null;
 
         _displayMode = OverlayDisplayMode.MiniBar;
         _suppressBoundsSave = false;
@@ -850,27 +850,25 @@ public partial class MainWindow : Window
         UpdateTickerState();
     }
 
-    // 펼치기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로도 마지막에 이 메서드를 쓴다.
-    // target이 null이면 창은 이미 적용된 것이다. fadeIn이면 펼친 내용을 0에서 1로 띄운다.
-    private void ApplyExpandedState(PixelRect? target, bool fadeIn = false)
+    // 펼치기의 끝 상태를 한 번에 적용하고 저장한다. 애니메이션 경로, 즉시 확정, 애니메이션 꺼짐 경로가 모두 이 메서드로 끝난다.
+    // 첫머리에서 전환 애니메이션을 해제하고 공유 요소 상태를 되돌린다.
+    // target이 null이면 창은 이미 적용된 것이다(애니메이션 경로는 단계 B에서 창을 적용했다).
+    private void ApplyExpandedState(PixelRect? target)
     {
+        ClearTransitionAnimations();
+        ResetSharedElementState();
         MiniBarContent.Visibility = Visibility.Collapsed;
         MiniBarContent.Opacity = 1;
-        RootChrome.Padding = new Thickness(8);
-        RootChrome.Height = double.NaN;
-        RootChrome.VerticalAlignment = VerticalAlignment.Stretch;
+        ExpandedContent.Opacity = 1;
+        ExpandedContent.Visibility = Visibility.Visible;
         if (target is PixelRect rect)
             ApplyWindowRectPx(rect);
         _pendingWindowRect = null;
-        if (fadeIn)
-        {
-            FadeIn(ExpandedContent);
-        }
-        else
-        {
-            ExpandedContent.Opacity = 1;
-            ExpandedContent.Visibility = Visibility.Visible;
-        }
+        // 창 적용 뒤 실제 창을 읽어 왕복 복원 메모로 남긴다. 메모리에만 두고 저장하지 않는다.
+        if (_pendingWindowBefore is PixelRect b && GetWindowRectPx() is PixelRect a)
+            _lastTransition = new OverlayLayoutPlanner.TransitionMemo(b, a, GetWorkAreaPx(a), _pendingAnchor);
+        _pendingWindowBefore = null;
+
         _displayMode = OverlayDisplayMode.Expanded;
         _suppressBoundsSave = false;
         EnsureKeyboardFocus();
@@ -912,107 +910,226 @@ public partial class MainWindow : Window
         }
     }
 
-    // 끝나면 HoldEnd 값을 해제한 뒤 로컬 값을 1로 둔다.
-    private void FadeIn(UIElement element)
-    {
-        var generation = _transitionGeneration;
-        element.BeginAnimation(OpacityProperty, null);
-        element.Opacity = 0;
-        element.Visibility = Visibility.Visible;
-        var fade = CreateFade(0, 1);
-        fade.Completed += (_, _) => RunTransitionStep(generation, () =>
-        {
-            element.BeginAnimation(OpacityProperty, null);
-            element.Opacity = 1;
-        });
-        element.BeginAnimation(OpacityProperty, fade);
-    }
-
     private void ClearTransitionAnimations()
     {
         ExpandedContent.BeginAnimation(OpacityProperty, null);
         MiniBarContent.BeginAnimation(OpacityProperty, null);
         RootChrome.BeginAnimation(OpacityProperty, null);
         RootChrome.BeginAnimation(HeightProperty, null);
+        SharedClockGhost.BeginAnimation(Canvas.LeftProperty, null);
+        SharedClockGhost.BeginAnimation(Canvas.TopProperty, null);
+        SharedClockGhost.BeginAnimation(WidthProperty, null);
+        SharedClockGhost.BeginAnimation(HeightProperty, null);
+        GhostExpandedClock.BeginAnimation(OpacityProperty, null);
+        GhostMiniClock.BeginAnimation(OpacityProperty, null);
+        ExpandedClockBlock.BeginAnimation(OpacityProperty, null);
+        MiniClockBlock.BeginAnimation(OpacityProperty, null);
     }
 
-    // 접기: 펼친 내용 페이드아웃, 카드 높이 축소, 창 1회 변경, 막대 내용 페이드인 순이다.
+    // 공유 요소 전환이 바꾼 로컬 값을 쉬는 상태로 되돌린다. 애니메이션은 ClearTransitionAnimations로 먼저 해제해야
+    // 이 대입이 HoldEnd 값에 가려지지 않는다. 끝나면 유령 층은 접혀 있고, 실제 날짜·시계 블록은 불투명하며,
+    // 카드와 두 내용은 고정 높이 없이 칸을 채운다. 내용의 Visibility는 호출한 쪽이 정한다.
+    private void ResetSharedElementState()
+    {
+        TransitionLayer.Visibility = Visibility.Collapsed;
+        ExpandedClockBlock.Opacity = 1;
+        MiniClockBlock.Opacity = 1;
+        ExpandedContent.Height = double.NaN;
+        ExpandedContent.VerticalAlignment = VerticalAlignment.Stretch;
+        ExpandedContent.IsHitTestVisible = true;
+        MiniBarContent.Height = double.NaN;
+        MiniBarContent.VerticalAlignment = VerticalAlignment.Stretch;
+        MiniBarContent.IsHitTestVisible = true;
+        RootChrome.VerticalAlignment = VerticalAlignment.Stretch;
+        RootChrome.Height = double.NaN;
+    }
+
+    // e의 배치 사각형을 root 좌표(DIP)로 잰다. 측정 전에 e가 Visible이고 레이아웃이 끝나 있어야 한다.
+    private static Rect RectIn(FrameworkElement e, Visual root)
+    {
+        var origin = e.TranslatePoint(new Point(0, 0), root as UIElement);
+        return new Rect(origin.X, origin.Y, e.ActualWidth, e.ActualHeight);
+    }
+
+    // 유령 블록을 r에 놓고 한 층만 보이게 한 뒤 전환 층을 띄운다.
+    private void ShowGhostAt(Rect r, bool expandedLayerVisible)
+    {
+        // 남은 애니메이션 값이 있으면 아래 로컬 값 대입이 가려지므로 먼저 해제한다.
+        SharedClockGhost.BeginAnimation(Canvas.LeftProperty, null);
+        SharedClockGhost.BeginAnimation(Canvas.TopProperty, null);
+        SharedClockGhost.BeginAnimation(WidthProperty, null);
+        SharedClockGhost.BeginAnimation(HeightProperty, null);
+        GhostExpandedClock.BeginAnimation(OpacityProperty, null);
+        GhostMiniClock.BeginAnimation(OpacityProperty, null);
+
+        Canvas.SetLeft(SharedClockGhost, r.X);
+        Canvas.SetTop(SharedClockGhost, r.Y);
+        SharedClockGhost.Width = r.Width;
+        SharedClockGhost.Height = r.Height;
+        GhostExpandedClock.Opacity = expandedLayerVisible ? 1 : 0;
+        GhostMiniClock.Opacity = expandedLayerVisible ? 0 : 1;
+        TransitionLayer.Visibility = Visibility.Visible;
+    }
+
+    // 유령 블록을 from에서 to로 옮기며 크기를 바꾸고, 나가는 층과 들어오는 층을 같은 시간 동안 교차 페이드한다.
+    // 끝 처리는 높이 애니메이션 쪽이 맡으므로 여기의 애니메이션에는 처리기를 달지 않는다.
+    private void StartGhostMorph(Rect from, Rect to, bool toMini)
+    {
+        var duration = Ms(OverlayLayoutMetrics.HeightAnimationMilliseconds);
+        DoubleAnimation Move(double start, double end) =>
+            new(start, end, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
+
+        SharedClockGhost.BeginAnimation(Canvas.LeftProperty, Move(from.X, to.X));
+        SharedClockGhost.BeginAnimation(Canvas.TopProperty, Move(from.Y, to.Y));
+        SharedClockGhost.BeginAnimation(WidthProperty, Move(from.Width, to.Width));
+        SharedClockGhost.BeginAnimation(HeightProperty, Move(from.Height, to.Height));
+
+        var outgoing = toMini ? GhostExpandedClock : GhostMiniClock;
+        var incoming = toMini ? GhostMiniClock : GhostExpandedClock;
+        outgoing.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, duration));
+        incoming.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, duration));
+    }
+
+    private static VerticalAlignment ToVerticalAlignment(VerticalAnchor anchor) =>
+        anchor == VerticalAnchor.Bottom ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+
+    // 막대 카드(MiniWindowHeightDip) 안에서 막대 내용이 차지하는 높이: 카드 테두리와 내용 Margin의 세로 합을 뺀다.
+    private double MiniBarContentHeightDip() =>
+        OverlayLayoutMetrics.MiniWindowHeightDip
+        - RootChrome.BorderThickness.Top - RootChrome.BorderThickness.Bottom
+        - MiniBarContent.Margin.Top - MiniBarContent.Margin.Bottom;
+
+    // 접기(총 200 ms). t0(동기): 카드와 펼친 내용의 높이를 고정하고, 막대 내용을 보이지 않게 기준 모서리 쪽에 배치한 뒤
+    // 레이아웃을 확정하고 두 날짜·시계 블록을 잰다. 이어서 펼친 내용 페이드아웃(0–120 ms), 카드 높이 축소(0–200 ms),
+    // 유령 이동(0–200 ms), 막대 내용 페이드인(80–200 ms)을 함께 시작한다.
+    // 창은 이 메서드에서 바꾸지 않고 끝 상태(ApplyCollapsedState)에서 1회 바꾼다.
     private void StartCollapseAnimation(int generation)
     {
-        var target = _pendingWindowRect;
+        var target = _pendingWindowRect ?? throw new InvalidOperationException("접기 목표 창이 없습니다.");
+        var win = GetWindowRectPx() ?? throw new InvalidOperationException("창 사각형을 읽지 못했습니다.");
+        var scale = GetDpiScale();
+        var alignment = ToVerticalAlignment(_pendingAnchor);
+
+        ClearTransitionAnimations();
+
+        // 1. 카드와 펼친 내용의 높이를 현재 값으로 고정한다. 카드가 줄어도 내용이 다시 배치되지 않고 기준 모서리 쪽에 머문다.
+        var startHeight = RootChrome.ActualHeight;
+        RootChrome.Height = startHeight;
+        RootChrome.VerticalAlignment = alignment;
+        ExpandedContent.Height = ExpandedContent.ActualHeight;
+        ExpandedContent.VerticalAlignment = alignment;
+        ExpandedContent.IsHitTestVisible = false;
+
+        // 2. 막대 내용을 보이지 않게 막대 카드 자리(기준 모서리 쪽)에 미리 배치한다. 측정하려면 Visible이어야 한다.
+        //    페이드인 동안 지난 막대 세션의 일정 행이 보이지 않게 오늘 일정을 먼저 다시 읽는다(끝 상태에서도 한 번 더 읽는다).
+        ReloadTodayVisible();
+        MiniBarContent.Opacity = 0;
+        MiniBarContent.IsHitTestVisible = false;
+        MiniBarContent.Height = MiniBarContentHeightDip();
+        MiniBarContent.VerticalAlignment = alignment;
+        MiniBarContent.Visibility = Visibility.Visible;
+
+        // 3. 측정 전에 레이아웃을 확정한다.
+        UpdateLayout();
+
+        // 4. 출발·도착 사각형. 도착은 지금 창 좌표로 잰 값이고 창은 끝 상태에서 target으로 바뀐다.
+        //    기준 모서리 변과 왼쪽 변이 옮겨지는 만큼(클램프·메모 복원, 없으면 0) 더해 화면상 도착 위치에 맞춘다.
+        var from = RectIn(ExpandedClockBlock, TransitionLayer);
+        var to = RectIn(MiniClockBlock, TransitionLayer);
+        to.Y += OverlayLayoutPlanner.AnchorEdgeShiftPx(win, target, _pendingAnchor) / scale;
+        to.X += (target.Left - win.Left) / scale;
+
+        // 5. 실제 블록 두 개를 감추고 유령을 출발 자리에 펼침 서식으로 띄운다.
+        ExpandedClockBlock.Opacity = 0;
+        MiniClockBlock.Opacity = 0;
+        ShowGhostAt(from, true);
+
         var fadeOut = CreateFade(1, 0);
-        fadeOut.Completed += (_, _) => RunTransitionStep(generation, () =>
-        {
-            ExpandedContent.BeginAnimation(OpacityProperty, null);
-            ExpandedContent.Opacity = 1;
-            ExpandedContent.Visibility = Visibility.Collapsed;
+        var shrink = CreateHeightAnimation(startHeight, OverlayLayoutMetrics.MiniWindowHeightDip);
+        shrink.Completed += (_, _) => RunTransitionStep(generation, () => ApplyCollapsedState(target));
+        var incomingFade = CreateFade(0, 1);
+        incomingFade.BeginTime = TimeSpan.FromMilliseconds(OverlayLayoutMetrics.IncomingFadeBeginMilliseconds);
 
-            // 내용이 접히면 자동 높이가 줄어드는 프레임이 생기므로 현재 높이를 먼저 로컬 값으로 고정한다.
-            var from = RootChrome.ActualHeight;
-            RootChrome.Height = from;
-            RootChrome.VerticalAlignment = _pendingAnchor == VerticalAnchor.Bottom
-                ? VerticalAlignment.Bottom
-                : VerticalAlignment.Top;
-
-            var shrink = CreateHeightAnimation(from, OverlayLayoutMetrics.MiniCardHeightDip);
-            shrink.Completed += (_, _) => RunTransitionStep(generation, () =>
-            {
-                RootChrome.BeginAnimation(HeightProperty, null);
-                ApplyCollapsedState(target, fadeIn: true);
-            });
-            RootChrome.BeginAnimation(HeightProperty, shrink);
-        });
         ExpandedContent.BeginAnimation(OpacityProperty, fadeOut);
+        RootChrome.BeginAnimation(HeightProperty, shrink);
+        StartGhostMorph(from, to, true);
+        MiniBarContent.BeginAnimation(OpacityProperty, incomingFade);
     }
 
-    // 펼치기: 막대 내용 페이드아웃, 창 1회 변경(카드는 창보다 커질 수 없으므로 먼저 키운다),
-    // 카드 높이 확대, 펼친 내용 페이드인 순이다.
+    // 펼치기(총 320 ms).
+    // 단계 A(0–120 ms): 막대 시계 블록 자리에 유령을 막대 서식으로 띄우고 막대 내용을 페이드아웃한다.
+    //   막대 내용은 Visible로 남긴다. 단계 B에서 새 창 기준으로 막대 시계 블록을 다시 재야 한다.
+    // 단계 B(120–320 ms): 카드와 막대 내용을 막대 높이로 고정한 채 창을 1회 키우고(카드는 창보다 커질 수 없다),
+    //   펼친 내용을 보이지 않게 배치해 출발·도착 사각형을 다시 잰 뒤 카드 높이 확대, 유령 이동,
+    //   펼친 내용 페이드인(80 ms 뒤 시작)을 함께 진행한다.
     private void StartExpandAnimation(int generation)
     {
+        ClearTransitionAnimations();
+
+        // 단계 A. 붙인 목록을 막 뗐다면 행 높이가 바뀌었을 수 있으므로 측정 전에 레이아웃을 확정한다.
+        UpdateLayout();
+        MiniClockBlock.Opacity = 0;
+        ShowGhostAt(RectIn(MiniClockBlock, TransitionLayer), false);
+        MiniBarContent.IsHitTestVisible = false;
+
         var fadeOut = CreateFade(1, 0);
         fadeOut.Completed += (_, _) => RunTransitionStep(generation, () =>
         {
-            MiniBarContent.BeginAnimation(OpacityProperty, null);
-            MiniBarContent.Opacity = 1;
-            MiniBarContent.Visibility = Visibility.Collapsed;
-
+            // 단계 B
             var scale = GetDpiScale();
-            var inset = OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale);
             var target = _pendingWindowRect ?? throw new InvalidOperationException("펼치기 목표 창이 없습니다.");
             if (GetWindowRectPx() is PixelRect win)
             {
-                var work = GetWorkAreaPx(win);
-                var anchor = OverlayLayoutPlanner.ChooseResizeAnchor(
-                    win.Deflate(inset),
-                    work,
-                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.ExpandedCardHeightDip, scale),
-                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.EdgeToleranceDip, scale));
-                target = OverlayLayoutPlanner.ResizeWindow(
-                    win,
-                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.ExpandedWindowHeightDip, scale),
-                    anchor,
-                    work,
-                    inset);
-                _pendingAnchor = anchor;
+                // Begin 때와 같은 메모·같은 창이므로 결과가 같다. 그 사이 창이 바뀌었으면 새로 계산된다.
+                var plan = PlanTransitionFor(win, OverlayDisplayMode.Expanded);
+                target = plan.TargetWindow;
+                _pendingAnchor = plan.Anchor;
             }
 
+            var alignment = ToVerticalAlignment(_pendingAnchor);
+
+            // 막대 내용은 페이드아웃된 상태(Opacity 0)로 Visible을 유지한다.
+            MiniBarContent.BeginAnimation(OpacityProperty, null);
+            MiniBarContent.Opacity = 0;
+
+            // 창을 키워도 막대 카드가 화면상 제자리에 있도록 카드와 막대 내용을 막대 높이로 고정해 기준 모서리에 붙인다.
+            RootChrome.Height = OverlayLayoutMetrics.MiniWindowHeightDip;
+            RootChrome.VerticalAlignment = alignment;
+            MiniBarContent.Height = MiniBarContentHeightDip();
+            MiniBarContent.VerticalAlignment = alignment;
+
             _pendingWindowRect = target;
-            RootChrome.Height = OverlayLayoutMetrics.MiniCardHeightDip;
-            RootChrome.VerticalAlignment = _pendingAnchor == VerticalAnchor.Bottom
-                ? VerticalAlignment.Bottom
-                : VerticalAlignment.Top;
-            RootChrome.Padding = new Thickness(8);
             ApplyWindowRectPx(target);
             _pendingWindowRect = null;
 
-            var to = target.Height / scale - 2 * OverlayLayoutMetrics.WindowMarginDip;
-            var grow = CreateHeightAnimation(OverlayLayoutMetrics.MiniCardHeightDip, to);
-            grow.Completed += (_, _) => RunTransitionStep(generation, () =>
-            {
-                RootChrome.BeginAnimation(HeightProperty, null);
-                ApplyExpandedState(null, fadeIn: true);
-            });
+            // 펼친 내용을 끝 높이로 고정해 보이지 않게 배치한다. 카드가 커지는 동안 기준 모서리 쪽부터 드러난다.
+            var cardHeight = target.Height / scale;
+            ExpandedContent.Opacity = 0;
+            ExpandedContent.IsHitTestVisible = false;
+            ExpandedContent.Height = Math.Max(
+                0,
+                cardHeight
+                - RootChrome.BorderThickness.Top - RootChrome.BorderThickness.Bottom
+                - ExpandedContent.Margin.Top - ExpandedContent.Margin.Bottom);
+            ExpandedContent.VerticalAlignment = alignment;
+            ExpandedContent.Visibility = Visibility.Visible;
+
+            UpdateLayout();
+
+            // 창이 바뀌었으므로 출발 사각형도 새 창 좌표로 다시 잰다(기준이 아래면 창 위 변이 옮겨졌다).
+            var from = RectIn(MiniClockBlock, TransitionLayer);
+            var to = RectIn(ExpandedClockBlock, TransitionLayer);
+            ExpandedClockBlock.Opacity = 0;
+            ShowGhostAt(from, false);
+
+            var grow = CreateHeightAnimation(OverlayLayoutMetrics.MiniWindowHeightDip, cardHeight);
+            grow.Completed += (_, _) => RunTransitionStep(generation, () => ApplyExpandedState(null));
+            var incomingFade = CreateFade(0, 1);
+            incomingFade.BeginTime = TimeSpan.FromMilliseconds(OverlayLayoutMetrics.IncomingFadeBeginMilliseconds);
+
             RootChrome.BeginAnimation(HeightProperty, grow);
+            StartGhostMorph(from, to, false);
+            ExpandedContent.BeginAnimation(OpacityProperty, incomingFade);
         });
         MiniBarContent.BeginAnimation(OpacityProperty, fadeOut);
     }
@@ -1020,6 +1137,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// 진행 중인 전환을 즉시 끝 상태로 확정한다. 숨기기, 자정, 창이 숨겨질 때 부른다.
     /// 아직 적용하지 않은 목표 창이 있으면 1회 적용하고 저장까지 끝낸다. 늦게 오는 Completed는 generation으로 무효가 된다.
+    /// 공유 요소 상태는 끝 상태 메서드 첫머리에서 되돌린다.
     /// </summary>
     private void FinishTransitionNow()
     {
@@ -1038,6 +1156,15 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             LogService.Warn("transition", "전환 즉시 확정 실패", ex);
+            // 확정이 중간에 실패해도 유령 층이 남거나 실제 블록이 투명한 채 굳지 않게 중단 경로로 정리한다.
+            try
+            {
+                AbortTransition();
+            }
+            catch (Exception cleanup)
+            {
+                LogService.Warn("transition", "전환 정리 실패", cleanup);
+            }
         }
         finally
         {
@@ -1047,14 +1174,22 @@ public partial class MainWindow : Window
         }
     }
 
-    // 전환을 되돌리지 않고 멈춘다. 늦은 Completed를 무효화하고 애니메이션 값을 해제한다.
+    // 전환을 되돌리지 않고 멈춘다. 늦은 Completed를 무효화하고 애니메이션 값을 해제한 뒤 공유 요소 상태를 되돌린다.
+    // 중단 시점에는 두 내용이 함께 Visible일 수 있으므로 현재 모드(_displayMode) 쪽만 보이게 맞춘다.
     private void AbortTransition()
     {
         ++_transitionGeneration;
         ClearTransitionAnimations();
+        ResetSharedElementState();
+        var mini = _displayMode == OverlayDisplayMode.MiniBar;
+        ExpandedContent.Visibility = mini ? Visibility.Collapsed : Visibility.Visible;
+        MiniBarContent.Visibility = mini ? Visibility.Visible : Visibility.Collapsed;
         ExpandedContent.Opacity = 1;
         MiniBarContent.Opacity = 1;
         _pendingWindowRect = null;
+        // 중단된 전환은 창이 어디까지 갔는지 알 수 없으므로 왕복 복원 메모도 버린다.
+        _lastTransition = null;
+        _pendingWindowBefore = null;
         _suppressBoundsSave = false;
         _transitionInProgress = false;
     }
@@ -1487,52 +1622,151 @@ public partial class MainWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        const int WmDpiChanged = 0x02E0;
+        const int WmEnterSizeMove = 0x0231;
+        const int WmExitSizeMove = 0x0232;
         const int WmMoving = 0x0216;
-        if (msg == WmDpiChanged)
+        const int WmDpiChanged = 0x02E0;
+        if (msg == WmEnterSizeMove)
+        {
+            OnEnterSizeMove();
+        }
+        else if (msg == WmExitSizeMove)
+        {
+            OnExitSizeMove();
+        }
+        else if (msg == WmDpiChanged)
+        {
             _ = Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea));
+            // 이동 중 다른 배율의 모니터로 넘어가면 OS가 창 크기와 잡은 지점을 새 배율로 다시 잡는다.
+            // 이전 기준선으로 계속 더하면 어긋나므로 제안 사각형과 현재 커서로 기준선을 다시 잡는다.
+            if (_dragSession is not null)
+            {
+                try
+                {
+                    if (lParam != IntPtr.Zero && TryGetCursorPx() is PixelPoint cursor)
+                    {
+                        var s = Marshal.PtrToStructure<NativeRect>(lParam);
+                        var suggested = new PixelRect(s.Left, s.Top, s.Right, s.Bottom);
+                        _dragSession = OverlayDragSnap.Begin(suggested, cursor);
+                    }
+                    else
+                    {
+                        _dragSession = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _dragSession = null;
+                    ReportHandlerFailure("ui.snap", ex);
+                }
+            }
+        }
         else if (msg == WmMoving && _snapEnabled && !_positionLocked && !_transitionInProgress &&
                  _attached is null && lParam != IntPtr.Zero)
         {
-            try
+            if (TrySnapMoving(lParam))
             {
-                var r = Marshal.PtrToStructure<NativeRect>(lParam);
-                var proposed = new PixelRect(r.Left, r.Top, r.Right, r.Bottom);
-                // 배율은 모니터를 넘나들며 바뀔 수 있으므로 메시지마다 다시 읽는다.
-                // OverlaySnap은 4변 동일 inset만 받으므로 가로·세로 배율이 다를 수 있어도 DpiScaleX 하나로 inset과 임계값을 환산한다.
-                var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
-                // 작업 영역은 현재 창이 아니라 제안 사각형이 걸친 모니터 기준이다.
-                var work = GetWorkAreaPx(proposed);
-                var snapped = OverlaySnap.Snap(
-                    proposed,
-                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, scale),
-                    work,
-                    OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.SnapThresholdDip, scale));
-                if (snapped != proposed)
-                {
-                    var native = new NativeRect
-                    {
-                        Left = snapped.Left,
-                        Top = snapped.Top,
-                        Right = snapped.Right,
-                        Bottom = snapped.Bottom
-                    };
-                    Marshal.StructureToPtr(native, lParam, false);
-                }
-
                 handled = true;
                 return (IntPtr)1;
             }
-            catch (Exception ex)
-            {
-                // 스냅만 건너뛰고 이동은 막지 않는다.
-                handled = false;
-                ReportHandlerFailure("ui.snap", ex);
-            }
+
+            handled = false;
         }
 
         return IntPtr.Zero;
     }
+
+    // 이동 루프 시작. 스냅 조건과 무관하게 세션을 만든다(끝 로그용). 메시지는 처리하지 않은 것으로 둔다.
+    private void OnEnterSizeMove()
+    {
+        try
+        {
+            _dragSession = GetWindowRectPx() is PixelRect rect && TryGetCursorPx() is PixelPoint cursor
+                ? OverlayDragSnap.Begin(rect, cursor)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            _dragSession = null;
+            ReportHandlerFailure("ui.snap", ex);
+        }
+    }
+
+    // WM_MOVING의 lParam(RECT*)을 스냅한 사각형으로 되쓴다. 처리했으면 true, 예외로 건너뛰었으면 false다.
+    private bool TrySnapMoving(IntPtr lParam)
+    {
+        try
+        {
+            var r = Marshal.PtrToStructure<NativeRect>(lParam);
+            var lp = new PixelRect(r.Left, r.Top, r.Right, r.Bottom);
+            // 세션이 있으면 lParam에서는 크기만 쓴다. lParam 위치는 OS가 이전 되쓰기 위에 커서 이동량을 누적한 값이라
+            // 그대로 쓰면 스냅으로 밀린 만큼 잡은 지점과 커서가 어긋난다.
+            // Propose는 폭·높이 0 이하에서 예외를 던지므로 그때는 lp(기존 동작)를 쓴다.
+            var proposed = _dragSession is DragSnapSession session &&
+                           lp.Width > 0 && lp.Height > 0 &&
+                           TryGetCursorPx() is PixelPoint cursor
+                ? OverlayDragSnap.Propose(session, cursor, lp.Width, lp.Height)
+                : lp;
+            // 배율은 모니터를 넘나들며 바뀔 수 있으므로 메시지마다 다시 읽는다.
+            // 가로·세로 배율이 다를 수 있어도 DpiScaleX 하나로 임계값을 환산한다.
+            var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+            // 작업 영역은 현재 창이 아니라 제안 사각형이 걸친 모니터 기준이다.
+            var work = GetWorkAreaPx(proposed);
+            var snapped = OverlaySnap.Snap(
+                proposed,
+                work,
+                OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.SnapThresholdDip, scale));
+            // 비교 대상은 lp다. 스냅이 없는 프레임에서도 커서 기준 위치를 되써야 OS 누적이 사라진다.
+            if (snapped != lp)
+            {
+                var native = new NativeRect
+                {
+                    Left = snapped.Left,
+                    Top = snapped.Top,
+                    Right = snapped.Right,
+                    Bottom = snapped.Bottom
+                };
+                Marshal.StructureToPtr(native, lParam, false);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // 세션 기준선을 더 믿을 수 없으므로 이 드래그의 나머지는 OS lParam(기존 동작)으로 둔다.
+            _dragSession = null;
+            ReportHandlerFailure("ui.snap", ex);
+            return false;
+        }
+    }
+
+    // 이동 루프 끝. 세션이 있었으면 최종 창과 붙은 변을 1줄 남기고, 어떤 경로든 세션을 비운다.
+    // 예외로 세션이 먼저 비워진 드래그는 끝 로그 대신 ReportHandlerFailure 1건이 기록이다(1줄 규칙은 정상 종료 세션에 적용).
+    private void OnExitSizeMove()
+    {
+        try
+        {
+            if (_dragSession is null || GetWindowRectPx() is not PixelRect r)
+                return;
+
+            var w = GetWorkAreaPx(r);
+            var edges = OverlaySnap.DetectEdges(r, w, 0);
+            var snapOn = _snapEnabled && !_positionLocked && _attached is null;
+            LogService.Info("ui.snap", $"드래그 끝: 창=({r.Left},{r.Top},{r.Right},{r.Bottom}) 작업영역=({w.Left},{w.Top},{w.Right},{w.Bottom}) 붙은 변={OverlaySnap.DescribeEdges(edges)} 스냅={(snapOn ? "켜짐" : "꺼짐")}");
+        }
+        catch (Exception ex)
+        {
+            ReportHandlerFailure("ui.snap", ex);
+        }
+        finally
+        {
+            _dragSession = null;
+        }
+    }
+
+    // PerMonitorV2 매니페스트라 GetWindowRect·WM_MOVING lParam과 같은 물리 px다. 실패하면 null.
+    private static PixelPoint? TryGetCursorPx() =>
+        GetCursorPos(out var point) ? new PixelPoint(point.X, point.Y) : null;
 
     private void ClampToVisibleWorkArea()
     {
@@ -1547,9 +1781,7 @@ public partial class MainWindow : Window
         var screenWork = Forms.Screen.FromHandle(hwnd).WorkingArea;
         var work = new PixelRect(screenWork.Left, screenWork.Top, screenWork.Right, screenWork.Bottom);
 
-        // 눈에 보이는 카드 기준으로 클램프한다. 스냅으로 붙은 창의 투명 여백은 작업 영역 밖이어도 밀지 않는다.
-        var inset = OverlayLayoutMetrics.DipToPx(OverlayLayoutMetrics.WindowMarginDip, GetDpiScale());
-        var clamped = OverlayLayoutPlanner.ClampWindowToWorkArea(rect, work, inset);
+        var clamped = OverlayLayoutPlanner.ClampWindowToWorkArea(rect, work);
         if (clamped == rect)
             return;
 
@@ -1564,6 +1796,17 @@ public partial class MainWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
 
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;

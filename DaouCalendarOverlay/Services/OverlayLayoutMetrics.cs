@@ -24,26 +24,22 @@ public enum AttachDirection
 /// <summary>오버레이 창 배치에 쓰는 크기·시간 상수와 DIP-px 변환. 크기 상수는 DIP, 시간은 ms 또는 초다.</summary>
 public static class OverlayLayoutMetrics
 {
-    public const double WindowWidthDip = 325;
+    /// <summary>창 폭. 창 사각형이 곧 카드 사각형이다.</summary>
+    public const double WindowWidthDip = 311;
 
-    /// <summary>RootChrome Margin. 창과 카드 테두리 사이 투명 여백.</summary>
-    public const double WindowMarginDip = 7;
+    /// <summary>펼침 창 높이(= 카드 높이).</summary>
+    public const double ExpandedWindowHeightDip = 426;
 
-    public const double ExpandedWindowHeightDip = 440;
-
-    /// <summary>펼침 카드 높이(440 - 7*2).</summary>
-    public const double ExpandedCardHeightDip = 426;
-
-    /// <summary>눈에 보이는 막대 카드 높이(테두리 포함).</summary>
-    public const double MiniCardHeightDip = 48;
-
-    /// <summary>막대 창 높이(48 + 7*2).</summary>
-    public const double MiniWindowHeightDip = 62;
+    /// <summary>막대 창 높이(= 막대 카드 높이, 테두리 포함).</summary>
+    public const double MiniWindowHeightDip = 48;
 
     public const double MiniBarLineHeightDip = 17;
 
-    /// <summary>막대에 붙는 목록 영역의 고정 높이(상세 카드 MaxHeight 380 + 여유 4).</summary>
-    public const double AttachedRegionHeightDip = 384;
+    /// <summary>막대 카드와 붙인 목록 카드 사이 간격.</summary>
+    public const double AttachGapDip = 6;
+
+    /// <summary>막대에 붙는 목록 영역의 고정 높이(AttachGapDip 6 + 상세 카드 MaxHeight 380 + 여유 4).</summary>
+    public const double AttachedRegionHeightDip = 390;
 
     public const double SnapThresholdDip = 12;
 
@@ -52,6 +48,9 @@ public static class OverlayLayoutMetrics
     public const int ContentFadeMilliseconds = 120;
 
     public const int HeightAnimationMilliseconds = 200;
+
+    /// <summary>들어오는 쪽 내용 페이드인의 시작 시각(ms). 높이 애니메이션과 같은 순간에 끝나도록 높이 시간에서 페이드 시간을 뺀 값이다.</summary>
+    public const int IncomingFadeBeginMilliseconds = HeightAnimationMilliseconds - ContentFadeMilliseconds; // 80
 
     public const int TickerSlideMilliseconds = 350;
 
