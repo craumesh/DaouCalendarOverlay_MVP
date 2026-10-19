@@ -496,4 +496,143 @@ public sealed class OverlayLayoutPlannerTests
 
         Assert.Equal(new PixelRect(0, -390, 311, 438), window);
     }
+
+    // PlanDragDpiReplacement: 끌기 중 배율 변경. 작업 영역 클램프 없이 이전 창의 중심(카드 가로 중심·막대 칸 세로 중심)을 보존한다.
+
+    [Fact]
+    public void PlanDragDpiReplacement_Mixed150LeftTo100Right_CenterPreserved_NotClamped()
+    {
+        // 왼쪽 150%(경계 X=1920), 오른쪽 100%. 카드 왼쪽 변 X-232에서 이전 창 [1688, 2154]의 다수 면적(234 > 232)이 오른쪽이라 100%가 된다.
+        // 카드 위 변 -100은 작업 영역 위 밖이지만 그대로 둔다(클램프 없음).
+        const int x = 1920;
+        var m150 = CanvasMetrics.FromScale(1.5);
+        var m100 = CanvasMetrics.FromScale(1.0);
+        var cardBefore = new PixelRect(x - 232, -100, x - 232 + 466, -100 + 72);
+
+        var layout = OverlayLayoutPlanner.PlanDragDpiReplacement(
+            cardBefore, m150.Slot, m150, OverlayDisplayMode.MiniBar, m100, new PixelPoint(x + 960, 520));
+
+        Assert.Equal(m100.Slot, layout.Placement);
+        Assert.Equal(new PixelRect(1766, -478, 2077, 350), layout.Window);
+        var card = layout.Placement.InWindow(layout.Window);
+        Assert.Equal(new PixelRect(1766, -88, 2077, -40), card);
+        // 새 창도 오른쪽(100%) 면적이 더 크다(157 > 154). 왼쪽 위를 보존하면 [1688, 1999]로 왼쪽이 232 > 79라 150%로 되돌아간다.
+        Assert.True(layout.Window.Right - x > x - layout.Window.Left);
+    }
+
+    [Fact]
+    public void PlanDragDpiReplacement_Mixed100LeftTo150Right_CenterPreserved_HalfPixelTowardNewMonitor()
+    {
+        // 왼쪽 100%, 오른쪽 150%(경계 X=1920). 이전 창 [1765, 2076]은 오른쪽이 156 > 155라 150%가 된다.
+        // 새 창 466 px의 중심은 반 px로 갈리므로 오른쪽(배율을 바꾼 모니터) 쪽을 고른다. 반대쪽이면 233 = 233 동률이다.
+        const int x = 1920;
+        var m100 = CanvasMetrics.FromScale(1.0);
+        var m150 = CanvasMetrics.FromScale(1.5);
+        var cardBefore = new PixelRect(x - 155, 100, x - 155 + 311, 100 + 48);
+
+        var layout = OverlayLayoutPlanner.PlanDragDpiReplacement(
+            cardBefore, m100.Slot, m100, OverlayDisplayMode.MiniBar, m150, new PixelPoint(x + 1440, 790));
+        var towardLeft = OverlayLayoutPlanner.PlanDragDpiReplacement(
+            cardBefore, m100.Slot, m100, OverlayDisplayMode.MiniBar, m150, new PixelPoint(960, 520));
+
+        Assert.Equal(m150.Slot, layout.Placement);
+        Assert.Equal(new PixelRect(1688, -497, 2154, 745), layout.Window);
+        Assert.Equal(new PixelRect(1688, 88, 2154, 160), layout.Placement.InWindow(layout.Window));
+        Assert.True(layout.Window.Right - x > x - layout.Window.Left);
+        Assert.Equal(new PixelRect(1687, -497, 2153, 745), towardLeft.Window);
+    }
+
+    [Theory]
+    [InlineData(1.0, OverlayDisplayMode.MiniBar, 0)]
+    [InlineData(1.25, OverlayDisplayMode.Expanded, 0)]
+    [InlineData(1.25, OverlayDisplayMode.Expanded, 1)]
+    [InlineData(1.5, OverlayDisplayMode.Expanded, 2)]
+    public void PlanDragDpiReplacement_SameScale_KeepsWindowAndPlacement(double scale, OverlayDisplayMode mode, int kind)
+    {
+        var m = CanvasMetrics.FromScale(scale);
+        var previous = mode == OverlayDisplayMode.MiniBar ? m.Slot
+            : kind == 0 ? m.ExpandedDown
+            : kind == 1 ? m.ExpandedUp
+            : new CardPlacement(m.ExpandedUp.OffsetPx + 101, m.ExpandedHeightPx);
+        var cardBefore = previous.InWindow(new PixelRect(-701, -303, -701 + m.WidthPx, -303 + m.HeightPx));
+
+        var layout = OverlayLayoutPlanner.PlanDragDpiReplacement(cardBefore, previous, m, mode, m, new PixelPoint(5000, 5000));
+
+        Assert.Equal(previous, layout.Placement);
+        Assert.Equal(new PixelRect(-701, -303, -701 + m.WidthPx, -303 + m.HeightPx), layout.Window);
+    }
+
+    [Theory]
+    [InlineData(1.0, 1.5, 201, 302)]
+    [InlineData(1.5, 1.0, 18, 12)]
+    [InlineData(1.5, 1.0, 585, 390)]
+    [InlineData(1.0, 1.25, 12, 16)]
+    [InlineData(1.0, 1.25, 390, 488)]
+    [InlineData(1.0, 1.5, 100000, 585)]
+    public void PlanDragDpiReplacement_Expanded_MapsOffsetWithinSlotRange(double fromScale, double toScale, int fromOffset, int expectedOffset)
+    {
+        // 이전 배치가 [ExpandedUp, ExpandedDown]에서 차지한 비율을 새 범위로 옮긴다. 끝점은 끝점으로, 범위 밖은 범위 안으로.
+        var from = CanvasMetrics.FromScale(fromScale);
+        var to = CanvasMetrics.FromScale(toScale);
+        var previous = new CardPlacement(fromOffset, from.ExpandedHeightPx);
+        var cardBefore = previous.InWindow(new PixelRect(50, -200, 50 + from.WidthPx, -200 + from.HeightPx));
+
+        var layout = OverlayLayoutPlanner.PlanDragDpiReplacement(cardBefore, previous, from, OverlayDisplayMode.Expanded, to, new PixelPoint(0, 0));
+
+        Assert.Equal(new CardPlacement(expectedOffset, to.ExpandedHeightPx), layout.Placement);
+        Assert.Equal(to.WidthPx, layout.Window.Width);
+        Assert.Equal(to.HeightPx, layout.Window.Height);
+    }
+
+    // 두 모니터를 가로로 놓고(위 변 0으로 맞춤, 높이는 배율마다 다름) 카드를 경계 너머로 1 px씩 옮긴다. 이전 창의 다수 면적이
+    // 다른 배율의 모니터로 넘어간 모든 위치(배율이 바뀌는 첫 지점부터 끝까지)에서 새 창의 다수 면적도 그 모니터에 있어야
+    // OS가 배율을 되돌리지 않는다(왕복 없음). 카드 가로 중심은 반 px 안에서 보존된다(클램프 없음).
+    [Theory]
+    [InlineData(1.5, 1.0, OverlayDisplayMode.MiniBar, false)]
+    [InlineData(1.0, 1.5, OverlayDisplayMode.MiniBar, false)]
+    [InlineData(1.5, 1.0, OverlayDisplayMode.Expanded, false)]
+    [InlineData(1.5, 1.0, OverlayDisplayMode.Expanded, true)]
+    [InlineData(1.0, 1.5, OverlayDisplayMode.Expanded, true)]
+    [InlineData(1.25, 1.0, OverlayDisplayMode.MiniBar, false)]
+    [InlineData(1.0, 1.25, OverlayDisplayMode.Expanded, false)]
+    [InlineData(1.75, 1.0, OverlayDisplayMode.MiniBar, false)]
+    public void PlanDragDpiReplacement_MixedDpiBoundary_BothDirections_NoDpiPingPong(
+        double leftScale, double rightScale, OverlayDisplayMode mode, bool slotAtBottom)
+    {
+        var x = OverlayLayoutMetrics.DipToPx(1920, leftScale);
+        var left = new PixelRect(0, 0, x, OverlayLayoutMetrics.DipToPx(1080, leftScale));
+        var right = new PixelRect(x, 0, x + OverlayLayoutMetrics.DipToPx(1920, rightScale), OverlayLayoutMetrics.DipToPx(1080, rightScale));
+
+        foreach (var movingRight in new[] { true, false })
+        {
+            var (from, to, fromScale, toScale) = movingRight ? (left, right, leftScale, rightScale) : (right, left, rightScale, leftScale);
+            var pm = CanvasMetrics.FromScale(fromScale);
+            var m = CanvasMetrics.FromScale(toScale);
+            var previous = mode == OverlayDisplayMode.MiniBar ? pm.Slot : slotAtBottom ? pm.ExpandedUp : pm.ExpandedDown;
+            var toward = new PixelPoint((to.Left + to.Right) / 2, (to.Top + to.Bottom) / 2);
+            var switched = 0;
+            for (var cardLeft = x - pm.WidthPx; cardLeft <= x; cardLeft++)
+            {
+                var cardBefore = new PixelRect(cardLeft, 300, cardLeft + pm.WidthPx, 300 + previous.HeightPx);
+                var windowBefore = OverlayLayoutPlanner.WindowForCard(cardBefore, previous, pm.WidthPx, pm.HeightPx);
+                if (Overlap(windowBefore, to) <= Overlap(windowBefore, from))
+                    continue; // OS가 아직 배율을 바꾸지 않는 위치
+
+                switched++;
+                var layout = OverlayLayoutPlanner.PlanDragDpiReplacement(cardBefore, previous, pm, mode, m, toward);
+                Assert.True(
+                    Overlap(layout.Window, to) > Overlap(layout.Window, from),
+                    $"cardLeft={cardLeft} movingRight={movingRight}: 새 창 {layout.Window}의 다수 면적이 이전 모니터로 돌아간다");
+                var card = layout.Placement.InWindow(layout.Window);
+                Assert.InRange(card.Left * 2L + card.Width - (cardBefore.Left * 2L + cardBefore.Width), -1, 1);
+            }
+
+            // 배율이 바뀌는 첫 지점부터 카드가 경계를 다 넘을 때까지 확인했다(왼쪽 위 보존에서 왕복이 생기던 77 px 구간 이상).
+            Assert.True(switched >= 77, $"movingRight={movingRight}: 확인한 위치 {switched}개");
+        }
+    }
+
+    private static long Overlap(PixelRect a, PixelRect b) =>
+        (long)Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left)) *
+        Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
 }

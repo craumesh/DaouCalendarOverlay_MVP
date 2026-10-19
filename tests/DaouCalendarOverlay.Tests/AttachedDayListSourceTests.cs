@@ -167,7 +167,8 @@ public sealed class AttachedDayListSourceTests
     }
 
     /// <summary>
-    /// 떼기의 마무리(억제 해제, 순환 재판정)는 조건 없이 이 순서로 돈다. 창을 옮기거나 저장을 예약하거나 클램프하지 않는다.
+    /// 떼기의 마무리(억제 해제, 순환 재판정)는 조건 없이 이 순서로 돈다. 창을 옮기거나 클램프하지 않는다.
+    /// 저장 예약은 붙인 동안 창이 옮겨졌을 때만 한다(CloseAttached_SavesOnlyWhenWindowMovedWhileAttached가 고정한다).
     /// 전환 중 분기를 두지 않는 대신, 전환 중에는 CloseAttached가 불리지 않도록 호출부를 고정한다(아래 시험).
     /// </summary>
     [Fact]
@@ -175,7 +176,7 @@ public sealed class AttachedDayListSourceTests
     {
         var body = MethodBody(CodeBehind(), "private void CloseAttached()");
 
-        foreach (var forbidden in new[] { "_transitionInProgress", "ApplyWindowRectPx(", "ScheduleBoundsSave", "ClampToVisibleWorkArea", "_preAttach" })
+        foreach (var forbidden in new[] { "_transitionInProgress", "ApplyWindowRectPx(", "ClampToVisibleWorkArea", "_preAttach" })
             Assert.DoesNotContain(forbidden, body, StringComparison.Ordinal);
 
         var order = new[]
@@ -192,6 +193,112 @@ public sealed class AttachedDayListSourceTests
         Assert.All(positions, p => Assert.True(p >= 0));
         for (var i = 1; i < positions.Length; i++)
             Assert.True(positions[i - 1] < positions[i], $"{order[i - 1]} 다음에 {order[i]}가 와야 한다");
+    }
+
+    /// <summary>
+    /// 붙인 동안 화면 설정 변경(ClampToVisibleWorkArea 등)으로 창이 옮겨지면 저장이 막혀 있어 설정의 Left/Top이 옛 값으로 남는다.
+    /// 그래서 붙일 때 창 사각형(물리 px)을 기억하고, 떼기에서 현재 창 사각형이 다를 때만 저장을 예약한다.
+    /// 평소 떼기(창이 그대로)는 창 이동 0회·저장 0회다.
+    /// </summary>
+    [Fact]
+    public void CloseAttached_SavesOnlyWhenWindowMovedWhileAttached()
+    {
+        var source = CodeBehind();
+        Assert.Equal(1, CountOf(source, "private PixelRect? _attachedWindowPx;"));
+
+        var open = MethodBody(source, "private void OpenAttachedDayList()");
+        Assert.Equal(1, CountOf(open, "_attachedWindowPx = win;"));
+        Assert.True(
+            open.IndexOf("GetWindowRectPx() is not PixelRect win", StringComparison.Ordinal) >= 0,
+            "OpenAttachedDayList가 기억하는 사각형은 가드에서 읽은 창 사각형이어야 한다");
+
+        var close = MethodBody(source, "private void CloseAttached()");
+        Assert.Equal(1, CountOf(close, "ScheduleBoundsSave();"));
+        Assert.Equal(1, CountOf(close, "_attachedWindowPx = null;"));
+        Assert.DoesNotContain("ApplyWindowRectPx(", close, StringComparison.Ordinal);
+        Assert.DoesNotContain("SaveWindowBoundsAsync", close, StringComparison.Ordinal);
+
+        // 저장 예약은 억제를 푼 뒤에, 그리고 기억한 사각형이 있고 현재 창 사각형과 다를 때만 한다.
+        var unsuppress = close.IndexOf("_suppressBoundsSave = false;", StringComparison.Ordinal);
+        var condition = close.IndexOf("now != before", StringComparison.Ordinal);
+        var schedule = close.IndexOf("ScheduleBoundsSave();", StringComparison.Ordinal);
+        Assert.True(unsuppress >= 0 && condition > unsuppress && schedule > condition, "억제 해제 → 비교 → 저장 예약 순서여야 한다");
+        var ifLine = close.LastIndexOf("if (", schedule, StringComparison.Ordinal);
+        var guard = close.Substring(ifLine, schedule - ifLine);
+        Assert.Contains("windowAtAttach is PixelRect before", guard, StringComparison.Ordinal);
+        Assert.Contains("GetWindowRectPx() is PixelRect now", guard, StringComparison.Ordinal);
+        Assert.Contains("now != before", guard, StringComparison.Ordinal);
+
+        // 붙이지 않은 채 떼면(_attached == null) 아무것도 하지 않는다.
+        Assert.True(
+            close.IndexOf("if (_attached is null)", StringComparison.Ordinal) < unsuppress,
+            "붙어 있지 않으면 먼저 반환해야 한다");
+    }
+
+    /// <summary>
+    /// 끌기 중 배율이 바뀌면(모니터 사이로 끌 때) 작업 영역 클램프를 하지 않는다. 클램프하면 모니터 경계에서 카드가 밀려나
+    /// 밀려난 거리가 끌기 세션에 남고, 높은 배율에서 낮은 배율로 천천히 끌어서는 넘어갈 수 없다. 클램프는 EndCardDrag의 1회다.
+    /// 새 창은 이전 창의 중심을 보존한다(PlanDragDpiReplacement). 이전 창은 cardBefore와 이전 배율(_placementScale)의 배치로 얻고,
+    /// 그 창이 가장 많이 걸친 모니터(배율을 바꾼 모니터)는 반 px 반올림 방향과 왕복 예측에만 쓴다. 중심 보존 창이 그 모니터를 벗어날 때만
+    /// WPF가 적용한 OS 제안 창의 왼쪽 위를 쓴다.
+    /// </summary>
+    [Fact]
+    public void ReplaceAfterDpiChange_DuringDrag_DoesNotClamp()
+    {
+        var source = CodeBehind();
+        var replace = MethodBody(source, "private void ReplaceAfterDpiChange(");
+
+        var branchStart = replace.IndexOf("if (_dragSession is not null)", StringComparison.Ordinal);
+        var restStart = replace.IndexOf("if ((cardBefore ?? GetCardRectPx()) is not PixelRect card)", StringComparison.Ordinal);
+        Assert.True(branchStart >= 0, "_dragSession 분기가 있어야 한다");
+        Assert.True(restStart > branchStart, "끌기 중 분기는 쉬는 배치 계산보다 앞에 있어야 한다");
+        var branch = replace.Substring(branchStart, restStart - branchStart);
+
+        foreach (var forbidden in new[] { "PlanRestingLayout", "ClampWindowToWorkArea", "ClampToVisibleWorkArea", "PlanExpandedPlacement" })
+            Assert.DoesNotContain(forbidden, branch, StringComparison.Ordinal);
+
+        var ordered = new[]
+        {
+            "cardBefore ?? GetCardRectPx()",
+            "CanvasMetrics.FromScale(_placementScale)",
+            "OverlayLayoutPlanner.WindowForCard(dragBefore, _placement, previousMetrics.WidthPx, previousMetrics.HeightPx)",
+            "var monitor = GetWorkAreaPx(windowBefore);",
+            "OverlayLayoutPlanner.PlanDragDpiReplacement(dragBefore, _placement, previousMetrics, _displayMode, m, toward)",
+            "if (GetWorkAreaPx(dragLayout.Window) != monitor && GetWindowRectPx() is PixelRect suggested)",
+            "ApplyRestingLayout(dragLayout, scale);",
+            "_dragSession = OverlayDragSnap.Begin(dragCard, dragCursor);",
+            "return;",
+        };
+        var at = -1;
+        foreach (var item in ordered)
+        {
+            var next = branch.IndexOf(item, at + 1, StringComparison.Ordinal);
+            Assert.True(next > at, $"끌기 중 분기에서 '{item}'이 순서대로 있어야 한다");
+            at = next;
+        }
+
+        // 작업 영역은 모니터 식별(반올림 방향·왕복 예측)에만 쓰고 창 사각형을 그 안으로 옮기지 않는다.
+        Assert.Equal(2, CountOf(branch, "GetWorkAreaPx("));
+        Assert.Equal(1, CountOf(branch, "ApplyRestingLayout("));
+
+        // 끌기 중이 아닐 때의 재배치는 그대로 카드 왼쪽 위를 보존하는 PlanRestingLayout(클램프 포함)이다.
+        var rest = replace.Substring(restStart);
+        Assert.Contains("OverlayLayoutPlanner.PlanRestingLayout(", rest, StringComparison.Ordinal);
+        Assert.DoesNotContain("PlanDragDpiReplacement", rest, StringComparison.Ordinal);
+
+        // 끌기 끝의 클램프 1회는 EndCardDrag가 맡는다.
+        var end = MethodBody(source, "private void EndCardDrag(");
+        Assert.Equal(1, CountOf(end, "ClampToVisibleWorkArea();"));
+
+        // 이전 배율은 카드 배치와 함께 ApplyCardPlacement만 정한다.
+        Assert.Equal(2, CountOf(source, "_placementScale = ")); // 선언 초기값 1 + ApplyCardPlacement 1
+        Assert.Contains("_placementScale = scale;", MethodBody(source, "private void ApplyCardPlacement(CardPlacement placement, double scale)"), StringComparison.Ordinal);
+
+        // 순수 함수는 작업 영역을 받지 않고 클램프하지 않는다.
+        var planner = File.ReadAllText(RepositoryPaths.Combine("DaouCalendarOverlay", "Services", "OverlayLayoutPlanner.cs"));
+        var planBody = MethodBody(planner, "public static RestingLayout PlanDragDpiReplacement(");
+        Assert.DoesNotContain("ClampWindowToWorkArea", planBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("work", planBody, StringComparison.Ordinal);
     }
 
     /// <summary>

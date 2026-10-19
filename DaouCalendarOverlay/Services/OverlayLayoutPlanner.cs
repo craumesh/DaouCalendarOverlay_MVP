@@ -141,6 +141,49 @@ public static class OverlayLayoutPlanner
     }
 
     /// <summary>
+    /// 카드를 끄는 도중 배율이 바뀐 뒤의 배치. 작업 영역 클램프를 하지 않는다(클램프는 끌기 끝 1회).
+    /// 이전 배율의 창 사각형(cardBefore, previous, previousMetrics로 얻음)의 중심을 보존해 새 배율 크기(m.WidthPx x m.HeightPx)의 창을 놓는다.
+    /// 창 중심은 카드 가로 중심이자 막대 칸 세로 중심이다(HeightPx = 2 x SlotOffsetPx + MiniHeightPx라 막대 칸이 캔버스 세로 가운데).
+    /// 창이 중심 기준으로 줄거나 커지므로, OS가 배율을 정하는 기준(창 면적이 더 큰 모니터)이 새 창에서도 같은 모니터로 남아
+    /// WM_DPICHANGED가 되돌아가지 않는다. 왼쪽 위를 보존하면 466→311 px로 줄어든 창의 다수 면적이 이전 모니터로 돌아가 배율이 왕복한다.
+    /// 중심이 반 px로 갈리면 중심이 toward(배율을 바꾼 모니터 안의 점)에 가까운 쪽을 고른다. toward는 반올림 방향만 정한다.
+    /// 막대면 m.Slot이다. 펼침이면 이전 배치가 [ExpandedUp, ExpandedDown] 범위에서 차지한 비율을 새 범위로 옮긴다(끝점은 끝점으로).
+    /// 같은 배율(previousMetrics == m)이면 창과 배치가 그대로다.
+    /// </summary>
+    public static RestingLayout PlanDragDpiReplacement(
+        PixelRect cardBefore, CardPlacement previous, CanvasMetrics previousMetrics,
+        OverlayDisplayMode mode, CanvasMetrics m, PixelPoint toward)
+    {
+        var before = WindowForCard(cardBefore, previous, previousMetrics.WidthPx, previousMetrics.HeightPx);
+        var left = StartForCenter(2L * before.Left + before.Width, m.WidthPx, toward.X);
+        var top = StartForCenter(2L * before.Top + before.Height, m.HeightPx, toward.Y);
+        var window = new PixelRect(left, top, left + m.WidthPx, top + m.HeightPx);
+        if (mode == OverlayDisplayMode.MiniBar)
+            return new RestingLayout(window, m.Slot);
+
+        var previousUp = previousMetrics.ExpandedUp.OffsetPx;
+        var previousRange = previousMetrics.ExpandedDown.OffsetPx - previousUp;
+        var up = m.ExpandedUp.OffsetPx;
+        var range = m.ExpandedDown.OffsetPx - up;
+        var offset = previousRange <= 0
+            ? m.ExpandedDown.OffsetPx
+            : up + (int)Math.Round((double)(previous.OffsetPx - previousUp) * range / previousRange, MidpointRounding.ToEven);
+        return new RestingLayout(window, new CardPlacement(Math.Clamp(offset, up, up + range), m.ExpandedHeightPx));
+    }
+
+    // 중심의 2배가 center2인 길이 size 구간의 시작. 중심이 반 px로 갈리면 중심이 toward에 가까운 쪽(같으면 작은 쪽)이다.
+    private static int StartForCenter(long center2, int size, int toward)
+    {
+        var doubled = center2 - size;
+        if (doubled % 2 == 0)
+            return (int)(doubled / 2);
+
+        var lower = (int)((doubled - 1) / 2); // doubled가 홀수라 정확히 나뉜다(음수도 내림).
+        var target = 2L * toward;
+        return Math.Abs(center2 - 1 - target) <= Math.Abs(center2 + 1 - target) ? lower : lower + 1;
+    }
+
+    /// <summary>
     /// 붙인 목록 영역(창 위 변 기준).
     /// Below: (m.SlotOffsetPx + m.MiniHeightPx, m.AttachRegionPx).
     /// Above: (m.SlotOffsetPx - m.AttachRegionPx, m.AttachRegionPx).

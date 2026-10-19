@@ -54,16 +54,20 @@ public partial class MainWindow : Window
     private bool _tickerAnimating;
     private bool _miniDirty;
     private int _tickerGeneration;
-    // 전환 애니메이션 중에만 의미가 있다. 아직 적용하지 않은 목표 창은 적용 뒤 null로 돌린다.
+    // 전환 애니메이션 중에만 의미가 있다. 아직 적용하지 않은 목표 모드이고, 목표 카드 배치는 아래 _pendingPlacement가 들고 있다.
     private OverlayDisplayMode _pendingMode = OverlayDisplayMode.Expanded;
     // 쉬는 상태의 카드 배치(창 위 변 기준 오프셋·높이, 현재 배율 px). ApplyCardPlacement만 바꾼다.
     private CardPlacement _placement;
-    // 진행 중인 전환의 목표 카드 배치.
+    // _placement를 정한 배율. 끌기 중 DPI 재배치가 이전 배율의 창 크기와 펼침 배치 범위를 구할 때 쓴다. ApplyCardPlacement만 바꾼다.
+    private double _placementScale = 1.0;
+    // 진행 중인 전환의 목표 카드 배치. 적용(Apply*State)이나 중단 뒤 null로 돌린다.
     private CardPlacement? _pendingPlacement;
     // ApplySettings가 받은 카드 왼쪽 위(DIP = 카드 px ÷ 창 배율, settings.json Left/Top과 같은 의미). 시작 배치에 쓴다.
     private (double Left, double Top) _savedCardTopLeftDip;
-    // 시스템 이동 루프(WM_ENTERSIZEMOVE~WM_EXITSIZEMOVE) 동안만 값이 있다. 시작 창 사각형과 시작 커서(물리 px).
+    // 카드 끌기(BeginCardDrag~EndCardDrag) 동안만 값이 있다. 시작 카드 사각형과 시작 커서(물리 px).
     private DragSnapSession? _dragSession;
+    // 목록을 붙인 시점의 창 사각형(물리 px). 붙인 동안 창이 옮겨졌는지 떼기에서 비교한다. 붙여 있지 않으면 null.
+    private PixelRect? _attachedWindowPx;
 
     private static readonly SolidColorBrush MiniTimeBrush = CreateFrozenBrush(0xB8, 0xBD, 0xC8);
     private static readonly SolidColorBrush MiniTitleBrush = CreateFrozenBrush(0xE7, 0xEA, 0xF0);
@@ -462,7 +466,7 @@ public partial class MainWindow : Window
         var region = OverlayLayoutPlanner.AttachRegion(dir, m);
 
         // 끌기 직후(400 ms 안)에 붙이면 대기 중인 위치 저장을 버리지 않고 지금 기록한다. 붙이기·떼기는 창을 옮기지 않고
-        // 떼기는 저장을 예약하지 않으므로, 버리면 메모리 설정값이 끌기 전 위치로 남아 다음 ApplySettings·재시작에서 카드가 되돌아간다.
+        // 평소 떼기(붙인 동안 창이 그대로)는 저장을 예약하지 않으므로, 버리면 메모리 설정값이 끌기 전 위치로 남아 다음 ApplySettings·재시작에서 카드가 되돌아간다.
         if (_saveBoundsTimer is { IsEnabled: true })
             SaveBoundsTimer_Tick(_saveBoundsTimer, EventArgs.Empty);
 
@@ -473,6 +477,7 @@ public partial class MainWindow : Window
         else
             _miniTickerTimer?.Stop();
         _attached = dir;
+        _attachedWindowPx = win;
 
         // 두 오버레이는 붙임 영역에 둔다. 막대 카드와 목록 카드 사이 간격은 막대 쪽 변(Below=위, Above=아래)에만 둔다.
         var regionTop = region.OffsetPx / scale;
@@ -515,6 +520,13 @@ public partial class MainWindow : Window
 
         _attached = null;
         _suppressBoundsSave = false;
+        // 붙인 동안 화면 설정 변경 등으로 창이 옮겨졌을 때만 저장을 예약한다. 평소 떼기(창이 그대로)는 저장 0회다.
+        // 붙인 동안은 저장이 막혀 있어 옮겨진 위치가 설정에 반영되지 못했다.
+        var windowAtAttach = _attachedWindowPx;
+        _attachedWindowPx = null;
+        if (windowAtAttach is PixelRect before && GetWindowRectPx() is PixelRect now && now != before)
+            ScheduleBoundsSave();
+
         UpdateTickerState();
     }
 
@@ -892,6 +904,7 @@ public partial class MainWindow : Window
         RootChrome.Margin = new Thickness(0, placement.OffsetPx / scale, 0, 0);
         RootChrome.Height = placement.HeightPx / scale;
         _placement = placement;
+        _placementScale = scale;
         if (_attached is null)
             RestoreOverlayPlacement();
     }
@@ -952,7 +965,7 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
 
         // 붙인 목록은 전환 플래그를 세우기 전에 먼저 뗀다. 그래야 CloseAttached가 전환 밖에서 끝나고,
-        // 떼기는 위치 저장을 예약하지 않으므로 저장은 ApplyExpandedState의 한 번뿐이다(저장 원자성).
+        // 평소 떼기는 위치 저장을 예약하지 않고(예약해도 아래에서 곧바로 멈춘다) 저장은 ApplyExpandedState의 한 번뿐이다(저장 원자성).
         OnMiniBarLeaving();
 
         _transitionInProgress = true;
@@ -1805,7 +1818,7 @@ public partial class MainWindow : Window
     private void SystemEvents_DisplaySettingsChanged(object? sender, EventArgs e) =>
         _ = Dispatcher.BeginInvoke(new Action(ClampToVisibleWorkArea));
 
-    // 창 메시지. WM_GETMINMAXINFO는 최대 추적 크기를 키우고(R1), WM_DPICHANGED는 카드 왼쪽 위를 보존해 다시 배치한다.
+    // 창 메시지. WM_GETMINMAXINFO는 최대 추적 크기를 키우고(R1), WM_DPICHANGED는 새 배율로 다시 배치한다(끌기 중이면 창 중심 보존).
     // 끌기(WM_ENTERSIZEMOVE·WM_MOVING·WM_EXITSIZEMOVE)는 마우스 캡처로 직접 처리하므로 여기서 다루지 않는다.
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -1828,7 +1841,7 @@ public partial class MainWindow : Window
         }
         else if (msg == WmDpiChanged)
         {
-            // 이 시점은 아직 이전 배율 상태이므로 카드 사각형을 미리 읽어 두고, 배율이 적용된 뒤 왼쪽 위를 보존해 다시 배치한다.
+            // 이 시점은 아직 이전 배율 상태이므로 카드 사각형을 미리 읽어 두고, 배율이 적용된 뒤 이 사각형을 기준으로 다시 배치한다.
             var cardBefore = GetCardRectPx();
             _ = Dispatcher.BeginInvoke(new Action(() => ReplaceAfterDpiChange(cardBefore)));
         }
@@ -1836,8 +1849,11 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
-    // 배율이 바뀐 뒤 카드 왼쪽 위(px)를 보존해 쉬는 배치를 새 배율로 다시 계산한다.
-    // 전환 중이면 먼저 끝내고, 붙인 목록은 뗀다. 끌기 중이면 새 카드 사각형과 현재 커서로 기준선을 다시 잡는다.
+    // 배율이 바뀐 뒤 끌기 중이 아니면 카드 왼쪽 위(px)를 보존해 쉬는 배치를 새 배율로 다시 계산한다.
+    // 전환 중이면 먼저 끝내고, 붙인 목록은 뗀다.
+    // 끌기 중이면 클램프하지 않는다. 배율이 바뀌기 전의 창(cardBefore와 이전 배율 배치로 얻음) 중심을 보존해 새 배율 크기의 창을 놓고
+    // (PlanDragDpiReplacement), 새 카드 사각형과 현재 커서로 기준선을 다시 잡는다. 왼쪽 위를 보존하면 줄어든 창의 다수 면적이 이전 모니터로
+    // 돌아가 배율이 왕복한다. 중심 보존 창도 그 모니터를 벗어나면 OS 제안 창 위치를 쓴다. 클램프는 EndCardDrag 1회다(끌기 중 클램프는 카드를 경계에 건다).
     private void ReplaceAfterDpiChange(PixelRect? cardBefore)
     {
         try
@@ -1850,6 +1866,36 @@ public partial class MainWindow : Window
 
             var scale = GetDpiScale();
             var m = CanvasMetrics.FromScale(scale);
+            if (_dragSession is not null)
+            {
+                if ((cardBefore ?? GetCardRectPx()) is not PixelRect dragBefore)
+                {
+                    EndCardDrag(false);
+                    return;
+                }
+
+                // OS는 창 면적이 가장 큰 모니터로 배율을 정하므로 이전 창의 그 모니터가 배율을 바꾼 모니터다.
+                // 그 작업 영역의 중심은 반 px 반올림 방향만 정한다(클램프가 아니다).
+                var previousMetrics = CanvasMetrics.FromScale(_placementScale);
+                var windowBefore = OverlayLayoutPlanner.WindowForCard(dragBefore, _placement, previousMetrics.WidthPx, previousMetrics.HeightPx);
+                var monitor = GetWorkAreaPx(windowBefore);
+                var toward = new PixelPoint(monitor.Left + monitor.Width / 2, monitor.Top + monitor.Height / 2);
+                var dragLayout = OverlayLayoutPlanner.PlanDragDpiReplacement(dragBefore, _placement, previousMetrics, _displayMode, m, toward);
+                // 높이가 다른 모니터 경계 등에서 중심 보존 창의 다수 면적이 그 모니터를 벗어나면 배율이 되돌아가 왕복하므로,
+                // 그때만 WPF가 이미 적용한 OS 제안 창의 왼쪽 위를 그대로 두고 크기와 배치만 새 배율로 맞춘다.
+                if (GetWorkAreaPx(dragLayout.Window) != monitor && GetWindowRectPx() is PixelRect suggested)
+                    dragLayout = dragLayout with { Window = new PixelRect(suggested.Left, suggested.Top, suggested.Left + m.WidthPx, suggested.Top + m.HeightPx) };
+                ApplyRestingLayout(dragLayout, scale);
+                if (GetWindowRectPx() is PixelRect dragWin && dragWin.Height < m.HeightPx)
+                    LogService.Warn("ui.layout", $"창 캔버스 높이 부족: 요구={m.HeightPx} 실제={dragWin.Height}");
+
+                if (GetCardRectPx() is PixelRect dragCard && TryGetCursorPx() is PixelPoint dragCursor)
+                    _dragSession = OverlayDragSnap.Begin(dragCard, dragCursor);
+                else
+                    EndCardDrag(false);
+                return;
+            }
+
             if ((cardBefore ?? GetCardRectPx()) is not PixelRect card)
                 return;
 
@@ -1860,14 +1906,6 @@ public partial class MainWindow : Window
 
             if (GetWindowRectPx() is PixelRect win && win.Height < m.HeightPx)
                 LogService.Warn("ui.layout", $"창 캔버스 높이 부족: 요구={m.HeightPx} 실제={win.Height}");
-
-            if (_dragSession is not null)
-            {
-                if (GetCardRectPx() is PixelRect newCard && TryGetCursorPx() is PixelPoint cursor)
-                    _dragSession = OverlayDragSnap.Begin(newCard, cursor);
-                else
-                    EndCardDrag(false);
-            }
         }
         catch (Exception ex)
         {
