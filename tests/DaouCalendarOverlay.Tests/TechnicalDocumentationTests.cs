@@ -610,7 +610,7 @@ public sealed class TechnicalDocumentationTests
 
         // §37: 버전 이력과 프로토콜 유지
         var versioning = Section("versioning");
-        Assert.Contains("7.3.1", versioning, StringComparison.Ordinal);
+        Assert.Contains("7.4.0", versioning, StringComparison.Ordinal);
         Assert.Contains("DaouCalendarOverlay.NativeBridge.v8", versioning, StringComparison.Ordinal);
 
         // §39: 용어
@@ -700,12 +700,12 @@ public sealed class TechnicalDocumentationTests
     }
 
     /// <summary>
-    /// 7.3.1: §16.2의 Installer 발췌가 v731 worker를 <c>Files</c>에, v720·v730 worker를 obsolete 목록에 싣고,
+    /// 7.4.0: §16.2의 Installer 발췌가 v740 worker를 <c>Files</c>에, v720·v730·v731 worker를 obsolete 목록에 싣고,
     /// §10이 <c>cookies.onChanged</c> 트리거와 스냅샷 저장소 키를 말하며, §13·§15·§17이 세션 유지 사실을 반영하는지 고정한다.
     /// 발췌는 HTML 이스케이프를 풀어 실제 소스 형태로 비교한다.
     /// </summary>
     [Fact]
-    public void TechnicalDoc_InstallerExcerptListsV731Worker()
+    public void TechnicalDoc_InstallerExcerptListsV740Worker()
     {
         var html = File.ReadAllText(TechnicalDocPath);
 
@@ -720,14 +720,16 @@ public sealed class TechnicalDocumentationTests
         var obsoleteExcerpt = build.Substring(obsoleteStart, obsoleteEnd - obsoleteStart);
 
         Assert.Contains(
-            "(\"DaouCalendarOverlay.ChromeExtension.service-worker-v731.js\", \"service-worker-v731.js\")",
+            "(\"DaouCalendarOverlay.ChromeExtension.service-worker-v740.js\", \"service-worker-v740.js\")",
             filesExcerpt,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("service-worker-v731.js", filesExcerpt, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v730.js", filesExcerpt, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", filesExcerpt, StringComparison.Ordinal);
         Assert.Contains("\"service-worker-v720.js\"", obsoleteExcerpt, StringComparison.Ordinal);
         Assert.Contains("\"service-worker-v730.js\"", obsoleteExcerpt, StringComparison.Ordinal);
-        Assert.Contains("public const string ExpectedExtensionVersion = \"7.3.1\";", build, StringComparison.Ordinal);
+        Assert.Contains("public const string ExpectedExtensionVersion = \"7.4.0\";", build, StringComparison.Ordinal);
+        Assert.Contains("\"service-worker-v731.js\"", obsoleteExcerpt, StringComparison.Ordinal);
 
         var sync = GetSectionHtml(html, "sync");
         Assert.Contains("cookies.onChanged", sync, StringComparison.Ordinal);
@@ -743,7 +745,7 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("인증 문구 3종", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("기대 버전은 7.2.0", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("기대 버전은 7.3.0", sync, StringComparison.Ordinal);
-        Assert.Contains("기대 버전은 7.3.1", sync, StringComparison.Ordinal);
+        Assert.Contains("기대 버전은 7.4.0", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("7.2.0 worker의", sync, StringComparison.Ordinal);
         Assert.Contains("SYNC_BUDGET_MS = 40000", sync, StringComparison.Ordinal);
         // §10.2 버전 불일치 예시는 현재 기대 버전(ExpectedExtensionVersion)을 쓴다.
@@ -755,7 +757,7 @@ public sealed class TechnicalDocumentationTests
 
         var storage = GetSectionHtml(html, "storage");
         Assert.Contains("daouSessionSnapshot", storage, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay-7.3.1.exe", storage, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay-7.4.0.exe", storage, StringComparison.Ordinal);
         Assert.DoesNotContain("DaouCalendarOverlay-7.3.0.exe", storage, StringComparison.Ordinal);
         Assert.DoesNotContain("DaouCalendarOverlay-7.2.0.exe", storage, StringComparison.Ordinal);
 
@@ -765,7 +767,7 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("확장에 <code class=\"inline\">cookies</code> 권한이 없고", security, StringComparison.Ordinal);
 
         var files = GetSectionHtml(html, "files");
-        Assert.Contains("service-worker-v731.js", files, StringComparison.Ordinal);
+        Assert.Contains("service-worker-v740.js", files, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v730.js", files, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", files, StringComparison.Ordinal);
         Assert.Contains("worker-mock-test.js", files, StringComparison.Ordinal);
@@ -774,10 +776,10 @@ public sealed class TechnicalDocumentationTests
 
     /// <summary>
     /// 7.3.0: §20 상수표가 worker 시간 상수(예산·갱신·쿨다운·탭 양보·복원)를 싣고, §22·§23이 7.3.0 기준으로 서술하며,
-    /// 7.3.1: §24.5 체크리스트의 현재값이 v731 worker인지 고정한다. 프로토콜·lease 상수는 바뀌지 않았다는 서술도 확인한다.
+    /// 7.4.0: §24.5 체크리스트의 현재값이 v740 worker인지 고정한다. 프로토콜·lease 상수는 바뀌지 않았다는 서술도 확인한다.
     /// </summary>
     [Fact]
-    public void TechnicalDoc_ConstantsAndReleaseChecklistReflectV731()
+    public void TechnicalDoc_ConstantsAndReleaseChecklistReflectV740()
     {
         var html = File.ReadAllText(TechnicalDocPath);
 
@@ -797,18 +799,18 @@ public sealed class TechnicalDocumentationTests
 
         Assert.Contains("FetchLeaseSeconds", appendix, StringComparison.Ordinal);
         Assert.Contains("ResultLeaseSeconds", appendix, StringComparison.Ordinal);
-        Assert.Contains("기대 확장 버전</td><td>7.3.1", appendix, StringComparison.Ordinal);
+        Assert.Contains("기대 확장 버전</td><td>7.4.0", appendix, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v730.js", appendix, StringComparison.Ordinal);
         Assert.DoesNotContain("service-worker-v720.js", appendix, StringComparison.Ordinal);
 
         var browserMatrix = GetSectionHtml(html, "browser-matrix");
-        Assert.Contains("현재 빌드(v7.3.1)", browserMatrix, StringComparison.Ordinal);
+        Assert.Contains("현재 빌드(v7.4.0)", browserMatrix, StringComparison.Ordinal);
         Assert.DoesNotContain("v7.2.0", browserMatrix, StringComparison.Ordinal);
         Assert.Contains("R-E", browserMatrix, StringComparison.Ordinal);
 
         var release = GetSectionHtml(html, "release");
-        Assert.Contains("service-worker-v731.js", release, StringComparison.Ordinal);
-        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v731.js", release, StringComparison.Ordinal);
+        Assert.Contains("service-worker-v740.js", release, StringComparison.Ordinal);
+        Assert.Contains("DaouCalendarOverlay.ChromeExtension.service-worker-v740.js", release, StringComparison.Ordinal);
         Assert.Contains("worker-mock-test.js", release, StringComparison.Ordinal);
         Assert.DoesNotContain("-Version 7.2.0", release, StringComparison.Ordinal);
         Assert.DoesNotContain("-Version 7.3.0", release, StringComparison.Ordinal);
@@ -1057,6 +1059,101 @@ public sealed class TechnicalDocumentationTests
         Assert.DoesNotContain("7.3.0 절을 더해", testing, StringComparison.Ordinal);
         Assert.DoesNotContain("결과를 적을 계획이다", testing, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// 7.4.0: §11.5·§14.2 코드 발췌가 현재 소스의 메서드 경계와 글자 단위로 같은지 고정한다.
+    /// 소스에서는 <c>"    " + signature</c>와 정확히 같은 줄부터 그 뒤 첫 <c>"    }"</c> 줄까지를,
+    /// 문서에서는 앞의 <c>&lt;pre&gt;&lt;code&gt;</c> 태그를 지운 줄이 <c>"    " + signature</c>로 시작하는 줄부터
+    /// 끝의 <c>&lt;/code&gt;&lt;/pre&gt;</c>를 지운 결과가 <c>"    }"</c>인 첫 줄까지를 HTML 디코드해 비교한다.
+    /// 공백 정규화는 하지 않고 줄 끝 '\r'만 지운다.
+    /// </summary>
+    [Theory]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private bool BeginCardDrag()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ContinueCardDrag()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void EndCardDrag(bool cancel)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ClampToVisibleWorkArea()")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialDisplayMode(bool minimized)")]
+    [InlineData("DaouCalendarOverlay/Views/MainWindow.xaml.cs", "private void ApplyInitialPlacement()")]
+    [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static PixelRect ClampWindowToWorkArea(PixelRect window, PixelRect work)")]
+    [InlineData("DaouCalendarOverlay/Services/OverlayLayoutPlanner.cs", "public static CardPlacement PlanExpandedPlacement(PixelRect window, PixelRect work, CanvasMetrics m)")]
+    public void TechnicalDoc_LayoutExcerptsMatchCurrentSource(string relativeSourcePath, string signature)
+    {
+        const string indent = "    ";
+        const string closingLine = "    }";
+        var head = indent + signature;
+
+        // (1) 소스: 시그니처 줄부터 그 뒤 첫 "    }" 줄까지(포함).
+        var sourceLines = SplitLines(File.ReadAllText(RepoLayout.Path(relativeSourcePath.Split('/'))));
+        var sourceStarts = Enumerable.Range(0, sourceLines.Length)
+            .Where(i => string.Equals(sourceLines[i], head, StringComparison.Ordinal))
+            .ToList();
+        Assert.True(sourceStarts.Count == 1,
+            $"{relativeSourcePath}에서 시그니처 줄 '{signature}'가 정확히 1개여야 하는데 {sourceStarts.Count}개다.");
+
+        var sourceBlock = new List<string>();
+        var sourceClosed = false;
+        for (var i = sourceStarts[0]; i < sourceLines.Length; i++)
+        {
+            sourceBlock.Add(sourceLines[i]);
+            if (string.Equals(sourceLines[i], closingLine, StringComparison.Ordinal))
+            {
+                sourceClosed = true;
+                break;
+            }
+        }
+
+        Assert.True(sourceClosed, $"{relativeSourcePath}에서 '{signature}' 뒤의 닫는 중괄호 줄을 찾지 못했다.");
+
+        // (2) 문서: 접두 태그를 지운 줄이 시그니처로 시작하는 줄부터, 접미 태그를 지우고 TrimEnd한 결과가 "    }"인 첫 줄까지.
+        var docLines = SplitLines(File.ReadAllText(TechnicalDocPath));
+        var docStarts = Enumerable.Range(0, docLines.Length)
+            .Where(i => StripPreCodePrefix(docLines[i]).StartsWith(head, StringComparison.Ordinal))
+            .ToList();
+        Assert.True(docStarts.Count == 1,
+            $"기술 문서에서 시그니처 '{signature}'로 시작하는 발췌 줄이 정확히 1개여야 하는데 {docStarts.Count}개다.");
+
+        var docBlock = new List<string>();
+        var docClosed = false;
+        for (var i = docStarts[0]; i < docLines.Length; i++)
+        {
+            var line = i == docStarts[0] ? StripPreCodePrefix(docLines[i]) : docLines[i];
+            var withoutSuffix = PreCodeSuffixPattern.Replace(line, string.Empty);
+            if (string.Equals(withoutSuffix.TrimEnd(), closingLine, StringComparison.Ordinal))
+            {
+                docBlock.Add(withoutSuffix);
+                docClosed = true;
+                break;
+            }
+
+            docBlock.Add(line);
+        }
+
+        Assert.True(docClosed, $"기술 문서에서 '{signature}' 발췌의 닫는 중괄호 줄을 찾지 못했다.");
+
+        var decoded = docBlock.Select(System.Net.WebUtility.HtmlDecode);
+
+        // (3) 비교: 공백 정규화 없이 글자 단위로 같아야 한다.
+        Assert.Equal(expected: string.Join("\n", sourceBlock), actual: string.Join("\n", decoded));
+    }
+
+    /// <summary>
+    /// 7.4.0: §14.2 WndProc 발췌 블록에 함께 실린 <c>ReplaceAfterDpiChange</c>도 현재 소스와 글자 단위로 같은지 고정한다.
+    /// 비교 규칙은 <see cref="TechnicalDoc_LayoutExcerptsMatchCurrentSource"/>와 같다.
+    /// </summary>
+    [Fact]
+    public void TechnicalDoc_ReplaceAfterDpiChangeExcerptMatchesCurrentSource() =>
+        TechnicalDoc_LayoutExcerptsMatchCurrentSource(
+            "DaouCalendarOverlay/Views/MainWindow.xaml.cs",
+            "private void ReplaceAfterDpiChange(PixelRect? cardBefore)");
+
+    private static readonly Regex PreCodePrefixPattern = new("^<pre><code[^>]*>", RegexOptions.CultureInvariant);
+    private static readonly Regex PreCodeSuffixPattern = new("</code></pre>$", RegexOptions.CultureInvariant);
+
+    private static string StripPreCodePrefix(string line) => PreCodePrefixPattern.Replace(line, string.Empty);
+
+    /// <summary>"\r\n"과 "\n" 기준으로 줄을 나눈다. 줄 끝 '\r'만 지우고 다른 공백은 그대로 둔다.</summary>
+    private static string[] SplitLines(string text) => text.Split(["\r\n", "\n"], StringSplitOptions.None);
 
     /// <summary><c>&lt;section id="{id}"&gt;</c>부터 그 뒤 첫 <c>&lt;/section&gt;</c>까지(포함)를 돌려준다.</summary>
     private static string GetSectionHtml(string html, string id)

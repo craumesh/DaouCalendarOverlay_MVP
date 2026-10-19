@@ -20,6 +20,12 @@ public sealed class AppSettings
     /// <summary>캘린더 ID → 마지막으로 확인한 표시 이름. 키가 없는 옛 settings.json에서는 빈 사전이다.</summary>
     public Dictionary<string, string> CalendarNames { get; set; } = new();
 
+    /// <summary>오버레이를 막대(최소화) 상태로 시작한다. 키가 없는 옛 settings.json에서는 false(펼침)다.</summary>
+    public bool OverlayMinimized { get; set; } = false;
+
+    /// <summary>창을 끌 때 작업 영역 가장자리에 붙인다. 키가 없는 옛 settings.json에서는 true다.</summary>
+    public bool SnapToScreenEdges { get; set; } = true;
+
     [JsonIgnore]
     public bool IsConfigured =>
         BaseUrlPolicy.Validate(BaseUrl).IsValid &&
@@ -41,6 +47,8 @@ public sealed class AppSettings
         // settings.json에 "CalendarNames": null이 들어 있어도 복제(설정 창·저장 스냅샷)가 실패하지 않게 한다.
         CalendarNames = CalendarNames is null
             ? new Dictionary<string, string>()
-            : new Dictionary<string, string>(CalendarNames)
+            : new Dictionary<string, string>(CalendarNames),
+        OverlayMinimized = OverlayMinimized,
+        SnapToScreenEdges = SnapToScreenEdges
     };
 }

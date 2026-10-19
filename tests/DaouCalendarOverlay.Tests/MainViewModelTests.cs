@@ -137,6 +137,84 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public void GetVisibleUnfilteredEventsForDate_IgnoresSearchFilter()
+    {
+        var date = new DateTime(2026, 9, 25);
+        var vm = new MainViewModel(() => date);
+        var timed = Ev(
+            "timed",
+            new DateTimeOffset(2026, 9, 25, 9, 0, 0, Kst),
+            new DateTimeOffset(2026, 9, 25, 10, 0, 0, Kst));
+        vm.SetEvents(new[] { timed });
+
+        vm.SetFilter("Title", "일치하지 않는 검색어");
+
+        Assert.Empty(vm.GetEventsForDate(date));
+        Assert.Single(vm.GetVisibleUnfilteredEventsForDate(date));
+    }
+
+    [Fact]
+    public void GetVisibleUnfilteredEventsForDate_ExcludesEventWhenAllCalendarsHidden()
+    {
+        var date = new DateTime(2026, 9, 25);
+        var vm = new MainViewModel(() => date);
+        var timed = Ev(
+            "timed",
+            new DateTimeOffset(2026, 9, 25, 9, 0, 0, Kst),
+            new DateTimeOffset(2026, 9, 25, 10, 0, 0, Kst));
+        vm.SetEvents(new[] { timed });
+
+        Assert.Single(vm.GetVisibleUnfilteredEventsForDate(date));
+
+        vm.SetHiddenCalendars(new[] { "cal-1" });
+
+        Assert.Empty(vm.GetVisibleUnfilteredEventsForDate(date));
+    }
+
+    [Fact]
+    public void GetVisibleUnfilteredEventsForDate_KeepsSharedEventWhenOnlyOneCalendarHidden()
+    {
+        var date = new DateTime(2026, 9, 25);
+        var start = new DateTimeOffset(2026, 9, 25, 9, 0, 0, Kst);
+        var end = new DateTimeOffset(2026, 9, 25, 10, 0, 0, Kst);
+        var vm = new MainViewModel(() => date);
+        vm.SetEvents(new[]
+        {
+            Shared("38262", "38262", "내 캘린더", start, end),
+            Shared("38262", "60717", "팀 캘린더", start, end)
+        });
+
+        vm.SetHiddenCalendars(new[] { "60717" });
+        Assert.Single(vm.GetVisibleUnfilteredEventsForDate(date));
+
+        vm.SetHiddenCalendars(new[] { "38262", "60717" });
+        Assert.Empty(vm.GetVisibleUnfilteredEventsForDate(date));
+    }
+
+    [Fact]
+    public void GetUnfilteredEventChipsForDate_UsesAllDayTextFirstThenTimeText()
+    {
+        var date = new DateTime(2026, 9, 25);
+        var vm = new MainViewModel(() => date);
+        var timed = Ev(
+            "timed",
+            new DateTimeOffset(2026, 9, 25, 9, 5, 0, Kst),
+            new DateTimeOffset(2026, 9, 25, 10, 0, 0, Kst));
+        var allDay = Ev(
+            "allday",
+            new DateTimeOffset(2026, 9, 25, 0, 0, 0, Kst),
+            new DateTimeOffset(2026, 9, 25, 23, 59, 59, 999, Kst));
+        vm.SetEvents(new[] { timed, allDay });
+        vm.SetFilter("Title", "일치하지 않는 검색어");
+
+        var chips = vm.GetUnfilteredEventChipsForDate(date);
+
+        Assert.Equal(2, chips.Count);
+        Assert.Equal("종일", chips[0].Text);
+        Assert.Equal("09:05", chips[1].Text);
+    }
+
+    [Fact]
     public void GetCalendarDescriptors_IncludesEveryCalendarOfSharedEvent()
     {
         var today = DateTime.Today;

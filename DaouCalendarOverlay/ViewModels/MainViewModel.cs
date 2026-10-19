@@ -257,6 +257,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             .Select(CreateEventChip)
             .ToList();
 
+    /// <summary>숨김 캘린더 규칙만 적용한 날짜별 칩. 막대에서 여는 목록용이며 검색 필터는 적용하지 않는다.</summary>
+    public IReadOnlyList<EventChipViewModel> GetUnfilteredEventChipsForDate(DateTime date) =>
+        GetVisibleUnfilteredEventsForDate(date)
+            .Select(CreateEventChip)
+            .ToList();
+
     public (DateTimeOffset From, DateTimeOffset To) GetVisibleRange() => CalendarGrid.GetVisibleRange(_displayMonth);
 
     private void BuildCalendar()
@@ -318,7 +324,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
     }
 
-    private IReadOnlyList<DaouCalendarEvent> GetVisibleUnfilteredEventsForDate(DateTime date) =>
+    /// <summary>숨김 캘린더 규칙만 적용한 날짜별 일정. 막대와 막대에서 여는 목록용이며 검색 필터는 적용하지 않는다.</summary>
+    public IReadOnlyList<DaouCalendarEvent> GetVisibleUnfilteredEventsForDate(DateTime date) =>
         _allEvents
             .Where(e => !IsHiddenEvent(e))
             .Where(e => CalendarGrid.OccursOnDate(e, date.Date))
@@ -330,7 +337,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         !string.IsNullOrWhiteSpace(source) &&
         source.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
-    private static EventChipViewModel CreateEventChip(DaouCalendarEvent calendarEvent)
+    public static EventChipViewModel CreateEventChip(DaouCalendarEvent calendarEvent)
     {
         var accent = EventColorPalette.Resolve(calendarEvent.Color, calendarEvent.CalendarId);
         return new EventChipViewModel

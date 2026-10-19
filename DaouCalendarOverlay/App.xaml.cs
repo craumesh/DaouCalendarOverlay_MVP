@@ -369,7 +369,8 @@ public partial class App : WpfApplication
         if (dialog.ShowDialog() != true)
             return;
 
-        _settings = dialog.Result;
+        // 설정창 결과에 현재 최소화 상태와 위치를 다시 넣는다(이유는 SettingsDialogMerge 주석).
+        _settings = SettingsDialogMerge.PreserveOverlayState(dialog.Result, _settings);
         _settings.RefreshMinutes = SettingsValidation.ClampRefreshMinutes(_settings.RefreshMinutes);
         _settings.HiddenCalendarIds = _settings.HiddenCalendarIds
             .Where(id => _settings.CalendarIds.Contains(id, StringComparer.Ordinal))
@@ -426,13 +427,22 @@ public partial class App : WpfApplication
             return;
 
         if (_overlayWindow.IsVisible)
-            _overlayWindow.Hide();
+            _overlayWindow.HideOverlay();
         else
             ActivateOverlay();
     }
 
     public async Task SaveWindowBoundsAsync(double left, double top)
     {
+        _settings.Left = left;
+        _settings.Top = top;
+        await SaveSettingsAsync();
+    }
+
+    /// <summary>최소화 상태와 그 상태의 창 위치를 한 번의 SaveSettingsAsync로 저장한다. ApplySettings는 부르지 않는다.</summary>
+    public async Task SaveOverlayLayoutAsync(bool minimized, double left, double top)
+    {
+        _settings.OverlayMinimized = minimized;
         _settings.Left = left;
         _settings.Top = top;
         await SaveSettingsAsync();

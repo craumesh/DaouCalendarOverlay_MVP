@@ -11,8 +11,9 @@ public sealed class OverlayShortcutPolicyTests
         bool filterFocused = false,
         bool filterHasText = false,
         bool eventDetailsVisible = false,
-        bool dayListVisible = false) =>
-        OverlayShortcutPolicy.Resolve(key, modifiers, filterFocused, filterHasText, eventDetailsVisible, dayListVisible);
+        bool dayListVisible = false,
+        bool miniBarMode = false) =>
+        OverlayShortcutPolicy.Resolve(key, modifiers, filterFocused, filterHasText, eventDetailsVisible, dayListVisible, miniBarMode);
 
     [Fact]
     public void Resolve_F5_ReturnsRefresh()
@@ -95,5 +96,66 @@ public sealed class OverlayShortcutPolicyTests
         Assert.Equal(OverlayShortcutAction.None, Resolve(Key.A));
         Assert.Equal(OverlayShortcutAction.None, Resolve(Key.End));
         Assert.Equal(OverlayShortcutAction.None, Resolve(Key.Enter, ModifierKeys.Control));
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_Escape_IgnoresFilterState_ReturnsHideWindow()
+    {
+        Assert.Equal(
+            OverlayShortcutAction.HideWindow,
+            Resolve(Key.Escape, filterFocused: true, filterHasText: true, miniBarMode: true));
+        Assert.Equal(
+            OverlayShortcutAction.HideWindow,
+            Resolve(Key.Escape, filterFocused: true, filterHasText: false, miniBarMode: true));
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_Escape_WhenEventDetailsVisible_ReturnsCloseEventDetails()
+    {
+        Assert.Equal(
+            OverlayShortcutAction.CloseEventDetails,
+            Resolve(Key.Escape, filterFocused: true, filterHasText: true, eventDetailsVisible: true, dayListVisible: true, miniBarMode: true));
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_Escape_WhenOnlyDayListVisible_ReturnsCloseDayList()
+    {
+        Assert.Equal(
+            OverlayShortcutAction.CloseDayList,
+            Resolve(Key.Escape, filterFocused: true, filterHasText: true, dayListVisible: true, miniBarMode: true));
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_MonthNavigationKeys_ReturnNoneRegardlessOfModifiers()
+    {
+        foreach (var key in new[] { Key.PageUp, Key.PageDown, Key.Home })
+        {
+            Assert.Equal(OverlayShortcutAction.None, Resolve(key, miniBarMode: true));
+            Assert.Equal(OverlayShortcutAction.None, Resolve(key, ModifierKeys.Control, miniBarMode: true));
+            Assert.Equal(OverlayShortcutAction.None, Resolve(key, ModifierKeys.Control, filterFocused: true, miniBarMode: true));
+            Assert.Equal(OverlayShortcutAction.None, Resolve(key, ModifierKeys.Shift, miniBarMode: true));
+        }
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_F5_ReturnsRefresh_EvenWhenFilterFocused()
+    {
+        Assert.Equal(OverlayShortcutAction.Refresh, Resolve(Key.F5, miniBarMode: true));
+        Assert.Equal(OverlayShortcutAction.Refresh, Resolve(Key.F5, filterFocused: true, filterHasText: true, miniBarMode: true));
+    }
+
+    [Fact]
+    public void Resolve_MiniBar_OtherKeys_ReturnNone()
+    {
+        Assert.Equal(OverlayShortcutAction.None, Resolve(Key.A, miniBarMode: true));
+        Assert.Equal(OverlayShortcutAction.None, Resolve(Key.Enter, ModifierKeys.Control, miniBarMode: true));
+    }
+
+    [Fact]
+    public void Resolve_NotMiniBar_EscapeWithFilterText_StillReturnsClearFilter()
+    {
+        Assert.Equal(
+            OverlayShortcutAction.ClearFilter,
+            Resolve(Key.Escape, filterFocused: true, filterHasText: true, miniBarMode: false));
     }
 }
